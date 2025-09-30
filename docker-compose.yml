@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  # ==============================
+  # Backend Node.js
+  # ==============================
+  app:
+    build: .
+    container_name: backend_app
+    restart: always
+    env_file: .env
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+
+  # ==============================
+  # MongoDB
+  # ==============================
+  mongo:
+    image: mongo:6
+    container_name: backend_mongo
+    restart: always
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+
+  # ==============================
+  # Mongo Express (interface web)
+  # ==============================
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: backend_mongo_express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_CONFIG_BASICAUTH_USERNAME}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_CONFIG_BASICAUTH_PASSWORD}
+    depends_on:
+      - mongo
+
+  # ==============================
+  # Backup MongoDB automatisé
+  # ==============================
+  mongo-backup:
+    build: ./backup
+    container_name: backend_mongo_backup
+    restart: always
+    env_file: .env
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      - mongo
+
+# ==============================
+# Volumes persistants
+# ==============================
+volumes:
+  mongo-data:
+  backups:  # ajouté pour s'assurer que le volume de backups est déclaré
