@@ -19,8 +19,8 @@ app.use(morgan("dev"));      // Logging des requêtes
 
 // Rate limiting : max 100 requêtes / 15 min par IP
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: "Trop de requêtes depuis cette IP, réessayez plus tard."
 });
 app.use(limiter);
@@ -48,19 +48,38 @@ app.use(cors({
 app.use(express.json());
 
 // =======================
-// 🔹 Routes
+// 🔹 Routes principales
 // =======================
 const cinetpayRoutes = require("./routes/cinetpayRoutes");
 const authRoutes = require("./routes/authRoutes");
-const productRoutes = require("./routes/products"); // nouvelle route produits
+const productRoutes = require("./routes/products");
 
 app.use("/api/cinetpay", cinetpayRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 
-// Health check
-app.get("/healthz", (req, res) => {
-  res.json({ status: "ok", timestamp: Date.now() });
+// =======================
+// 🔹 Page d’accueil (évite le 404)
+// =======================
+app.get("/", (req, res) => {
+  res.json({
+    message: "🚀 Bienvenue sur l’API Marketplace",
+    environment: process.env.NODE_ENV || "development",
+    docs: "/api",
+  });
+});
+
+// =======================
+// 🔹 Health Check robuste
+// =======================
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "backend-api",
+    environment: process.env.NODE_ENV || "development",
+    mongo_uri: process.env.MONGO_ATLAS_URI ? "configured" : "not set",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // =======================
