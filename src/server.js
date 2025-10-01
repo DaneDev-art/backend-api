@@ -12,12 +12,20 @@ const mongoUri =
     ? process.env.MONGO_ATLAS_URI
     : process.env.MONGO_LOCAL_URI;
 
+// Fonction pour masquer le mot de passe dans le log
+const maskMongoUri = (uri) => {
+  if (!uri) return "undefined";
+  return uri.replace(/\/\/(.*):(.*)@/, "//$1:*****@");
+};
+
 // Fonction pour connecter à MongoDB avec retries
 const connectDB = async (retries = 5, delay = 3000) => {
   while (retries) {
     try {
       const conn = await mongoose.connect(mongoUri, {
         dbName: process.env.MONGO_INITDB_DATABASE || "mydb",
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
       });
       console.log(`✅ MongoDB connecté : ${conn.connection.host}/${conn.connection.name}`);
       return conn;
@@ -39,11 +47,11 @@ const connectDB = async (retries = 5, delay = 3000) => {
 // Démarrage du serveur après connexion à MongoDB + Socket.IO
 (async () => {
   try {
-    await connectDB();
+    const conn = await connectDB();
 
     const server = http.createServer(app);
     const io = new Server(server, {
-      cors: { origin: "*" }, // tu peux restreindre à ton frontend Flutter
+      cors: { origin: "*" },
     });
 
     io.on("connection", (socket) => {
@@ -62,7 +70,6 @@ const connectDB = async (retries = 5, delay = 3000) => {
           content: data.content,
         });
 
-        // Notifier le destinataire en temps réel
         io.to(data.to).emit("receiveMessage", message);
       });
 
@@ -74,7 +81,8 @@ const connectDB = async (retries = 5, delay = 3000) => {
     server.listen(PORT, () => {
       console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
-      console.log(`📦 Mongo URI utilisé: ${mongoUri}`);
+      // Affiche l'URI Mongo masquée en prod
+      console.log(`📦 Mongo URI utilisé: ${maskMongoUri(conn.connection.client.s.url || mongoUri)}`);
     });
   } catch (err) {
     console.error("❌ Impossible de démarrer le serveur:", err.message);

@@ -1,17 +1,23 @@
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
 
-/**
- * Connecte à MongoDB avec retries en cas d'échec.
- * @param {number} retries - Nombre de tentatives de connexion restantes (par défaut 5)
- * @param {number} delay - Délai entre les tentatives en ms (par défaut 3000)
- */
+// Vérification des variables d'environnement
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("MONGO_ATLAS_URI:", process.env.MONGO_ATLAS_URI);
+console.log("MONGO_LOCAL_URI:", process.env.MONGO_LOCAL_URI);
+console.log("MONGO_INITDB_DATABASE:", process.env.MONGO_INITDB_DATABASE);
+
+// Fonction de connexion
 const connectDB = async (retries = 5, delay = 3000) => {
-  // Choisir l'URI en fonction de l'environnement
   const mongoUri =
     process.env.NODE_ENV === "production"
       ? process.env.MONGO_ATLAS_URI
       : process.env.MONGO_LOCAL_URI;
+
+  if (!mongoUri) {
+    logger.error("❌ MongoDB URI non défini ! Vérifie les variables d'environnement.");
+    process.exit(1);
+  }
 
   while (retries) {
     try {
@@ -40,5 +46,4 @@ const connectDB = async (retries = 5, delay = 3000) => {
   }
 };
 
-// ✅ Export de la fonction
 module.exports = connectDB;
