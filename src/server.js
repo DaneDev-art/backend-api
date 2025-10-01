@@ -7,13 +7,17 @@ const { Server } = require("socket.io");
 const PORT = process.env.PORT || 5000;
 
 // Déterminer l'URI Mongo à utiliser
-const mongoUri =
-  process.env.NODE_ENV === "production"
-    ? process.env.MONGO_ATLAS_URI
-    : process.env.MONGO_LOCAL_URI;
+const getMongoUri = () => {
+  if (process.env.NODE_ENV === "production") {
+    return process.env.MONGO_ATLAS_URI;
+  }
+  return process.env.MONGO_LOCAL_URI;
+};
 
 // Fonction pour connecter à MongoDB avec retries
 const connectDB = async (retries = 5, delay = 3000) => {
+  const mongoUri = getMongoUri();
+
   if (!mongoUri) {
     console.error("❌ MongoDB URI non défini ! Vérifie les variables d'environnement.");
     process.exit(1);
@@ -79,9 +83,10 @@ const connectDB = async (retries = 5, delay = 3000) => {
     });
 
     server.listen(PORT, () => {
+      const mongoUri = getMongoUri();
       console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
-      console.log(`📦 Mongo URI utilisé: ${process.env.MONGO_ATLAS_URI || mongoUri}`);
+      console.log(`📦 Mongo URI utilisé: ${mongoUri}`);
     });
   } catch (err) {
     console.error("❌ Impossible de démarrer le serveur:", err.message);
