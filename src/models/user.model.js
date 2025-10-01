@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 
 const userSchema = new mongoose.Schema(
   {
+    // 🆔 Informations communes
     email: {
       type: String,
       required: true,
@@ -14,15 +15,33 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    name: {
-      type: String,
-      trim: true,
-    },
     role: {
       type: String,
-      enum: ["user", "admin"],
-      default: "user",
+      enum: ["buyer", "seller", "delivery", "admin"],
+      default: "buyer",
     },
+
+    // Buyer fields
+    fullName: { type: String, trim: true },
+    phone: { type: String, trim: true },
+    address: { type: String, trim: true },
+    zone: { type: String, trim: true },
+    country: { type: String, trim: true },
+    city: { type: String, trim: true },
+
+    // Seller fields
+    ownerName: { type: String, trim: true },
+    shopName: { type: String, trim: true },
+
+    // Delivery fields
+    plate: { type: String, trim: true },
+    idNumber: { type: String, trim: true },
+    guarantee: { type: String, trim: true },
+    transportMode: { type: String, enum: ["Moto", "Vélo", "Voiture", "Autre"] },
+
+    idCardFrontUrl: { type: String },
+    idCardBackUrl: { type: String },
+    selfieUrl: { type: String },
   },
   { timestamps: true }
 );

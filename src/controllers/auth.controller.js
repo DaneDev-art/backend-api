@@ -20,23 +20,70 @@ const signToken = (user) =>
 // -------------------
 router.post("/register", async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { role, email, password } = req.body;
     if (!email || !password)
-      return res
-        .status(400)
-        .json({ message: "email & password required" });
+      return res.status(400).json({ message: "email & password required" });
 
     const existing = await User.findOne({ email });
     if (existing)
       return res.status(409).json({ message: "User already exists" });
 
-    const user = new User({ email, password, name });
+    // Création de l'utilisateur selon le rôle
+    let userData = { email, password, role };
+
+    if (role === "buyer") {
+      const { fullName, phone, address, zone, country, city } = req.body;
+      userData = { ...userData, fullName, phone, address, zone, country, city };
+    } else if (role === "seller") {
+      const { ownerName, shopName, phone, address, country } = req.body;
+      userData = { ...userData, ownerName, shopName, phone, address, country };
+    } else if (role === "delivery") {
+      const {
+        fullName,
+        phone,
+        address,
+        zone,
+        country,
+        city,
+        plate,
+        idNumber,
+        guarantee,
+        transportMode,
+        idCardFrontUrl,
+        idCardBackUrl,
+        selfieUrl,
+      } = req.body;
+
+      userData = {
+        ...userData,
+        fullName,
+        phone,
+        address,
+        zone,
+        country,
+        city,
+        plate,
+        idNumber,
+        guarantee,
+        transportMode,
+        idCardFrontUrl,
+        idCardBackUrl,
+        selfieUrl,
+      };
+    }
+
+    const user = new User(userData);
     await user.save();
 
     const token = signToken(user);
     res.status(201).json({
       token,
-      user: { id: user._id, email: user.email, name: user.name },
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        name: user.fullName || user.ownerName || "",
+      },
     });
   } catch (err) {
     logger.error("Register error:", err);
@@ -51,9 +98,7 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
-      return res
-        .status(400)
-        .json({ message: "email & password required" });
+      return res.status(400).json({ message: "email & password required" });
 
     const user = await User.findOne({ email });
     if (!user)
@@ -66,7 +111,12 @@ router.post("/login", async (req, res) => {
     const token = signToken(user);
     res.json({
       token,
-      user: { id: user._id, email: user.email, name: user.name },
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        name: user.fullName || user.ownerName || "",
+      },
     });
   } catch (err) {
     logger.error("Login error:", err);

@@ -53,10 +53,12 @@ app.use(express.json());
 const cinetpayRoutes = require("./routes/cinetpayRoutes");
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/products");
+const cartRoutes = require("./routes/cart"); // 🔹 Nouvelle route Cart
 
 app.use("/api/cinetpay", cinetpayRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/cart", cartRoutes); // 🔹 Monter les routes du panier
 
 // =======================
 // 🔹 Page d’accueil (évite le 404)
