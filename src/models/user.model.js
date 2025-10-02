@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 
 const userSchema = new mongoose.Schema(
   {
-    // 🆔 Informations communes
+    // 🆔 Infos communes
     email: {
       type: String,
       required: true,
@@ -31,14 +31,20 @@ const userSchema = new mongoose.Schema(
 
     // Seller fields
     ownerName: { type: String, trim: true },
-    shopName: { type: String, trim: true },
+    shopName: { type: String, trim: true, index: true }, // 🔹 utile pour recherches rapides
+    shopDescription: { type: String, trim: true }, // 🔹 optionnel (présentation boutique)
+    logoUrl: { type: String }, // 🔹 logo Cloudinary si besoin
 
     // Delivery fields
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },
     guarantee: { type: String, trim: true },
-    transportMode: { type: String, enum: ["Moto", "Vélo", "Voiture", "Autre"] },
+    transportMode: {
+      type: String,
+      enum: ["Moto", "Vélo", "Voiture", "Autre"],
+    },
 
+    // Documents communs
     idCardFrontUrl: { type: String },
     idCardBackUrl: { type: String },
     selfieUrl: { type: String },
@@ -46,7 +52,7 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🔐 Hash mot de passe avant sauvegarde
+// 🔐 Hash password avant sauvegarde
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
@@ -59,7 +65,7 @@ userSchema.pre("save", async function (next) {
   }
 });
 
-// 🔐 Comparer un mot de passe fourni avec le hash
+// 🔐 Vérif mot de passe
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
