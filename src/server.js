@@ -1,6 +1,6 @@
 // server.js à la racine
 require("dotenv").config();
-const app = require("./src/app"); // ton fichier app.js où sont définies les routes
+const app = require("./app"); // ton fichier app.js où sont définies les routes
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
