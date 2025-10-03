@@ -26,11 +26,13 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // =======================
-// 🔐 CORS : Hybride dev/prod
+// 🔐 CORS : Dev Web Flutter + prod
 // =======================
 const allowedOriginsProd = [
-  "https://mon-site.com",                 // frontend prod
-  "https://backend-api-m0tf.onrender.com" // backend prod
+  "https://mon-site.com",                     // frontend prod
+  "https://backend-api-m0tf.onrender.com",   // backend prod
+  "http://localhost:5000",                    // backend dev local
+  "http://localhost:5173",                    // Flutter Web dev port (change si différent)
 ];
 
 app.use(cors({
@@ -42,7 +44,7 @@ app.use(cors({
         callback(new Error("❌ Non autorisé par CORS en production : " + origin));
       }
     } else {
-      console.log("🔍 [CORS] Requête depuis:", origin || "origine inconnue");
+      console.log("🔍 [CORS DEV] Requête depuis:", origin || "origine inconnue");
       callback(null, true);
     }
   },
