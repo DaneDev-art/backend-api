@@ -2,7 +2,6 @@
   "name": "node-express-mongo-jwt-api",
   "version": "1.0.0",
   "description": "API Node.js + Express + MongoDB + JWT + Cloudinary + Socket.IO",
-  "main": "src/server.js",
   "scripts": {
     "start": "cross-env NODE_ENV=production node src/server.js",
     "dev": "cross-env NODE_ENV=development nodemon src/server.js",
