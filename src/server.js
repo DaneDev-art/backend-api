@@ -1,20 +1,22 @@
+// server.js
 require("dotenv").config();
-const app = require("./app");
+const app = require("./app"); // ton fichier app.js où sont définies les routes
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 5000;
 
-// Déterminer l'URI Mongo à utiliser
+// --- Déterminer l'URI Mongo ---
 const getMongoUri = () => {
   if (process.env.NODE_ENV === "production") {
     return process.env.MONGO_ATLAS_URI;
   }
-  return process.env.MONGO_LOCAL_URI;
+  // fallback si pas de MONGO_LOCAL_URI défini
+  return process.env.MONGO_LOCAL_URI || process.env.MONGO_ATLAS_URI;
 };
 
-// Fonction pour connecter à MongoDB avec retries
+// --- Fonction pour connecter à MongoDB avec retries ---
 const connectDB = async (retries = 5, delay = 3000) => {
   const mongoUri = getMongoUri();
 
@@ -47,16 +49,15 @@ const connectDB = async (retries = 5, delay = 3000) => {
   }
 };
 
-// Démarrage du serveur après connexion à MongoDB + Socket.IO
+// --- Démarrage serveur après connexion à MongoDB ---
 (async () => {
   try {
     await connectDB();
 
     const server = http.createServer(app);
-    const io = new Server(server, {
-      cors: { origin: "*" }, // tu peux restreindre à ton frontend Flutter
-    });
 
+    // Socket.IO (optionnel pour Postman)
+    const io = new Server(server, { cors: { origin: "*" } });
     io.on("connection", (socket) => {
       console.log("🔌 Nouvel utilisateur connecté :", socket.id);
 
@@ -72,8 +73,6 @@ const connectDB = async (retries = 5, delay = 3000) => {
           to: data.to,
           content: data.content,
         });
-
-        // Notifier le destinataire en temps réel
         io.to(data.to).emit("receiveMessage", message);
       });
 

@@ -26,25 +26,30 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // =======================
-// 🔐 CORS : Restriction
+// 🔐 CORS : Hybride dev/prod
 // =======================
-const allowedOrigins = [
-  "http://localhost:3000",   // ✅ frontend en développement
-  "https://mon-site.com",    // ✅ frontend en production
+const allowedOriginsProd = [
+  "https://mon-site.com",                 // frontend prod
+  "https://backend-api-m0tf.onrender.com" // backend prod
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+    if (process.env.NODE_ENV === "production") {
+      if (!origin || allowedOriginsProd.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("❌ Non autorisé par CORS en production : " + origin));
+      }
     } else {
-      callback(new Error("❌ Non autorisé par CORS"));
+      console.log("🔍 [CORS] Requête depuis:", origin || "origine inconnue");
+      callback(null, true);
     }
   },
   credentials: true,
 }));
 
-// Middleware pour parser le JSON
+// Middleware pour parser le JSON (avant les routes)
 app.use(express.json());
 
 // =======================
@@ -53,15 +58,15 @@ app.use(express.json());
 const cinetpayRoutes = require("./routes/cinetpayRoutes");
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/products");
-const cartRoutes = require("./routes/cart"); // 🔹 Nouvelle route Cart
+const cartRoutes = require("./routes/cart");
 
 app.use("/api/cinetpay", cinetpayRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
-app.use("/api/cart", cartRoutes); // 🔹 Monter les routes du panier
+app.use("/api/cart", cartRoutes);
 
 // =======================
-// 🔹 Page d’accueil (évite le 404)
+// 🔹 Page d’accueil
 // =======================
 app.get("/", (req, res) => {
   res.json({
@@ -88,11 +93,12 @@ app.get("/health", (req, res) => {
 // 🔹 Gestion globale des erreurs
 // =======================
 app.use((err, req, res, next) => {
-  if (err.message === "❌ Non autorisé par CORS") {
+  if (err.message && err.message.includes("CORS")) {
+    console.error("❌ [CORS ERROR]", err.message);
     return res.status(403).json({ error: err.message });
   }
-  console.error(err);
-  res.status(500).json({ error: "Une erreur est survenue" });
+  console.error("❌ [SERVER ERROR]", err);
+  res.status(500).json({ error: "Une erreur est survenue sur le serveur" });
 });
 
 module.exports = app;
