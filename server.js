@@ -1,27 +1,38 @@
-// server.js
-
-const server = require("./src/server"); // ton src/server.js
-require("dotenv").config(); // Charger les variables d'environnement
+// server.js (à la racine)
 const app = require("./src/app");
-const connectDB = require("./src/config/db");
+const http = require("http");
+const { Server } = require("socket.io");
+const mongoose = require("mongoose");
 
 const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_ATLAS_URI || "mongodb://127.0.0.1:27017/mydb";
 
-(async () => {
-  try {
-    // ✅ Connexion à MongoDB
-    await connectDB();
+// Connexion à MongoDB
+mongoose.connect(MONGO_URI)
+  .then(() => console.log(`✅ MongoDB connecté : ${MONGO_URI}`))
+  .catch(err => {
+    console.error("❌ Erreur MongoDB:", err);
+    process.exit(1);
+  });
 
-    // ✅ Démarrage du serveur
-    app.listen(PORT, () => {
-      console.log("====================================");
-      console.log(`✅ Backend démarré sur le port: ${PORT}`);
-      console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
-      console.log(`📦 Mongo URI: ${process.env.MONGO_URI}`);
-      console.log("====================================");
-    });
-  } catch (err) {
-    console.error("❌ Impossible de démarrer le serveur:", err.message);
-    process.exit(1); // Arrêt si MongoDB est inaccessible
+// Création du serveur HTTP + Socket.IO
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // à adapter selon prod
+    methods: ["GET", "POST"]
   }
-})();
+});
+
+io.on("connection", socket => {
+  console.log("⚡ Nouveau client connecté:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("❌ Client déconnecté:", socket.id);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
+  console.log("🌍 Environnement:", process.env.NODE_ENV || "development");
+});

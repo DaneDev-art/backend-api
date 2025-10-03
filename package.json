@@ -2,9 +2,10 @@
   "name": "node-express-mongo-jwt-api",
   "version": "1.0.0",
   "description": "API Node.js + Express + MongoDB + JWT + Cloudinary + Socket.IO",
+  "main": "server.js",
   "scripts": {
-    "start": "cross-env NODE_ENV=production node src/server.js",
-    "dev": "cross-env NODE_ENV=development nodemon src/server.js",
+    "start": "node server.js",
+    "dev": "nodemon src/server.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "jest --runInBand"
@@ -28,7 +29,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
-    "cross-env": "^7.0.3",
     "eslint": "^8.57.1",
     "globals": "^16.4.0",
     "jest": "^29.6.1",
