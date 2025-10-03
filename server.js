@@ -1,5 +1,6 @@
 // server.js
 
+const server = require("./src/server"); // ton src/server.js
 require("dotenv").config(); // Charger les variables d'environnement
 const app = require("./src/app");
 const connectDB = require("./src/config/db");
