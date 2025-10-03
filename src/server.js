@@ -1,6 +1,6 @@
-// server.js
+// server.js à la racine
 require("dotenv").config();
-const app = require("./app"); // ton fichier app.js où sont définies les routes
+const app = require("./src/app"); // ton fichier app.js où sont définies les routes
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -56,7 +56,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
 
     const server = http.createServer(app);
 
-    // Socket.IO (optionnel pour Postman)
+    // Socket.IO (optionnel)
     const io = new Server(server, { cors: { origin: "*" } });
     io.on("connection", (socket) => {
       console.log("🔌 Nouvel utilisateur connecté :", socket.id);
@@ -67,7 +67,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
       });
 
       socket.on("sendMessage", async (data) => {
-        const Message = require("./models/Message");
+        const Message = require("./src/models/Message");
         const message = await Message.create({
           from: data.from,
           to: data.to,
