@@ -8,18 +8,18 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 
-// Charger variables d’environnement
+// Charger les variables d’environnement
 dotenv.config();
-
 const app = express();
 
 // =======================
 // 🔐 Sécurité & logs
 // =======================
-app.use(helmet());           // Sécurise les headers HTTP
-app.use(morgan("dev"));      // Affiche les requêtes dans la console
+app.set("trust proxy", 1); // ✅ Corrige l’erreur X-Forwarded-For sur Render
+app.use(helmet());
+app.use(morgan("dev"));
 
-// Rate limiting : max 100 requêtes / 15 min par IP
+// Limiteur de requêtes (anti-spam)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -28,36 +28,43 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // =======================
-// 🔐 CORS : Flutter Web + API + Prod
+// 🌐 CORS Configuration
 // =======================
 const allowedOriginsProd = [
-  "https://mon-site.com",                     // Frontend production
+  "https://mon-site.com",                    // Frontend production
   "https://backend-api-m0tf.onrender.com",   // Backend Render
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // Autoriser Postman, curl, ou Flutter Web sans header Origin
-    if (!origin) return callback(null, true);
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // Postman / mobile apps
 
-    // En production : n'autoriser que certaines origines
-    if (process.env.NODE_ENV === "production") {
-      if (allowedOriginsProd.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.warn("❌ [CORS PROD] Origine refusée :", origin);
-        callback(new Error("Non autorisé par CORS en production"));
+      // ✅ Autoriser localhost dynamiques pour Flutter Web
+      if (origin.startsWith("http://localhost:") || origin.startsWith("chrome-extension://")) {
+        console.log("🔍 [CORS LOCAL DEV] Autorisé :", origin);
+        return callback(null, true);
       }
-    } else {
-      // En dev : autoriser tout (Flutter Web, localhost, etc.)
+
+      // ✅ En production, vérifier liste blanche
+      if (process.env.NODE_ENV === "production") {
+        if (allowedOriginsProd.includes(origin)) {
+          return callback(null, true);
+        } else {
+          console.warn("❌ [CORS PROD] Origine refusée :", origin);
+          return callback(new Error("Non autorisé par CORS en production"));
+        }
+      }
+
+      // ✅ En développement, tout autoriser
       console.log("🔍 [CORS DEV] Autorisé :", origin);
       callback(null, true);
-    }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // =======================
 // 🧩 Middleware JSON
@@ -89,7 +96,7 @@ app.get("/", (req, res) => {
 });
 
 // =======================
-// 🔹 Health Check robuste
+// 🔹 Health Check
 // =======================
 app.get("/health", (req, res) => {
   res.status(200).json({

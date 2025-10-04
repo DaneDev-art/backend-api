@@ -7,7 +7,10 @@ const { Server } = require("socket.io");
 
 const PORT = process.env.PORT || 5000;
 
-// --- Déterminer l'URI Mongo ---
+// --- Faire confiance aux proxies (Render, Nginx, etc.)
+app.set("trust proxy", true);
+
+// --- Déterminer l'URI Mongo
 const getMongoUri = () => {
   if (process.env.NODE_ENV === "production") {
     return process.env.MONGO_ATLAS_URI;
@@ -16,7 +19,7 @@ const getMongoUri = () => {
   return process.env.MONGO_LOCAL_URI || process.env.MONGO_ATLAS_URI;
 };
 
-// --- Fonction pour connecter à MongoDB avec retries ---
+// --- Fonction pour connecter à MongoDB avec retries
 const connectDB = async (retries = 5, delay = 3000) => {
   const mongoUri = getMongoUri();
 
@@ -49,15 +52,23 @@ const connectDB = async (retries = 5, delay = 3000) => {
   }
 };
 
-// --- Démarrage serveur après connexion à MongoDB ---
+// --- Démarrage serveur après connexion à MongoDB
 (async () => {
   try {
     await connectDB();
 
     const server = http.createServer(app);
 
-    // Socket.IO (optionnel)
-    const io = new Server(server, { cors: { origin: "*" } });
+    // Socket.IO
+    const io = new Server(server, {
+      cors: {
+        origin: process.env.NODE_ENV === "production"
+          ? ["https://mon-site.com", "https://backend-api-m0tf.onrender.com"]
+          : "*",
+        methods: ["GET", "POST"]
+      }
+    });
+
     io.on("connection", (socket) => {
       console.log("🔌 Nouvel utilisateur connecté :", socket.id);
 
