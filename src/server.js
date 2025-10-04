@@ -4,11 +4,24 @@ const app = require("./app"); // ton fichier app.js où sont définies les route
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
+const cors = require("cors");
 
 const PORT = process.env.PORT || 5000;
 
 // --- Faire confiance aux proxies (Render, Nginx, etc.)
-app.set("trust proxy", true);
+app.set("trust proxy", 1); // 1 = confiance au premier proxy
+
+// --- Middleware pour parser le JSON et limiter la taille du body
+app.use(express.json({ limit: '10mb' }));
+
+// --- CORS pour Express
+app.use(cors({
+  origin: process.env.NODE_ENV === "production"
+    ? ["https://ton-frontend.com"] // ton frontend prod
+    : "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true
+}));
 
 // --- Déterminer l'URI Mongo
 const getMongoUri = () => {
@@ -63,7 +76,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
     const io = new Server(server, {
       cors: {
         origin: process.env.NODE_ENV === "production"
-          ? ["https://mon-site.com", "https://backend-api-m0tf.onrender.com"]
+          ? ["https://ton-frontend.com", "https://backend-api-m0tf.onrender.com"]
           : "*",
         methods: ["GET", "POST"]
       }
