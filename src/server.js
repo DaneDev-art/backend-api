@@ -4,31 +4,14 @@ const app = require("./app"); // ton fichier app.js où sont définies les route
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
 
 const PORT = process.env.PORT || 5000;
-
-// --- Faire confiance aux proxies (Render, Nginx, etc.)
-app.set("trust proxy", 1); // 1 = confiance au premier proxy
-
-// --- Middleware pour parser le JSON et limiter la taille du body
-app.use(express.json({ limit: '10mb' }));
-
-// --- CORS pour Express
-app.use(cors({
-  origin: process.env.NODE_ENV === "production"
-    ? ["https://ton-frontend.com"] // ton frontend prod
-    : "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true
-}));
 
 // --- Déterminer l'URI Mongo
 const getMongoUri = () => {
   if (process.env.NODE_ENV === "production") {
     return process.env.MONGO_ATLAS_URI;
   }
-  // fallback si pas de MONGO_LOCAL_URI défini
   return process.env.MONGO_LOCAL_URI || process.env.MONGO_ATLAS_URI;
 };
 
@@ -37,7 +20,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
   const mongoUri = getMongoUri();
 
   if (!mongoUri) {
-    console.error("❌ MongoDB URI non défini ! Vérifie les variables d'environnement.");
+    console.error("❌ MongoDB URI non défini !");
     process.exit(1);
   }
 
@@ -59,7 +42,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
         process.exit(1);
       }
 
-      console.warn(`🔄 Nouvelle tentative de connexion dans ${delay / 1000}s...`);
+      console.warn(`🔄 Nouvelle tentative dans ${delay / 1000}s...`);
       await new Promise((res) => setTimeout(res, delay));
     }
   }
@@ -106,10 +89,9 @@ const connectDB = async (retries = 5, delay = 3000) => {
     });
 
     server.listen(PORT, () => {
-      const mongoUri = getMongoUri();
       console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
-      console.log(`📦 Mongo URI utilisé: ${mongoUri}`);
+      console.log(`📦 Mongo URI utilisé: ${getMongoUri()}`);
     });
   } catch (err) {
     console.error("❌ Impossible de démarrer le serveur:", err.message);
