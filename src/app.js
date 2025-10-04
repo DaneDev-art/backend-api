@@ -1,4 +1,6 @@
-// src/app.js
+// =======================
+// 📦 Import des modules
+// =======================
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
@@ -14,8 +16,8 @@ const app = express();
 // =======================
 // 🔐 Sécurité & logs
 // =======================
-app.use(helmet());           // Headers sécurisés
-app.use(morgan("dev"));      // Logging des requêtes
+app.use(helmet());           // Sécurise les headers HTTP
+app.use(morgan("dev"));      // Affiche les requêtes dans la console
 
 // Rate limiting : max 100 requêtes / 15 min par IP
 const limiter = rateLimit({
@@ -26,32 +28,40 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // =======================
-// 🔐 CORS : Dev Web Flutter + prod
+// 🔐 CORS : Flutter Web + API + Prod
 // =======================
 const allowedOriginsProd = [
-  "https://mon-site.com",                     // frontend prod
-  "https://backend-api-m0tf.onrender.com",   // backend prod
-  "http://localhost:5000",                    // backend dev local
-  "http://localhost:5173",                    // Flutter Web dev port (change si différent)
+  "https://mon-site.com",                     // Frontend production
+  "https://backend-api-m0tf.onrender.com",   // Backend Render
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Autoriser Postman, curl, ou Flutter Web sans header Origin
+    if (!origin) return callback(null, true);
+
+    // En production : n'autoriser que certaines origines
     if (process.env.NODE_ENV === "production") {
-      if (!origin || allowedOriginsProd.includes(origin)) {
+      if (allowedOriginsProd.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error("❌ Non autorisé par CORS en production : " + origin));
+        console.warn("❌ [CORS PROD] Origine refusée :", origin);
+        callback(new Error("Non autorisé par CORS en production"));
       }
     } else {
-      console.log("🔍 [CORS DEV] Requête depuis:", origin || "origine inconnue");
+      // En dev : autoriser tout (Flutter Web, localhost, etc.)
+      console.log("🔍 [CORS DEV] Autorisé :", origin);
       callback(null, true);
     }
   },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// Middleware pour parser le JSON (avant les routes)
+// =======================
+// 🧩 Middleware JSON
+// =======================
 app.use(express.json());
 
 // =======================
@@ -103,4 +113,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Une erreur est survenue sur le serveur" });
 });
 
+// =======================
+// 🚀 Export de l’app
+// =======================
 module.exports = app;
