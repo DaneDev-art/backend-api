@@ -2,14 +2,15 @@ const mongoose = require("mongoose");
 
 const ProductSchema = new mongoose.Schema(
   {
+    // 🔹 Informations principales
     name: { type: String, required: true, index: true },
     description: { type: String, default: "" },
     price: { type: Number, required: true },
     stock: { type: Number, default: 0 },
 
-    // ✅ Plusieurs images (3 max)
+    // 🔹 Images (max 3)
     images: {
-      type: [String], // tableau d’URLs Cloudinary
+      type: [String], // URLs Cloudinary
       validate: {
         validator: function (arr) {
           return arr.length <= 3;
@@ -19,18 +20,24 @@ const ProductSchema = new mongoose.Schema(
       default: [],
     },
 
+    // 🔹 Catégorie
     category: { type: String, index: true },
 
-    // 🔹 Référence au vendeur
-    sellerId: {
+    // 🔹 Référence au vendeur (User)
+    seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
 
-    shopName: { type: String }, // Nom de la boutique du vendeur
+    // 🔹 Nom de la boutique du vendeur
+    shopName: { type: String, trim: true },
+
   },
   { timestamps: true }
 );
+
+// ✅ Index utile pour recherche combinée
+ProductSchema.index({ name: "text", category: 1 });
 
 module.exports = mongoose.model("Product", ProductSchema);

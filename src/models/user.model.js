@@ -1,3 +1,4 @@
+// src/models/user.model.js
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
@@ -10,10 +11,12 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
+      index: true,
     },
     password: {
       type: String,
       required: true,
+      minlength: 6,
     },
     role: {
       type: String,
@@ -21,7 +24,7 @@ const userSchema = new mongoose.Schema(
       default: "buyer",
     },
 
-    // Buyer fields
+    // 🔹 Infos Buyer
     fullName: { type: String, trim: true },
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
@@ -29,13 +32,14 @@ const userSchema = new mongoose.Schema(
     country: { type: String, trim: true },
     city: { type: String, trim: true },
 
-    // Seller fields
+    // 🔹 Infos Seller
     ownerName: { type: String, trim: true },
-    shopName: { type: String, trim: true, index: true }, // 🔹 utile pour recherches rapides
-    shopDescription: { type: String, trim: true }, // 🔹 optionnel (présentation boutique)
-    logoUrl: { type: String }, // 🔹 logo Cloudinary si besoin
+    shopName: { type: String, trim: true, index: true },
+    shopDescription: { type: String, trim: true },
+    logoUrl: { type: String },
+    profileImageUrl: { type: String }, // optionnel (image profil vendeur)
 
-    // Delivery fields
+    // 🔹 Infos Delivery
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },
     guarantee: { type: String, trim: true },
@@ -44,7 +48,7 @@ const userSchema = new mongoose.Schema(
       enum: ["Moto", "Vélo", "Voiture", "Autre"],
     },
 
-    // Documents communs
+    // 🔹 Documents communs
     idCardFrontUrl: { type: String },
     idCardBackUrl: { type: String },
     selfieUrl: { type: String },
@@ -52,7 +56,9 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🔐 Hash password avant sauvegarde
+// ======================================================
+// 🔐 Hash du mot de passe avant sauvegarde
+// ======================================================
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
@@ -65,9 +71,24 @@ userSchema.pre("save", async function (next) {
   }
 });
 
-// 🔐 Vérif mot de passe
+// ======================================================
+// 🔐 Vérification du mot de passe
+// ======================================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
+// ======================================================
+// 🔹 Getter public (pour renvoyer un profil sans mot de passe)
+// ======================================================
+userSchema.methods.toPublicJSON = function () {
+  const user = this.toObject();
+  delete user.password;
+  delete user.__v;
+  return user;
+};
+
+// ======================================================
+// ✅ Export
+// ======================================================
 module.exports = mongoose.model("User", userSchema);

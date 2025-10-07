@@ -1,43 +1,58 @@
 // src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const User = require("../models/User"); // assure-toi du bon chemin
+const User = require("../models/User");
 const logger = require("../utils/logger");
-const authMiddleware = require("../middlewares/auth.middleware");
+const authMiddleware = require("../middleware/auth.middleware"); // ✅ correction du chemin (middleware au singulier)
 
 const router = express.Router();
 
-// Générer un JWT
+// ----------------------------------------
+// 🔹 Génération du JWT
+// ----------------------------------------
 const signToken = (user) =>
   jwt.sign(
-    { id: user._id, role: user.role, email: user.email },
+    {
+      id: user._id, // utilisé dans req.user.id
+      role: user.role,
+      email: user.email,
+    },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
-// -------------------
-// REGISTER
-// -------------------
+// ----------------------------------------
+// 🔹 REGISTER
+// ----------------------------------------
 router.post("/register", async (req, res) => {
   try {
     const { role, email, password } = req.body;
-    if (!email || !password)
-      return res.status(400).json({ message: "email & password required" });
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email et mot de passe requis" });
+    }
 
     const existing = await User.findOne({ email });
-    if (existing)
-      return res.status(409).json({ message: "User already exists" });
+    if (existing) {
+      return res.status(409).json({ message: "Cet utilisateur existe déjà" });
+    }
 
-    // Création de l'utilisateur selon le rôle
     let userData = { email, password, role };
 
+    // 🔸 Buyer
     if (role === "buyer") {
       const { fullName, phone, address, zone, country, city } = req.body;
       userData = { ...userData, fullName, phone, address, zone, country, city };
-    } else if (role === "seller") {
+    }
+
+    // 🔸 Seller
+    else if (role === "seller") {
       const { ownerName, shopName, phone, address, country } = req.body;
       userData = { ...userData, ownerName, shopName, phone, address, country };
-    } else if (role === "delivery") {
+    }
+
+    // 🔸 Delivery
+    else if (role === "delivery") {
       const {
         fullName,
         phone,
@@ -72,10 +87,13 @@ router.post("/register", async (req, res) => {
       };
     }
 
+    // ✅ Création de l’utilisateur
     const user = new User(userData);
     await user.save();
 
+    // ✅ Génération du token
     const token = signToken(user);
+
     res.status(201).json({
       token,
       user: {
@@ -83,32 +101,38 @@ router.post("/register", async (req, res) => {
         email: user.email,
         role: user.role,
         name: user.fullName || user.ownerName || "",
+        shopName: user.shopName || null,
       },
     });
   } catch (err) {
-    logger.error("Register error:", err);
-    res.status(500).json({ message: "Server error" });
+    logger.error("❌ Register error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
   }
 });
 
-// -------------------
-// LOGIN
-// -------------------
+// ----------------------------------------
+// 🔹 LOGIN
+// ----------------------------------------
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password)
-      return res.status(400).json({ message: "email & password required" });
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email et mot de passe requis" });
+    }
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res.status(401).json({ message: "Invalid credentials" });
+    if (!user) {
+      return res.status(401).json({ message: "Identifiants invalides" });
+    }
 
     const isMatch = await user.comparePassword(password);
-    if (!isMatch)
-      return res.status(401).json({ message: "Invalid credentials" });
+    if (!isMatch) {
+      return res.status(401).json({ message: "Identifiants invalides" });
+    }
 
     const token = signToken(user);
+
     res.json({
       token,
       user: {
@@ -116,25 +140,29 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: user.role,
         name: user.fullName || user.ownerName || "",
+        shopName: user.shopName || null,
       },
     });
   } catch (err) {
-    logger.error("Login error:", err);
-    res.status(500).json({ message: "Server error" });
+    logger.error("❌ Login error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la connexion" });
   }
 });
 
-// -------------------
-// PROFILE (protected)
-// -------------------
+// ----------------------------------------
+// 🔹 PROFILE (protégé)
+// ----------------------------------------
 router.get("/profile", authMiddleware, async (req, res) => {
   try {
-    const u = await User.findById(req.user.id).select("-password");
-    if (!u) return res.status(404).json({ message: "User not found" });
-    res.json({ user: u });
+    const user = await User.findById(req.user.id).select("-password");
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json({ user });
   } catch (err) {
-    logger.error("Profile error:", err);
-    res.status(500).json({ message: "Server error" });
+    logger.error("❌ Profile error:", err);
+    res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
