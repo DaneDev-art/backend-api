@@ -33,6 +33,8 @@ const ProductSchema = new mongoose.Schema(
     // 🔹 Nom de la boutique du vendeur
     shopName: { type: String, trim: true },
 
+    // 🔹 Pays du vendeur ou d’origine du produit 🌍
+    country: { type: String, default: "" },
   },
   { timestamps: true }
 );
