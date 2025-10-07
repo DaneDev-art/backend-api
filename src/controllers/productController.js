@@ -1,6 +1,3 @@
-// ==========================================
-// src/controllers/productController.js
-// ==========================================
 const Product = require("../models/Product");
 const cloudinary = require("cloudinary").v2;
 
@@ -32,7 +29,7 @@ exports.getAllProducts = async (req, res) => {
 exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
-    const products = await Product.find({ sellerId });
+    const products = await Product.find({ seller: sellerId });
     res.status(200).json(products);
   } catch (err) {
     console.error("❌ getProductsBySeller error:", err);
@@ -74,7 +71,7 @@ exports.addProduct = async (req, res) => {
       price,
       category,
       images: uploadedImages,
-      sellerId,
+      seller: sellerId, // ✅ correspond au modèle
     });
 
     await product.save();
@@ -94,7 +91,7 @@ exports.updateProduct = async (req, res) => {
     const sellerId = req.user.id;
     const { name, description, price, category, images } = req.body;
 
-    const product = await Product.findOne({ _id: productId, sellerId });
+    const product = await Product.findOne({ _id: productId, seller: sellerId });
     if (!product) {
       return res.status(404).json({ message: "Produit introuvable" });
     }
@@ -133,7 +130,7 @@ exports.deleteProduct = async (req, res) => {
     const { productId } = req.params;
     const sellerId = req.user.id;
 
-    const deleted = await Product.findOneAndDelete({ _id: productId, sellerId });
+    const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
     if (!deleted) {
       return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
     }
