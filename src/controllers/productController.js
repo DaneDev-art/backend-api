@@ -1,3 +1,6 @@
+// ==========================================
+// src/controllers/productController.js
+// ==========================================
 const Product = require("../models/Product");
 const cloudinary = require("cloudinary").v2;
 
@@ -11,12 +14,25 @@ cloudinary.config({
 });
 
 // ==========================================
-// ✅ Obtenir tous les produits
+// ✅ Obtenir tous les produits (avec boutique & pays)
 // ==========================================
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find().populate("seller", "email shopName");
-    res.status(200).json(products);
+    const products = await Product.find()
+      .populate({
+        path: "seller",
+        select: "shopName country", // récupère ces champs depuis User
+      })
+      .sort({ createdAt: -1 });
+
+    // Fusionne les infos du vendeur dans l’objet produit
+    const enrichedProducts = products.map((p) => ({
+      ...p.toObject(),
+      shopName: p.seller?.shopName || "Boutique inconnue",
+      country: p.seller?.country || "Pays inconnu",
+    }));
+
+    res.status(200).json(enrichedProducts);
   } catch (err) {
     console.error("❌ getAllProducts error:", err);
     res.status(500).json({ error: err.message });
@@ -29,8 +45,16 @@ exports.getAllProducts = async (req, res) => {
 exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
-    const products = await Product.find({ seller: sellerId });
-    res.status(200).json(products);
+    const products = await Product.find({ seller: sellerId })
+      .populate("seller", "shopName country");
+
+    const enrichedProducts = products.map((p) => ({
+      ...p.toObject(),
+      shopName: p.seller?.shopName || "Boutique inconnue",
+      country: p.seller?.country || "Pays inconnu",
+    }));
+
+    res.status(200).json(enrichedProducts);
   } catch (err) {
     console.error("❌ getProductsBySeller error:", err);
     res.status(500).json({ error: err.message });
@@ -71,7 +95,7 @@ exports.addProduct = async (req, res) => {
       price,
       category,
       images: uploadedImages,
-      seller: sellerId, // ✅ correspond au modèle
+      seller: sellerId,
     });
 
     await product.save();
@@ -130,9 +154,15 @@ exports.deleteProduct = async (req, res) => {
     const { productId } = req.params;
     const sellerId = req.user.id;
 
-    const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
+    const deleted = await Product.findOneAndDelete({
+      _id: productId,
+      seller: sellerId,
+    });
+
     if (!deleted) {
-      return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
+      return res
+        .status(404)
+        .json({ message: "Produit non trouvé ou non autorisé" });
     }
 
     res.status(200).json({ message: "Produit supprimé avec succès" });
