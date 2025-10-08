@@ -1,11 +1,12 @@
+// src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
-const User = require("../models/user.model"); // vérifie le nom exact
+const User = require("../models/user.model");
 
 const router = express.Router();
 
-// Fonction pour générer le token JWT
+// 🔹 Fonction pour générer le token JWT
 const signToken = (user) =>
   jwt.sign(
     { id: user._id, email: user.email, role: user.role },
@@ -58,6 +59,7 @@ router.post(
           idCardBackUrl,
           selfieUrl,
         } = req.body;
+
         userData = {
           ...userData,
           fullName,
@@ -73,6 +75,7 @@ router.post(
           idCardFrontUrl,
           idCardBackUrl,
           selfieUrl,
+          status: "pending", // ✅ statut initial pour livreur
         };
       }
 
@@ -88,6 +91,7 @@ router.post(
           email: user.email,
           name: user.fullName || user.ownerName || "",
           role: user.role,
+          status: user.status || null, // ✅ inclut status pour delivery
         },
       });
     } catch (error) {
@@ -128,6 +132,7 @@ router.post(
           email: user.email,
           name: user.fullName || user.ownerName || "",
           role: user.role,
+          status: user.status || null, // ✅ inclut status pour delivery
         },
       });
     } catch (error) {
