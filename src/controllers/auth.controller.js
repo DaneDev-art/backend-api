@@ -3,7 +3,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const logger = require("../utils/logger");
-const authMiddleware = require("../middleware/auth.middleware"); // ✅ correction du chemin (middleware au singulier)
+const authMiddleware = require("../middleware/auth.middleware"); // ✅ correction du chemin
 
 const router = express.Router();
 
@@ -69,6 +69,7 @@ router.post("/register", async (req, res) => {
         selfieUrl,
       } = req.body;
 
+      // 🔹 Initialiser status à "pending"
       userData = {
         ...userData,
         fullName,
@@ -84,6 +85,7 @@ router.post("/register", async (req, res) => {
         idCardFrontUrl,
         idCardBackUrl,
         selfieUrl,
+        status: "pending",
       };
     }
 
@@ -102,6 +104,7 @@ router.post("/register", async (req, res) => {
         role: user.role,
         name: user.fullName || user.ownerName || "",
         shopName: user.shopName || null,
+        status: user.status || null, // inclure le status si disponible
       },
     });
   } catch (err) {
@@ -141,6 +144,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
         name: user.fullName || user.ownerName || "",
         shopName: user.shopName || null,
+        status: user.status || null,
       },
     });
   } catch (err) {

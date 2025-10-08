@@ -47,6 +47,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["Moto", "Vélo", "Voiture", "Autre"],
     },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: function () {
+        return this.role === "delivery" ? "pending" : undefined;
+      },
+    },
 
     // 🔹 Documents communs
     idCardFrontUrl: { type: String },
