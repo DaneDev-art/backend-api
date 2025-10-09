@@ -35,30 +35,36 @@ const allowedOriginsProd = [
   "https://backend-api-m0tf.onrender.com",
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // Postman / mobile apps
-    if (origin.startsWith("http://localhost:") || origin.startsWith("chrome-extension://")) {
-      console.log("🔍 [CORS LOCAL DEV] Autorisé :", origin);
-      return callback(null, true);
-    }
-    if (process.env.NODE_ENV === "production") {
-      if (allowedOriginsProd.includes(origin)) return callback(null, true);
-      console.warn("❌ [CORS PROD] Origine refusée :", origin);
-      return callback(new Error("Non autorisé par CORS en production"));
-    }
-    console.log("🔍 [CORS DEV] Autorisé :", origin);
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // Postman / mobile apps
+      if (
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("chrome-extension://")
+      ) {
+        console.log("🔍 [CORS LOCAL DEV] Autorisé :", origin);
+        return callback(null, true);
+      }
+      if (process.env.NODE_ENV === "production") {
+        if (allowedOriginsProd.includes(origin)) return callback(null, true);
+        console.warn("❌ [CORS PROD] Origine refusée :", origin);
+        return callback(new Error("Non autorisé par CORS en production"));
+      }
+      console.log("🔍 [CORS DEV] Autorisé :", origin);
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // =======================
 // 🧩 Middleware JSON
 // =======================
 app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
 // =======================
 // 🔹 Routes principales
@@ -67,6 +73,7 @@ app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
+app.use("/api/upload", require("./src/routes/uploadRoutes")); // ✅ ajout Cloudinary
 
 // =======================
 // 🔹 Page d’accueil
