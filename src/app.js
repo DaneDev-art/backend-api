@@ -73,7 +73,7 @@ app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
-app.use("/api/upload", require("./src/routes/uploadRoutes")); // ✅ ajout Cloudinary
+app.use("/api/upload", require("./routes/uploadRoutes")); // ✅ ajout Cloudinary
 
 // =======================
 // 🔹 Page d’accueil
