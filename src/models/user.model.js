@@ -1,10 +1,12 @@
-// src/models/user.model.js
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+// ==========================================
+// 🔹 Définition du schéma utilisateur
+// ==========================================
 const userSchema = new mongoose.Schema(
   {
-    // 🆔 Infos communes
+    // 🧩 Informations de base
     email: {
       type: String,
       required: true,
@@ -13,18 +15,21 @@ const userSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+
     password: {
       type: String,
       required: true,
       minlength: 6,
+      select: false, // 🔐 Empêche d’être renvoyé par défaut
     },
+
     role: {
       type: String,
-      enum: ["buyer", "seller", "delivery", "admin"],
+      enum: ["buyer", "seller", "delivery", "admin_general", "admin_seller", "admin_buyer", "admin_delivery"],
       default: "buyer",
     },
 
-    // 🔹 Infos Buyer
+    // 🔸 Informations communes
     fullName: { type: String, trim: true },
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
@@ -32,14 +37,14 @@ const userSchema = new mongoose.Schema(
     country: { type: String, trim: true },
     city: { type: String, trim: true },
 
-    // 🔹 Infos Seller
+    // 🔸 Informations vendeur
     ownerName: { type: String, trim: true },
     shopName: { type: String, trim: true, index: true },
     shopDescription: { type: String, trim: true },
     logoUrl: { type: String },
-    profileImageUrl: { type: String }, // optionnel (image profil vendeur)
+    profileImageUrl: { type: String },
 
-    // 🔹 Infos Delivery
+    // 🔸 Informations livreur
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },
     guarantee: { type: String, trim: true },
@@ -51,21 +56,24 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: function () {
-        return this.role === "delivery" ? "pending" : undefined;
+        return this.role === "delivery" ? "pending" : "approved";
       },
     },
 
-    // 🔹 Documents communs
+    // 🔸 Documents d’identité (Cloudinary)
     idCardFrontUrl: { type: String },
     idCardBackUrl: { type: String },
     selfieUrl: { type: String },
+
+    // 🔸 Avatar (pour buyers, admins)
+    avatarUrl: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
-// ======================================================
+// ==========================================
 // 🔐 Hash du mot de passe avant sauvegarde
-// ======================================================
+// ==========================================
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
@@ -78,16 +86,16 @@ userSchema.pre("save", async function (next) {
   }
 });
 
-// ======================================================
-// 🔐 Vérification du mot de passe
-// ======================================================
+// ==========================================
+// 🔐 Méthode pour comparer les mots de passe
+// ==========================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// ======================================================
-// 🔹 Getter public (pour renvoyer un profil sans mot de passe)
-// ======================================================
+// ==========================================
+// 🧩 Nettoyage de la sortie publique (profil utilisateur)
+// ==========================================
 userSchema.methods.toPublicJSON = function () {
   const user = this.toObject();
   delete user.password;
@@ -95,7 +103,18 @@ userSchema.methods.toPublicJSON = function () {
   return user;
 };
 
-// ======================================================
-// ✅ Export
-// ======================================================
+// ==========================================
+// 🔍 Index utile pour les recherches
+// ==========================================
+userSchema.index({
+  email: "text",
+  fullName: "text",
+  shopName: "text",
+  city: "text",
+  country: "text",
+});
+
+// ==========================================
+// ✅ Export du modèle
+// ==========================================
 module.exports = mongoose.model("User", userSchema);

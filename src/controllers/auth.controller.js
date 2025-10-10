@@ -1,19 +1,18 @@
-// src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const User = require("../models/User");
+const User = require("../models/user.model"); // ✅ Chemin corrigé
 const logger = require("../utils/logger");
-const authMiddleware = require("../middleware/auth.middleware"); // ✅ correction du chemin
+const authMiddleware = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
-// ----------------------------------------
+// ======================================================
 // 🔹 Génération du JWT
-// ----------------------------------------
+// ======================================================
 const signToken = (user) =>
   jwt.sign(
     {
-      id: user._id, // utilisé dans req.user.id
+      id: user._id,
       role: user.role,
       email: user.email,
     },
@@ -21,9 +20,9 @@ const signToken = (user) =>
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
-// ----------------------------------------
+// ======================================================
 // 🔹 REGISTER
-// ----------------------------------------
+// ======================================================
 router.post("/register", async (req, res) => {
   try {
     const { role, email, password } = req.body;
@@ -41,14 +40,24 @@ router.post("/register", async (req, res) => {
 
     // 🔸 Buyer
     if (role === "buyer") {
-      const { fullName, phone, address, zone, country, city } = req.body;
-      userData = { ...userData, fullName, phone, address, zone, country, city };
+      const { fullName, phone, address, zone, country, city, avatarUrl } = req.body;
+      userData = { ...userData, fullName, phone, address, zone, country, city, avatarUrl };
     }
 
     // 🔸 Seller
     else if (role === "seller") {
-      const { ownerName, shopName, phone, address, country } = req.body;
-      userData = { ...userData, ownerName, shopName, phone, address, country };
+      const { ownerName, shopName, phone, address, country, shopDescription, logoUrl } = req.body;
+      userData = {
+        ...userData,
+        ownerName,
+        shopName,
+        phone,
+        address,
+        country,
+        shopDescription,
+        logoUrl,
+        status: "approved",
+      };
     }
 
     // 🔸 Delivery
@@ -69,7 +78,6 @@ router.post("/register", async (req, res) => {
         selfieUrl,
       } = req.body;
 
-      // 🔹 Initialiser status à "pending"
       userData = {
         ...userData,
         fullName,
@@ -89,23 +97,21 @@ router.post("/register", async (req, res) => {
       };
     }
 
-    // ✅ Création de l’utilisateur
+    // 🔸 Par défaut : Buyer
+    else {
+      userData.role = "buyer";
+    }
+
+    // ✅ Sauvegarde en base
     const user = new User(userData);
     await user.save();
 
-    // ✅ Génération du token
+    // ✅ Token JWT
     const token = signToken(user);
 
     res.status(201).json({
       token,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        name: user.fullName || user.ownerName || "",
-        shopName: user.shopName || null,
-        status: user.status || null, // inclure le status si disponible
-      },
+      user: user.toPublicJSON(),
     });
   } catch (err) {
     logger.error("❌ Register error:", err);
@@ -113,9 +119,9 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// ----------------------------------------
+// ======================================================
 // 🔹 LOGIN
-// ----------------------------------------
+// ======================================================
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -124,7 +130,8 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Email et mot de passe requis" });
     }
 
-    const user = await User.findOne({ email });
+    // ⚠️ Sélection du champ password (sinon comparePassword échoue)
+    const user = await User.findOne({ email }).select("+password");
     if (!user) {
       return res.status(401).json({ message: "Identifiants invalides" });
     }
@@ -138,14 +145,7 @@ router.post("/login", async (req, res) => {
 
     res.json({
       token,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        name: user.fullName || user.ownerName || "",
-        shopName: user.shopName || null,
-        status: user.status || null,
-      },
+      user: user.toPublicJSON(),
     });
   } catch (err) {
     logger.error("❌ Login error:", err);
@@ -153,9 +153,9 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ----------------------------------------
+// ======================================================
 // 🔹 PROFILE (protégé)
-// ----------------------------------------
+// ======================================================
 router.get("/profile", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -163,10 +163,32 @@ router.get("/profile", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Utilisateur introuvable" });
     }
 
-    res.json({ user });
+    res.json({ user: user.toPublicJSON() });
   } catch (err) {
     logger.error("❌ Profile error:", err);
     res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ======================================================
+// 🔹 UPDATE PROFILE (protégé)
+// ======================================================
+router.put("/profile", authMiddleware, async (req, res) => {
+  try {
+    const updates = req.body;
+    const user = await User.findByIdAndUpdate(req.user.id, updates, {
+      new: true,
+      runValidators: true,
+    }).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json({ user: user.toPublicJSON() });
+  } catch (err) {
+    logger.error("❌ Update profile error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la mise à jour du profil" });
   }
 });
 

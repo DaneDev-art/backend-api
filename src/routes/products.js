@@ -3,7 +3,7 @@
 // ==========================================
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth.middleware");
+const { verifyToken, verifyAdmin } = require("../middleware/auth.middleware");
 const fileUpload = require("express-fileupload");
 const productController = require("../controllers/productController");
 
@@ -28,13 +28,23 @@ router.get("/", productController.getAllProducts);
 router.get("/seller/:sellerId", productController.getProductsBySeller);
 
 // ✅ Ajouter un produit (vendeur connecté)
-router.post("/add", auth, productController.addProduct);
+router.post("/add", verifyToken, productController.addProduct);
 
 // ✅ Modifier un produit (vendeur connecté)
-router.put("/update/:productId", auth, productController.updateProduct);
+router.put("/update/:productId", verifyToken, productController.updateProduct);
 
 // ✅ Supprimer un produit (vendeur connecté)
-router.delete("/remove/:productId", auth, productController.deleteProduct);
+router.delete("/remove/:productId", verifyToken, productController.deleteProduct);
+
+// ==========================================
+// 🔹 ROUTES ADMINISTRATEUR
+// ==========================================
+
+// ✅ Valider un produit (changer statut -> "validé")
+router.put("/validate/:productId", verifyToken, verifyAdmin, productController.validateProduct);
+
+// 🚫 Bloquer un produit (changer statut -> "bloqué")
+router.put("/block/:productId", verifyToken, verifyAdmin, productController.blockProduct);
 
 // ==========================================
 // ✅ Export du routeur

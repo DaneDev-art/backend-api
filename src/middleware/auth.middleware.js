@@ -6,7 +6,7 @@ const verifyToken = (req, res, next) => {
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     console.warn("⚠️ Middleware Auth: Token manquant ou mal formaté");
-    return res.status(401).json({ message: "Token manquant" });
+    return res.status(401).json({ message: "Token manquant ou invalide" });
   }
 
   const token = authHeader.split(" ")[1];
@@ -20,8 +20,11 @@ const verifyToken = (req, res, next) => {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
     // Stocke les informations utiles dans req.user
-    req.user = payload;
-    req.userId = payload.id || payload._id;
+    req.user = {
+      id: payload.id || payload._id,
+      role: payload.role,
+      email: payload.email,
+    };
     req.role = payload.role;
 
     next();
@@ -46,7 +49,19 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
+// 🔹 Middleware pour vérifier un rôle spécifique
+const verifyRole = (roles = []) => (req, res, next) => {
+  if (!req.role) {
+    return res.status(403).json({ message: "Rôle non défini" });
+  }
+  if (!roles.includes(req.role)) {
+    return res.status(403).json({ message: "Accès refusé pour ce rôle" });
+  }
+  next();
+};
+
 module.exports = {
   verifyToken,
   verifyAdmin,
+  verifyRole,
 };
