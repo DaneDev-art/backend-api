@@ -71,9 +71,13 @@ app.use(express.urlencoded({ extended: true }));
 // =======================
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/auth/delivery", require("./routes/deliveryAuthRoutes")); // ✅ Auth delivery spécifique
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/upload", require("./routes/uploadRoutes")); // ✅ ajout Cloudinary
+app.use("/api/deliveries", require("./routes/deliveries")); // ✅ Gestion des livreurs
+app.use("/api/messages", require("./routes/messageRoutes")); // ✅ Chat messages
+
 
 // =======================
 // 🔹 Page d’accueil

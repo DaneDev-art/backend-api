@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 
-module.exports = (req, res, next) => {
+// 🔹 Middleware pour vérifier que l'utilisateur est connecté
+const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -18,12 +19,34 @@ module.exports = (req, res, next) => {
 
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    // On peut stocker directement l'ID de l'utilisateur pour simplifier
+    // Stocke les informations utiles dans req.user
     req.user = payload;
-    req.userId = payload.id || payload._id; // selon ton JWT
+    req.userId = payload.id || payload._id;
+    req.role = payload.role;
+
     next();
   } catch (err) {
     console.error("❌ JWT invalide:", err.message);
     return res.status(401).json({ message: "Token invalide" });
   }
+};
+
+// 🔹 Middleware pour vérifier que l'utilisateur est un admin
+const verifyAdmin = (req, res, next) => {
+  const adminRoles = ["admin_general", "admin_seller", "admin_delivery", "admin_buyer"];
+
+  if (!req.role) {
+    return res.status(403).json({ message: "Rôle non défini" });
+  }
+
+  if (!adminRoles.includes(req.role)) {
+    return res.status(403).json({ message: "Accès réservé aux administrateurs" });
+  }
+
+  next();
+};
+
+module.exports = {
+  verifyToken,
+  verifyAdmin,
 };

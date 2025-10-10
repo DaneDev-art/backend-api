@@ -1,9 +1,14 @@
-// server.js à la racine
+// =======================
+// server.js
+// =======================
 require("dotenv").config();
-const app = require("./app"); // ton fichier app.js où sont définies les routes
+const app = require("./app");
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
+
+// ✅ Import du routeur des messages et fonction initSocket
+const { router: messageRoutes, initSocket } = require("./routes/messageRoutes");
 
 const PORT = process.env.PORT || 5000;
 
@@ -55,39 +60,102 @@ const connectDB = async (retries = 5, delay = 3000) => {
 
     const server = http.createServer(app);
 
-    // Socket.IO
+    // --- Configuration Socket.IO
     const io = new Server(server, {
       cors: {
-        origin: process.env.NODE_ENV === "production"
-          ? ["https://ton-frontend.com", "https://backend-api-m0tf.onrender.com"]
-          : "*",
-        methods: ["GET", "POST"]
-      }
+        origin:
+          process.env.NODE_ENV === "production"
+            ? [
+                "https://ton-frontend.com",
+                "https://backend-api-m0tf.onrender.com",
+              ]
+            : "*",
+        methods: ["GET", "POST", "PUT"],
+      },
     });
+
+    // 🔹 Injection du socket dans les routes messages
+    initSocket(io);
+
+    // --- Gestion des utilisateurs connectés
+    const onlineUsers = new Map();
 
     io.on("connection", (socket) => {
-      console.log("🔌 Nouvel utilisateur connecté :", socket.id);
+      console.log("🔌 Nouveau client connecté :", socket.id);
 
-      socket.on("joinRoom", (userId) => {
-        socket.join(userId);
-        console.log(`📥 Utilisateur ${userId} rejoint sa room`);
+      // 🟢 Identification de l’utilisateur
+      socket.on("join", (userId) => {
+        if (userId) {
+          socket.join(userId);
+          onlineUsers.set(userId, socket.id);
+          console.log(`👤 Utilisateur ${userId} a rejoint sa room`);
+        }
       });
 
+      // 🟡 Réception d’un message depuis le client Flutter
       socket.on("sendMessage", async (data) => {
-        const Message = require("./src/models/Message");
-        const message = await Message.create({
-          from: data.from,
-          to: data.to,
-          content: data.content,
-        });
-        io.to(data.to).emit("receiveMessage", message);
+        try {
+          const { from, to, content, productId } = data;
+          const Message = require("./models/Message");
+
+          // Créer le message en base
+          const newMessage = await Message.create({
+            from,
+            to,
+            content,
+            productId,
+            unread: [to],
+          });
+
+          // 🔴 Émission du message temps réel
+          io.to(to).emit("message:received", newMessage);
+          io.to(from).emit("message:sent", newMessage);
+        } catch (err) {
+          console.error("❌ Erreur sendMessage socket:", err.message);
+        }
       });
 
+      // 🔵 Lecture de message
+      socket.on("markAsRead", async ({ userId, otherUserId, productId }) => {
+        try {
+          const Message = require("./models/Message");
+          await Message.updateMany(
+            {
+              from: otherUserId,
+              to: userId,
+              productId: productId || null,
+              unread: userId,
+            },
+            { $pull: { unread: userId } }
+          );
+
+          // Notifier l'autre utilisateur
+          io.to(otherUserId).emit("message:read", {
+            readerId: userId,
+            otherUserId,
+            productId,
+          });
+        } catch (err) {
+          console.error("❌ Erreur markAsRead socket:", err.message);
+        }
+      });
+
+      // 🔴 Déconnexion
       socket.on("disconnect", () => {
-        console.log("❌ Utilisateur déconnecté :", socket.id);
+        for (let [userId, id] of onlineUsers.entries()) {
+          if (id === socket.id) {
+            onlineUsers.delete(userId);
+            console.log(`❌ Utilisateur ${userId} déconnecté`);
+            break;
+          }
+        }
       });
     });
 
+    // --- Intégration du routeur messages
+    app.use("/api/messages", messageRoutes);
+
+    // --- Démarrage du serveur HTTP + Socket.IO
     server.listen(PORT, () => {
       console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
