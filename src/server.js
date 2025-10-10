@@ -8,7 +8,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 // ✅ Import du routeur des messages et fonction initSocket
-const { router: messageRoutes, initSocket } = require("./routes/messageRoutes");
+const { router: messageRouter, initSocket } = require("./routes/messageRoutes");
 
 const PORT = process.env.PORT || 5000;
 
@@ -83,7 +83,6 @@ const connectDB = async (retries = 5, delay = 3000) => {
     io.on("connection", (socket) => {
       console.log("🔌 Nouveau client connecté :", socket.id);
 
-      // 🟢 Identification de l’utilisateur
       socket.on("join", (userId) => {
         if (userId) {
           socket.join(userId);
@@ -92,13 +91,11 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
-      // 🟡 Réception d’un message depuis le client Flutter
       socket.on("sendMessage", async (data) => {
         try {
           const { from, to, content, productId } = data;
           const Message = require("./models/Message");
 
-          // Créer le message en base
           const newMessage = await Message.create({
             from,
             to,
@@ -107,7 +104,6 @@ const connectDB = async (retries = 5, delay = 3000) => {
             unread: [to],
           });
 
-          // 🔴 Émission du message temps réel
           io.to(to).emit("message:received", newMessage);
           io.to(from).emit("message:sent", newMessage);
         } catch (err) {
@@ -115,32 +111,20 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
-      // 🔵 Lecture de message
       socket.on("markAsRead", async ({ userId, otherUserId, productId }) => {
         try {
           const Message = require("./models/Message");
           await Message.updateMany(
-            {
-              from: otherUserId,
-              to: userId,
-              productId: productId || null,
-              unread: userId,
-            },
+            { from: otherUserId, to: userId, productId: productId || null, unread: userId },
             { $pull: { unread: userId } }
           );
 
-          // Notifier l'autre utilisateur
-          io.to(otherUserId).emit("message:read", {
-            readerId: userId,
-            otherUserId,
-            productId,
-          });
+          io.to(otherUserId).emit("message:read", { readerId: userId, otherUserId, productId });
         } catch (err) {
           console.error("❌ Erreur markAsRead socket:", err.message);
         }
       });
 
-      // 🔴 Déconnexion
       socket.on("disconnect", () => {
         for (let [userId, id] of onlineUsers.entries()) {
           if (id === socket.id) {
@@ -152,8 +136,8 @@ const connectDB = async (retries = 5, delay = 3000) => {
       });
     });
 
-    // --- Intégration du routeur messages
-    app.use("/api/messages", messageRoutes);
+    // --- Intégration du routeur messages CORRECTEMENT
+    app.use("/api/messages", messageRouter);
 
     // --- Démarrage du serveur HTTP + Socket.IO
     server.listen(PORT, () => {

@@ -69,25 +69,17 @@ app.use(express.urlencoded({ extended: true }));
 // =======================
 // 🔹 Routes principales
 // =======================
-const routes = {
-  cinetpay: require("./routes/cinetpayRoutes"),
-  auth: require("./routes/authRoutes"),
-  deliveryAuth: require("./routes/deliveryAuthRoutes"),
-  products: require("./routes/products"),
-  cart: require("./routes/cart"),
-  upload: require("./routes/uploadRoutes"),
-  deliveries: require("./routes/deliveries"),
-  messages: require("./routes/messageRoutes"),
-};
+app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/auth/delivery", require("./routes/deliveryAuthRoutes")); // ✅ Auth delivery spécifique
+app.use("/api/products", require("./routes/products"));
+app.use("/api/cart", require("./routes/cart"));
+app.use("/api/upload", require("./routes/uploadRoutes")); // ✅ ajout Cloudinary
+app.use("/api/deliveries", require("./routes/deliveries")); // ✅ Gestion des livreurs
 
-// ✅ Vérification que chaque route exporte bien un Router
-for (const [key, router] of Object.entries(routes)) {
-  if (router && typeof router === "function") {
-    app.use(`/api/${key}`, router);
-  } else {
-    console.warn(`⚠️ Route "/api/${key}" non chargée car pas un Router valide`);
-  }
-}
+// 🔹 Route messages (sera injectée via server.js)
+const { router: messageRoutes } = require("./routes/messageRoutes");
+app.use("/api/messages", messageRoutes);
 
 // =======================
 // 🔹 Page d’accueil

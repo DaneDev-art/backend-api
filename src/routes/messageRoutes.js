@@ -140,7 +140,6 @@ router.put("/markAsRead", async (req, res) => {
 });
 
 // ============================================
-// ✅ Export du router avec initSocket attaché
+// ✅ Export du router et initSocket
 // ============================================
-router.initSocket = initSocket;
-module.exports = router;
+module.exports = { router, initSocket };
