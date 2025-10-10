@@ -5,7 +5,7 @@ const Product = require("../models/Product");
 const cloudinary = require("cloudinary").v2;
 
 // ==========================================
-// 🔹 Configuration Cloudinary
+// 🔹 Configuration Cloudinary (depuis .env)
 // ==========================================
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -19,13 +19,9 @@ cloudinary.config({
 exports.getAllProducts = async (req, res) => {
   try {
     const products = await Product.find()
-      .populate({
-        path: "seller",
-        select: "shopName country", // Récupère ces champs depuis le modèle User
-      })
+      .populate({ path: "seller", select: "shopName country" })
       .sort({ createdAt: -1 });
 
-    // Fusionner les infos du vendeur dans chaque produit
     const enrichedProducts = products.map((p) => ({
       ...p.toObject(),
       shopName: p.seller?.shopName || "Boutique inconnue",
@@ -35,7 +31,7 @@ exports.getAllProducts = async (req, res) => {
     res.status(200).json(enrichedProducts);
   } catch (err) {
     console.error("❌ getAllProducts error:", err);
-    res.status(500).json({ error: "Erreur serveur lors du chargement des produits." });
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -45,10 +41,8 @@ exports.getAllProducts = async (req, res) => {
 exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
-
     const products = await Product.find({ seller: sellerId })
-      .populate("seller", "shopName country")
-      .sort({ createdAt: -1 });
+      .populate("seller", "shopName country");
 
     const enrichedProducts = products.map((p) => ({
       ...p.toObject(),
@@ -59,7 +53,7 @@ exports.getProductsBySeller = async (req, res) => {
     res.status(200).json(enrichedProducts);
   } catch (err) {
     console.error("❌ getProductsBySeller error:", err);
-    res.status(500).json({ error: "Erreur serveur lors du chargement des produits du vendeur." });
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -68,25 +62,16 @@ exports.getProductsBySeller = async (req, res) => {
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
-    const sellerId = req.userId; // ✅ récupéré depuis le middleware auth
     const { name, description, price, category, images } = req.body;
+    const sellerId = req.user.id;
 
-    if (!sellerId) {
-      return res.status(401).json({ message: "Utilisateur non authentifié." });
-    }
-
-    if (!name || !price) {
-      return res.status(400).json({ message: "Nom et prix sont obligatoires." });
-    }
+    if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
+    if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
 
     let uploadedImages = [];
-
-    // 🔹 Upload Cloudinary si images fournies (base64 ou fichiers)
     if (images && images.length > 0) {
       for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, {
-          folder: "products",
-        });
+        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
         uploadedImages.push(uploadRes.secure_url);
       }
     }
@@ -98,13 +83,14 @@ exports.addProduct = async (req, res) => {
       category,
       images: uploadedImages,
       seller: sellerId,
+      status: "pending", // statut initial
     });
 
     await product.save();
     res.status(201).json(product);
   } catch (err) {
     console.error("❌ addProduct error:", err);
-    res.status(500).json({ error: "Erreur lors de l’ajout du produit." });
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -114,27 +100,21 @@ exports.addProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.userId;
+    const sellerId = req.user.id;
     const { name, description, price, category, images } = req.body;
 
     const product = await Product.findOne({ _id: productId, seller: sellerId });
-    if (!product) {
-      return res.status(404).json({ message: "Produit introuvable ou non autorisé." });
-    }
+    if (!product) return res.status(404).json({ message: "Produit introuvable" });
 
-    // 🔹 Mettre à jour les champs
     if (name) product.name = name;
     if (description) product.description = description;
     if (price) product.price = price;
     if (category) product.category = category;
 
-    // 🔹 Upload d’images si nouvelles
     if (images && images.length > 0) {
       const uploadedImages = [];
       for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, {
-          folder: "products",
-        });
+        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
         uploadedImages.push(uploadRes.secure_url);
       }
       product.images = uploadedImages;
@@ -144,7 +124,7 @@ exports.updateProduct = async (req, res) => {
     res.status(200).json(product);
   } catch (err) {
     console.error("❌ updateProduct error:", err);
-    res.status(500).json({ error: "Erreur lors de la mise à jour du produit." });
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -154,20 +134,50 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.userId;
+    const sellerId = req.user.id;
 
-    const deleted = await Product.findOneAndDelete({
-      _id: productId,
-      seller: sellerId,
-    });
+    const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
+    if (!deleted) return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
 
-    if (!deleted) {
-      return res.status(404).json({ message: "Produit non trouvé ou non autorisé." });
-    }
-
-    res.status(200).json({ message: "Produit supprimé avec succès." });
+    res.status(200).json({ message: "Produit supprimé avec succès" });
   } catch (err) {
     console.error("❌ deleteProduct error:", err);
-    res.status(500).json({ error: "Erreur lors de la suppression du produit." });
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ==========================================
+// ✅ Valider un produit (admin)
+// ==========================================
+exports.validateProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+
+    product.status = "validé";
+    await product.save();
+    res.status(200).json({ message: "Produit validé avec succès", product });
+  } catch (err) {
+    console.error("❌ validateProduct error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ==========================================
+// 🚫 Bloquer un produit (admin)
+// ==========================================
+exports.blockProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+
+    product.status = "bloqué";
+    await product.save();
+    res.status(200).json({ message: "Produit bloqué avec succès", product });
+  } catch (err) {
+    console.error("❌ blockProduct error:", err);
+    res.status(500).json({ error: err.message });
   }
 };

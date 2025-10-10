@@ -41,10 +41,20 @@ router.delete("/remove/:productId", verifyToken, productController.deleteProduct
 // ==========================================
 
 // ✅ Valider un produit (changer statut -> "validé")
-router.put("/validate/:productId", verifyToken, verifyAdmin, productController.validateProduct);
+router.put(
+  "/validate/:productId",
+  verifyToken,
+  verifyAdmin,
+  productController.validateProduct || ((req, res) => res.status(501).json({ message: "Not implemented" }))
+);
 
 // 🚫 Bloquer un produit (changer statut -> "bloqué")
-router.put("/block/:productId", verifyToken, verifyAdmin, productController.blockProduct);
+router.put(
+  "/block/:productId",
+  verifyToken,
+  verifyAdmin,
+  productController.blockProduct || ((req, res) => res.status(501).json({ message: "Not implemented" }))
+);
 
 // ==========================================
 // ✅ Export du routeur
