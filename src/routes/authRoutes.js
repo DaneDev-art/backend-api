@@ -117,7 +117,8 @@ router.post(
     try {
       const { email, password } = req.body;
 
-      const user = await User.findOne({ email });
+      // ✅ Inclure explicitement le champ password
+      const user = await User.findOne({ email }).select("+password");
       if (!user) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
 
       const isMatch = await user.comparePassword(password);
@@ -132,7 +133,7 @@ router.post(
           email: user.email,
           name: user.fullName || user.ownerName || "",
           role: user.role,
-          status: user.status || null, // ✅ inclut status pour delivery
+          status: user.status || null,
         },
       });
     } catch (error) {
