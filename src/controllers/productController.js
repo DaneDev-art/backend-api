@@ -23,9 +23,18 @@ exports.getAllProducts = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const enrichedProducts = products.map((p) => ({
-      ...p.toObject(),
+      _id: p._id,
+      name: p.name,
+      description: p.description,
+      price: p.price,
+      stock: p.stock,
+      images: p.images,
+      category: p.category,
+      status: p.status,
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
     }));
 
     res.status(200).json(enrichedProducts);
@@ -42,12 +51,22 @@ exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
     const products = await Product.find({ seller: sellerId })
-      .populate("seller", "shopName country");
+      .populate("seller", "shopName country")
+      .sort({ createdAt: -1 });
 
     const enrichedProducts = products.map((p) => ({
-      ...p.toObject(),
+      _id: p._id,
+      name: p.name,
+      description: p.description,
+      price: p.price,
+      stock: p.stock,
+      images: p.images,
+      category: p.category,
+      status: p.status,
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
     }));
 
     res.status(200).json(enrichedProducts);
@@ -83,7 +102,7 @@ exports.addProduct = async (req, res) => {
       category,
       images: uploadedImages,
       seller: sellerId,
-      status: "pending", // statut initial
+      status: "pending",
     });
 
     await product.save();
