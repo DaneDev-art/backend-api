@@ -60,7 +60,18 @@ router.get("/conversations/:userId", async (req, res) => {
     const convMap = new Map();
 
     messages.forEach((msg) => {
+      // 🔒 Protection : ignorer les messages invalides
+      if (!msg.from || !msg.to) {
+        console.warn("⚠️ Message invalide sans from/to :", msg._id);
+        return;
+      }
+
       const otherUserId = msg.from === userId ? msg.to : msg.from;
+      if (!otherUserId) {
+        console.warn("⚠️ Conversation sans otherUserId :", msg._id);
+        return;
+      }
+
       const key = `${otherUserId}_${msg.productId || "no_product"}`;
 
       if (!convMap.has(key)) {
