@@ -2,7 +2,7 @@
 // src/controllers/productController.js
 // ==========================================
 const Product = require("../models/Product");
-const User = require("../models/User");
+const User = require("../models/user.model");
 const cloudinary = require("cloudinary").v2;
 
 // ==========================================
