@@ -2,6 +2,7 @@
 // src/controllers/productController.js
 // ==========================================
 const Product = require("../models/Product");
+const User = require("../models/User");
 const cloudinary = require("cloudinary").v2;
 
 // ==========================================
@@ -19,7 +20,10 @@ cloudinary.config({
 exports.getAllProducts = async (req, res) => {
   try {
     const products = await Product.find()
-      .populate({ path: "seller", select: "shopName country" })
+      .populate({
+        path: "seller",
+        select: "shopName country fullName avatarUrl",
+      })
       .sort({ createdAt: -1 });
 
     const enrichedProducts = products.map((p) => ({
@@ -33,6 +37,7 @@ exports.getAllProducts = async (req, res) => {
       status: p.status,
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
+      sellerAvatar: p.seller?.avatarUrl || "",
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }));
@@ -50,8 +55,12 @@ exports.getAllProducts = async (req, res) => {
 exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
+
     const products = await Product.find({ seller: sellerId })
-      .populate("seller", "shopName country")
+      .populate({
+        path: "seller",
+        select: "shopName country fullName avatarUrl",
+      })
       .sort({ createdAt: -1 });
 
     const enrichedProducts = products.map((p) => ({
@@ -65,6 +74,7 @@ exports.getProductsBySeller = async (req, res) => {
       status: p.status,
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
+      sellerAvatar: p.seller?.avatarUrl || "",
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
     }));
@@ -87,6 +97,11 @@ exports.addProduct = async (req, res) => {
     if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
     if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
 
+    // 🔹 Récupérer les infos du vendeur
+    const seller = await User.findById(sellerId).select("shopName country");
+    if (!seller) return res.status(404).json({ message: "Vendeur introuvable" });
+
+    // 🔹 Upload Cloudinary
     let uploadedImages = [];
     if (images && images.length > 0) {
       for (const img of images) {
@@ -95,6 +110,7 @@ exports.addProduct = async (req, res) => {
       }
     }
 
+    // 🔹 Créer le produit
     const product = new Product({
       name,
       description,
@@ -102,7 +118,9 @@ exports.addProduct = async (req, res) => {
       category,
       images: uploadedImages,
       seller: sellerId,
-      status: "pending",
+      shopName: seller.shopName || "",
+      country: seller.country || "",
+      status: "actif",
     });
 
     await product.save();
