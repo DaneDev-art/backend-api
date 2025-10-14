@@ -47,8 +47,8 @@ router.post("/", async (req, res) => {
 
 // ============================================
 // 🔹 Récupérer toutes les conversations d’un user
-// ============================================
 // ⚠️ Doit venir avant /:user1/:user2
+// ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;

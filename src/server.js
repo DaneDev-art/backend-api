@@ -1,29 +1,23 @@
-// =======================
-// server.js
-// =======================
 require("dotenv").config();
 const app = require("./app");
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
 
-// ✅ Import du routeur des messages et fonction initSocket
+// ✅ Import du routeur messages et fonction initSocket
 const { router: messageRouter, initSocket } = require("./routes/messageRoutes");
 
 const PORT = process.env.PORT || 5000;
 
-// --- Déterminer l'URI Mongo
+// --- URI Mongo
 const getMongoUri = () => {
-  if (process.env.NODE_ENV === "production") {
-    return process.env.MONGO_ATLAS_URI;
-  }
+  if (process.env.NODE_ENV === "production") return process.env.MONGO_ATLAS_URI;
   return process.env.MONGO_LOCAL_URI || process.env.MONGO_ATLAS_URI;
 };
 
-// --- Fonction pour connecter à MongoDB avec retries
+// --- Connexion Mongo avec retry
 const connectDB = async (retries = 5, delay = 3000) => {
   const mongoUri = getMongoUri();
-
   if (!mongoUri) {
     console.error("❌ MongoDB URI non défini !");
     process.exit(1);
@@ -39,50 +33,43 @@ const connectDB = async (retries = 5, delay = 3000) => {
       console.log(`✅ MongoDB connecté : ${conn.connection.host}/${conn.connection.name}`);
       return conn;
     } catch (err) {
-      console.error("❌ Erreur de connexion MongoDB:", err.message);
+      console.error("❌ Erreur MongoDB:", err.message);
       retries -= 1;
-
-      if (!retries) {
-        console.error("⛔ Impossible de se connecter à MongoDB, arrêt du serveur.");
-        process.exit(1);
-      }
-
+      if (!retries) process.exit(1);
       console.warn(`🔄 Nouvelle tentative dans ${delay / 1000}s...`);
       await new Promise((res) => setTimeout(res, delay));
     }
   }
 };
 
-// --- Démarrage serveur après connexion à MongoDB
+// --- Démarrage serveur
 (async () => {
   try {
     await connectDB();
 
     const server = http.createServer(app);
 
-    // --- Configuration Socket.IO
+    // --- Socket.IO
     const io = new Server(server, {
       cors: {
         origin:
           process.env.NODE_ENV === "production"
-            ? [
-                "https://ton-frontend.com",
-                "https://backend-api-m0tf.onrender.com",
-              ]
+            ? ["https://ton-frontend.com", "https://backend-api-m0tf.onrender.com"]
             : "*",
         methods: ["GET", "POST", "PUT"],
       },
     });
 
-    // 🔹 Injection du socket dans les routes messages
+    // Injection du socket dans les routes
     initSocket(io);
 
-    // --- Gestion des utilisateurs connectés
+    // --- Utilisateurs en ligne
     const onlineUsers = new Map();
 
     io.on("connection", (socket) => {
-      console.log("🔌 Nouveau client connecté :", socket.id);
+      console.log("🔌 Client connecté :", socket.id);
 
+      // 🔹 Rejoindre room utilisateur
       socket.on("join", (userId) => {
         if (userId) {
           socket.join(userId);
@@ -91,26 +78,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
-      socket.on("sendMessage", async (data) => {
-        try {
-          const { from, to, content, productId } = data;
-          const Message = require("./models/Message");
-
-          const newMessage = await Message.create({
-            from,
-            to,
-            content,
-            productId,
-            unread: [to],
-          });
-
-          io.to(to).emit("message:received", newMessage);
-          io.to(from).emit("message:sent", newMessage);
-        } catch (err) {
-          console.error("❌ Erreur sendMessage socket:", err.message);
-        }
-      });
-
+      // 🔹 Marquer les messages comme lus via socket
       socket.on("markAsRead", async ({ userId, otherUserId, productId }) => {
         try {
           const Message = require("./models/Message");
@@ -125,6 +93,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
+      // 🔹 Déconnexion
       socket.on("disconnect", () => {
         for (let [userId, id] of onlineUsers.entries()) {
           if (id === socket.id) {
@@ -136,10 +105,10 @@ const connectDB = async (retries = 5, delay = 3000) => {
       });
     });
 
-    // --- Intégration du routeur messages CORRECTEMENT
+    // --- Routes messages
     app.use("/api/messages", messageRouter);
 
-    // --- Démarrage du serveur HTTP + Socket.IO
+    // --- Démarrage serveur HTTP
     server.listen(PORT, () => {
       console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
