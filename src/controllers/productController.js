@@ -35,6 +35,7 @@ exports.getAllProducts = async (req, res) => {
       images: p.images,
       category: p.category,
       status: p.status,
+      sellerId: p.seller?._id?.toString() || "",
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
       sellerAvatar: p.seller?.avatarUrl || "",
@@ -72,6 +73,7 @@ exports.getProductsBySeller = async (req, res) => {
       images: p.images,
       category: p.category,
       status: p.status,
+      sellerId: p.seller?._id?.toString() || "",
       shopName: p.seller?.shopName || "Boutique inconnue",
       country: p.seller?.country || "Pays inconnu",
       sellerAvatar: p.seller?.avatarUrl || "",
@@ -98,7 +100,7 @@ exports.addProduct = async (req, res) => {
     if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
 
     // 🔹 Récupérer les infos du vendeur
-    const seller = await User.findById(sellerId).select("shopName country");
+    const seller = await User.findById(sellerId).select("shopName country fullName avatarUrl");
     if (!seller) return res.status(404).json({ message: "Vendeur introuvable" });
 
     // 🔹 Upload Cloudinary
@@ -124,7 +126,28 @@ exports.addProduct = async (req, res) => {
     });
 
     await product.save();
-    res.status(201).json(product);
+    await product.populate({
+      path: "seller",
+      select: "shopName country fullName avatarUrl",
+    });
+
+    // 🔹 Réponse enrichie prête pour Flutter
+    res.status(201).json({
+      _id: product._id,
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      stock: product.stock,
+      images: product.images,
+      category: product.category,
+      status: product.status,
+      sellerId: product.seller?._id?.toString() || "",
+      shopName: product.seller?.shopName || "Boutique inconnue",
+      country: product.seller?.country || "Pays inconnu",
+      sellerAvatar: product.seller?.avatarUrl || "",
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+    });
   } catch (err) {
     console.error("❌ addProduct error:", err);
     res.status(500).json({ error: err.message });
