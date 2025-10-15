@@ -1,5 +1,5 @@
 // ===============================
-// routes/messageRoutes.js
+// routes/messageRoutes.js (Version Debug/Améliorée)
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -20,8 +20,11 @@ router.post("/", async (req, res) => {
   try {
     const { senderId, receiverId, message, productId } = req.body;
 
-    if (!senderId || !receiverId || !message || typeof message !== "string") {
-      return res.status(400).json({ error: "Champs manquants ou invalides" });
+    // Vérifications détaillées
+    if (!senderId) return res.status(400).json({ error: "Champs manquant: senderId" });
+    if (!receiverId) return res.status(400).json({ error: "Champs manquant: receiverId" });
+    if (!message || typeof message !== "string" || message.trim() === "") {
+      return res.status(400).json({ error: "Champs manquant ou invalide: message" });
     }
 
     const newMessage = await Message.create({
@@ -32,26 +35,29 @@ router.post("/", async (req, res) => {
       unread: [receiverId],
     });
 
-    // 🔴 Émettre l’événement Socket.IO (si socket actif)
+    // 🔴 Émettre l’événement Socket.IO
     if (io) {
       io.to(receiverId).emit("message:received", newMessage);
       io.to(senderId).emit("message:sent", newMessage);
     }
 
+    console.log(`✅ Nouveau message créé: ${newMessage._id} de ${senderId} à ${receiverId}`);
     res.status(201).json(newMessage);
+
   } catch (err) {
-    console.error("❌ Erreur POST /messages :", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erreur POST /messages :", err);
+    res.status(500).json({ error: "Erreur serveur lors de l'envoi du message", details: err.message });
   }
 });
 
 // ============================================
 // 🔹 Récupérer toutes les conversations d’un user
-// ⚠️ Doit venir avant /:user1/:user2
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+
+    if (!userId) return res.status(400).json({ error: "Champs manquant: userId" });
 
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
@@ -61,7 +67,6 @@ router.get("/conversations/:userId", async (req, res) => {
 
     messages.forEach((msg) => {
       if (!msg.from || !msg.to) return;
-
       const otherUserId = msg.from === userId ? msg.to : msg.from;
       const key = `${otherUserId}_${msg.productId || "no_product"}`;
 
@@ -78,8 +83,8 @@ router.get("/conversations/:userId", async (req, res) => {
 
     res.json(Array.from(convMap.values()));
   } catch (err) {
-    console.error("❌ Erreur GET /conversations :", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erreur GET /conversations :", err);
+    res.status(500).json({ error: "Erreur serveur lors de la récupération des conversations", details: err.message });
   }
 });
 
@@ -90,6 +95,8 @@ router.get("/:user1/:user2", async (req, res) => {
   try {
     const { user1, user2 } = req.params;
 
+    if (!user1 || !user2) return res.status(400).json({ error: "Champs manquants: user1 et user2" });
+
     const messages = await Message.find({
       $or: [
         { from: user1, to: user2 },
@@ -99,8 +106,8 @@ router.get("/:user1/:user2", async (req, res) => {
 
     res.json(messages);
   } catch (err) {
-    console.error("❌ Erreur GET /messages :", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erreur GET /messages :", err);
+    res.status(500).json({ error: "Erreur serveur lors de la récupération des messages", details: err.message });
   }
 });
 
@@ -111,32 +118,24 @@ router.put("/markAsRead", async (req, res) => {
   try {
     const { userId, otherUserId, productId } = req.body;
 
-    if (!userId || !otherUserId) {
-      return res.status(400).json({ error: "Champs manquants" });
-    }
+    if (!userId) return res.status(400).json({ error: "Champs manquant: userId" });
+    if (!otherUserId) return res.status(400).json({ error: "Champs manquant: otherUserId" });
 
-    await Message.updateMany(
-      {
-        from: otherUserId,
-        to: userId,
-        productId: productId || null,
-        unread: userId,
-      },
+    const result = await Message.updateMany(
+      { from: otherUserId, to: userId, productId: productId || null, unread: userId },
       { $pull: { unread: userId } }
     );
 
     if (io) {
-      io.to(otherUserId).emit("message:read", {
-        readerId: userId,
-        otherUserId,
-        productId,
-      });
+      io.to(otherUserId).emit("message:read", { readerId: userId, otherUserId, productId });
     }
 
-    res.json({ success: true });
+    console.log(`✅ Messages marqués comme lus: ${result.modifiedCount}`);
+    res.json({ success: true, modifiedCount: result.modifiedCount });
+
   } catch (err) {
-    console.error("❌ Erreur PUT /markAsRead :", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Erreur PUT /markAsRead :", err);
+    res.status(500).json({ error: "Erreur serveur lors du marquage des messages", details: err.message });
   }
 });
 
