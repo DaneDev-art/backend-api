@@ -20,15 +20,15 @@ router.post("/", async (req, res) => {
   try {
     const { senderId, receiverId, message, productId } = req.body;
 
-    if (!senderId || !receiverId || !message) {
-      return res.status(400).json({ error: "Champs manquants" });
+    if (!senderId || !receiverId || !message || typeof message !== "string") {
+      return res.status(400).json({ error: "Champs manquants ou invalides" });
     }
 
     const newMessage = await Message.create({
       from: senderId,
       to: receiverId,
       content: message,
-      productId,
+      productId: productId && productId !== "" ? productId : null,
       unread: [receiverId],
     });
 
@@ -60,18 +60,9 @@ router.get("/conversations/:userId", async (req, res) => {
     const convMap = new Map();
 
     messages.forEach((msg) => {
-      // 🔒 Protection : ignorer les messages invalides
-      if (!msg.from || !msg.to) {
-        console.warn("⚠️ Message invalide sans from/to :", msg._id);
-        return;
-      }
+      if (!msg.from || !msg.to) return;
 
       const otherUserId = msg.from === userId ? msg.to : msg.from;
-      if (!otherUserId) {
-        console.warn("⚠️ Conversation sans otherUserId :", msg._id);
-        return;
-      }
-
       const key = `${otherUserId}_${msg.productId || "no_product"}`;
 
       if (!convMap.has(key)) {
@@ -134,7 +125,6 @@ router.put("/markAsRead", async (req, res) => {
       { $pull: { unread: userId } }
     );
 
-    // 🔴 Émission socket (notification de lecture)
     if (io) {
       io.to(otherUserId).emit("message:read", {
         readerId: userId,
