@@ -1,5 +1,5 @@
 // controllers/cinetpayController.js
-const CinetPayService = require("../services/cinetpayService");
+const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 const PayoutTransaction = require("../models/PayoutTransaction");
