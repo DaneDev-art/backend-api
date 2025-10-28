@@ -44,6 +44,13 @@ const userSchema = new mongoose.Schema(
     logoUrl: { type: String },
     profileImageUrl: { type: String },
 
+    // 🔸 SOLDES & CINETPAY
+    cinetpayId: { type: String },
+    lockedBalance: { type: Number, default: 0 },
+    availableBalance: { type: Number, default: 0 },
+    cinetpayContactAdded: { type: Boolean, default: false },
+    cinetpayContactMeta: { type: Object, default: {} },
+
     // 🔸 Informations livreur
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },

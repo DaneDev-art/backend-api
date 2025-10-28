@@ -1,45 +1,52 @@
-// src/routes/cinetpayRoutes.js
+// =============================================
+// routes/cinetpayRoutes.js ✅ Version finale
+// =============================================
 const express = require("express");
 const router = express.Router();
+const CinetpayController = require("../controllers/cinetpayController");
 
-/**
- * Exemple d’endpoint pour initier un paiement
- * (Ici juste un mock — tu pourras brancher l’API CinetPay réelle plus tard)
- */
-router.post("/pay", (req, res) => {
-  const { amount, currency, description } = req.body;
+// ============================
+// 📌 PAYIN (Client → Marketplace → Vendeur)
+// ============================
 
-  if (!amount || !currency) {
-    return res.status(400).json({ message: "amount et currency sont requis" });
-  }
+// Créer un paiement PayIn
+router.post("/payin/create", CinetpayController.createPayIn);
 
-  // Simuler une réponse CinetPay
-  const fakeTransactionId = `txn_${Date.now()}`;
-  res.json({
-    message: "Paiement initié ✅",
-    transaction_id: fakeTransactionId,
-    amount,
-    currency,
-    description: description || "Achat",
-  });
-});
+// Vérifier / confirmer un paiement PayIn
+router.post("/payin/verify", CinetpayController.verifyPayIn);
 
-/**
- * Endpoint de notification (callback CinetPay)
- * → CinetPay appellera ce endpoint pour confirmer le paiement
- */
-router.post("/notify", (req, res) => {
-  console.log("📩 Notification CinetPay reçue :", req.body);
+// ============================
+// 📌 PAYOUT (Vendeur → Banque / Mobile Money)
+// ============================
 
-  // Répondre immédiatement (CinetPay exige une réponse HTTP 200)
-  res.json({ message: "Notification reçue ✅" });
-});
+// Créer un payout pour un vendeur
+router.post("/payout/create", CinetpayController.createPayOut);
 
-/**
- * Endpoint de test pour vérifier que la route marche
- */
+// Vérifier le statut d’un payout
+router.post("/payout/verify", CinetpayController.verifyPayOut);
+
+// ============================
+// 📌 SELLER (Enregistrement dans CinetPay pour payout)
+// ============================
+
+// Enregistrer un vendeur dans CinetPay (Wallet payout)
+router.post("/seller/register", CinetpayController.registerSeller);
+
+// ============================
+// 📌 WEBHOOK (Callback automatique de CinetPay)
+// ============================
+
+// Un seul webhook pour PayIn et PayOut — CinetPay distingue par le type d’opération
+router.post("/webhook", CinetpayController.handleWebhook);
+
+// ============================
+// 📌 Test route
+// ============================
 router.get("/test", (req, res) => {
-  res.send("✅ Route CinetPay fonctionnelle !");
+  res.status(200).json({
+    success: true,
+    message: "✅ Route CinetPay fonctionnelle !",
+  });
 });
 
 module.exports = router;

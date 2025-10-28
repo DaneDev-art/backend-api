@@ -15,15 +15,20 @@ const app = express();
 // =======================
 // 🔐 Sécurité & logs
 // =======================
-app.set("trust proxy", 1); // Corrige express-rate-limit derrière Render
-app.use(helmet());
+app.set("trust proxy", 1); // Utile pour Render ou nginx
+app.use(helmet({ crossOriginResourcePolicy: false })); // Permet affichage d’images externes
 app.use(morgan("dev"));
 
-// Limiteur de requêtes
+// 🔒 Limiteur de requêtes
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 100,
-  message: "Trop de requêtes depuis cette IP, réessayez plus tard.",
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: "Trop de requêtes depuis cette IP, réessayez plus tard.",
+  },
 });
 app.use(limiter);
 
@@ -38,7 +43,10 @@ const allowedOriginsProd = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // Postman / mobile apps
+      // ✅ Autoriser Postman, mobile ou server-side
+      if (!origin) return callback(null, true);
+
+      // ✅ Autoriser localhost pour dev
       if (
         origin.startsWith("http://localhost:") ||
         origin.startsWith("chrome-extension://")
@@ -46,11 +54,18 @@ app.use(
         console.log("🔍 [CORS LOCAL DEV] Autorisé :", origin);
         return callback(null, true);
       }
+
+      // ✅ Vérification production
       if (process.env.NODE_ENV === "production") {
-        if (allowedOriginsProd.includes(origin)) return callback(null, true);
+        if (allowedOriginsProd.includes(origin)) {
+          console.log("✅ [CORS PROD] Origine autorisée :", origin);
+          return callback(null, true);
+        }
         console.warn("❌ [CORS PROD] Origine refusée :", origin);
-        return callback(new Error("Non autorisé par CORS en production"));
+        return callback(new Error("Origine non autorisée par CORS"));
       }
+
+      // ✅ Environnement dev
       console.log("🔍 [CORS DEV] Autorisé :", origin);
       callback(null, true);
     },
@@ -69,15 +84,22 @@ app.use(express.urlencoded({ extended: true }));
 // =======================
 // 🔹 Routes principales
 // =======================
-app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
+
+// ✅ Authentification utilisateurs (clients, livreurs, vendeurs)
 app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/auth/delivery", require("./routes/deliveryAuthRoutes")); // ✅ Auth delivery spécifique
+app.use("/api/auth/delivery", require("./routes/deliveryAuthRoutes"));
+app.use("/api/sellers", require("./routes/seller.routes")); // Gestion des vendeurs
+
+// ✅ Paiement CinetPay
+app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
+
+// ✅ Autres fonctionnalités Marketplace
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
-app.use("/api/upload", require("./routes/uploadRoutes")); // ✅ ajout Cloudinary
-app.use("/api/deliveries", require("./routes/deliveries")); // ✅ Gestion des livreurs
+app.use("/api/upload", require("./routes/uploadRoutes")); // Cloudinary
+app.use("/api/deliveries", require("./routes/deliveries"));
 
-// 🔹 Route messages (sera injectée via server.js)
+// ✅ Messages (Socket.IO)
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
@@ -111,10 +133,14 @@ app.get("/health", (req, res) => {
 app.use((err, req, res, next) => {
   if (err.message && err.message.includes("CORS")) {
     console.error("❌ [CORS ERROR]", err.message);
-    return res.status(403).json({ error: err.message });
+    return res.status(403).json({ success: false, error: err.message });
   }
+
   console.error("❌ [SERVER ERROR]", err);
-  res.status(500).json({ error: "Une erreur est survenue sur le serveur" });
+  res.status(500).json({
+    success: false,
+    error: "Une erreur interne est survenue sur le serveur",
+  });
 });
 
 // =======================

@@ -4,13 +4,10 @@ const path = require("path");
 // Pour charger les variables d'environnement
 require("dotenv").config();
 
-// Importer ton serveur Express depuis src/server.js
-const app = require(path.join(__dirname, "src", "server"));
+// Importer ton serveur HTTP complet (Express + Socket.IO) depuis src/server.js
+require(path.join(__dirname, "src", "server"));
 
-// Définir le port depuis l'environnement ou 5000 par défaut
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`✅ Backend + Socket.IO démarré sur le port ${PORT}`);
-  console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
-});
+// --- Infos de log pour confirmation que le fichier racine a été exécuté
+console.log("🚀 server.js racine chargé");
+console.log(`🌍 Environnement: ${process.env.NODE_ENV || "development"}`);
+console.log(`📦 Port configuré dans .env: ${process.env.PORT || 5000}`);
