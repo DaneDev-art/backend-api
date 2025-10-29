@@ -3,6 +3,9 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 
+// 🔹 Models
+const Product = require("../models/Product");
+
 // 🔹 Schéma MongoDB pour le panier
 const cartSchema = new mongoose.Schema({
   userId: { type: String, required: true },
@@ -36,21 +39,37 @@ router.get("/:userId", async (req, res) => {
 // Ajouter un produit au panier
 // POST /api/cart/:userId/add
 router.post("/:userId/add", async (req, res) => {
-  const { productId, name, price, quantity = 1, shopName, image } = req.body;
+  const { productId, quantity = 1 } = req.body;
 
   if (!productId) return res.status(400).json({ error: "productId requis" });
 
   try {
+    // 🔹 Récupérer ou créer le panier
     let cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) {
-      cart = new Cart({ userId: req.params.userId, items: [] });
-    }
+    if (!cart) cart = new Cart({ userId: req.params.userId, items: [] });
 
+    // 🔹 Vérifier si le produit existe déjà dans le panier
     const index = cart.items.findIndex((item) => item.productId === productId);
+
+    // 🔹 Récupérer les infos produit depuis la collection Product
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ error: "Produit introuvable" });
+
+    const productData = {
+      productId,
+      name: product.name,
+      price: product.price,
+      quantity,
+      shopName: product.shopName || "",
+      image: product.images.length > 0 ? product.images[0] : "",
+    };
+
     if (index >= 0) {
+      // 🔹 Incrémenter la quantité si le produit existe déjà
       cart.items[index].quantity += quantity;
     } else {
-      cart.items.push({ productId, name, price, quantity, shopName, image });
+      // 🔹 Ajouter le produit au panier
+      cart.items.push(productData);
     }
 
     await cart.save();
