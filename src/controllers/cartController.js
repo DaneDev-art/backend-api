@@ -1,5 +1,5 @@
 // ==========================================
-// src/controllers/cartController.js
+// src/controllers/cartController.js ✅ Version améliorée
 // ==========================================
 const User = require("../models/user.model");
 const Product = require("../models/Product");
@@ -25,6 +25,7 @@ exports.getCart = async (req, res) => {
       return res.status(200).json([]);
     }
 
+    // 🔹 Structure propre avec infos vendeur
     const cartWithDetails = user.cart.map((item) => {
       const product = item.product;
       return {
@@ -34,6 +35,7 @@ exports.getCart = async (req, res) => {
         images: product?.images || [],
         quantity: item.quantity,
         shopName: product?.shopName || "",
+        sellerId: product?.seller?._id?.toString?.() || product?.seller?.toString?.() || "",
       };
     });
 
@@ -52,12 +54,24 @@ exports.addToCart = async (req, res) => {
     const { userId } = req.params;
     const { productId, quantity } = req.body;
 
+    // 🔹 Validation de base
+    if (!productId || !quantity) {
+      return res.status(400).json({ message: "Champs manquants : productId et quantity requis" });
+    }
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
+    // 🔹 Récupération automatique du produit et du vendeur
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: "Produit introuvable" });
 
+    const sellerId = product.seller;
+    if (!sellerId) {
+      return res.status(400).json({ message: "Produit sans vendeur associé dans la base" });
+    }
+
+    // 🔹 Vérifie si le produit existe déjà dans le panier
     const existingItem = user.cart.find(
       (item) => item.product.toString() === productId
     );
@@ -65,11 +79,16 @@ exports.addToCart = async (req, res) => {
     if (existingItem) {
       existingItem.quantity += quantity || 1;
     } else {
-      user.cart.push({ product: productId, quantity: quantity || 1 });
+      // 🔹 Ajout automatique du sellerId dans le panier
+      user.cart.push({
+        product: productId,
+        quantity: quantity || 1,
+        seller: sellerId, // 🧠 ajouté automatiquement
+      });
     }
 
     await user.save();
-    res.status(201).json({ message: "Produit ajouté au panier" });
+    res.status(201).json({ message: "Produit ajouté au panier avec succès" });
   } catch (err) {
     console.error("❌ addToCart error:", err);
     res.status(500).json({ error: err.message });
