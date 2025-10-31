@@ -1,6 +1,9 @@
-// controllers/cinetpayController.js
+// =============================================
+// controllers/cinetpayController.js ✅ Version corrigée
+// =============================================
 const CinetPayService = require("../services/CinetPayService");
-const Seller = require("../models/Seller");
+const Seller = require("../models/Seller"); // Ancienne collection (compatibilité)
+const User = require("../models/User"); // Nouvelle collection principale
 const PayinTransaction = require("../models/PayinTransaction");
 const PayoutTransaction = require("../models/PayoutTransaction");
 
@@ -36,17 +39,17 @@ module.exports = {
         });
       }
 
-      // Vérifier le vendeur
-      const seller = await Seller.findById(sellerId);
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
+      // ✅ Recherche du vendeur dans "Seller" ou "User"
+      let seller = await Seller.findById(sellerId);
+      if (!seller) seller = await User.findById(sellerId);
+
+      if (!seller || (seller.role && seller.role !== "seller")) {
+        return res.status(404).json({ error: "Vendeur introuvable ou invalide" });
       }
 
       // URL de retour et notification (Render par défaut)
-      const safeReturnUrl =
-        returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-      const safeNotifyUrl =
-        notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      const safeReturnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      const safeNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
       console.log("🔗 URLs:", { safeReturnUrl, safeNotifyUrl });
 
@@ -72,7 +75,7 @@ module.exports = {
       seller.balance_locked = (seller.balance_locked || 0) + netAmount;
       await seller.save();
 
-      // Sauvegarder la transaction en base
+      // Sauvegarde transaction
       await PayinTransaction.create({
         transactionId: result.transaction_id,
         sellerId,
@@ -84,7 +87,6 @@ module.exports = {
 
       console.log("✅ PAYIN créé avec succès:", result.transaction_id);
 
-      // Réponse au frontend
       res.status(201).json({
         success: true,
         transaction_id: result.transaction_id,
@@ -126,9 +128,13 @@ module.exports = {
       if (!sellerId || !amount)
         return res.status(400).json({ error: "sellerId et amount requis" });
 
-      const seller = await Seller.findById(sellerId);
-      if (!seller)
-        return res.status(404).json({ error: "Vendeur introuvable" });
+      // ✅ Recherche du vendeur dans "Seller" ou "User"
+      let seller = await Seller.findById(sellerId);
+      if (!seller) seller = await User.findById(sellerId);
+
+      if (!seller || (seller.role && seller.role !== "seller")) {
+        return res.status(404).json({ error: "Vendeur introuvable ou invalide" });
+      }
 
       if ((seller.balance_available || 0) < amount)
         return res
@@ -180,10 +186,30 @@ module.exports = {
       if (!name || !email || !phone || !prefix)
         return res.status(400).json({ error: "Champs requis manquants" });
 
-      const existing = await Seller.findOne({ email });
-      if (existing) return res.status(409).json({ error: "Vendeur existe déjà" });
+      // Vérifie dans User d’abord
+      const existingUser = await User.findOne({ email });
+      if (existingUser && existingUser.role === "seller") {
+        return res.status(409).json({ error: "Vendeur existe déjà" });
+      }
 
-      const seller = await Seller.create({ name, surname, email, phone, prefix });
+      // Vérifie aussi dans Seller (ancien modèle)
+      const existingSeller = await Seller.findOne({ email });
+      if (existingSeller) {
+        return res.status(409).json({ error: "Vendeur existe déjà" });
+      }
+
+      // Crée un vendeur dans "users"
+      const seller = await User.create({
+        name,
+        surname,
+        email,
+        phone,
+        prefix,
+        role: "seller",
+        balance_available: 0,
+        balance_locked: 0,
+      });
+
       res.status(201).json({ success: true, seller });
     } catch (err) {
       console.error("❌ registerSeller:", err);

@@ -25,7 +25,15 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["buyer", "seller", "delivery", "admin_general", "admin_seller", "admin_buyer", "admin_delivery"],
+      enum: [
+        "buyer",
+        "seller",
+        "delivery",
+        "admin_general",
+        "admin_seller",
+        "admin_buyer",
+        "admin_delivery",
+      ],
       default: "buyer",
     },
 
@@ -44,10 +52,16 @@ const userSchema = new mongoose.Schema(
     logoUrl: { type: String },
     profileImageUrl: { type: String },
 
-    // 🔸 SOLDES & CINETPAY
+    // ==========================================
+    // 🔸 SOLDES & CINETPAY (compatibles controller)
+    // ==========================================
     cinetpayId: { type: String },
-    lockedBalance: { type: Number, default: 0 },
-    availableBalance: { type: Number, default: 0 },
+
+    // ✅ Harmonisation des noms pour compatibilité
+    balance_locked: { type: Number, default: 0 }, // utilisé par le contrôleur
+    balance_available: { type: Number, default: 0 },
+
+    // 🔸 Métadonnées CinetPay
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
@@ -59,6 +73,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["Moto", "Vélo", "Voiture", "Autre"],
     },
+
     status: {
       type: String,
       enum: ["pending", "approved", "rejected"],
