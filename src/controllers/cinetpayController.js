@@ -3,7 +3,7 @@
 // =============================================
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller"); // Ancienne collection (compatibilité)
-const User = require("../models/User"); // Nouvelle collection principale
+const User = require("../models/user.model"); // Nouvelle collection principale
 const PayinTransaction = require("../models/PayinTransaction");
 const PayoutTransaction = require("../models/PayoutTransaction");
 
