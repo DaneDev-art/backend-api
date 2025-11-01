@@ -21,7 +21,7 @@ const verifyToken = (req, res, next) => {
 
     // Stocke les informations utiles dans req.user
     req.user = {
-      id: payload.id || payload._id,
+      _id: payload.id || payload._id, // ✅ compatible avec Mongoose ObjectId
       role: payload.role,
       email: payload.email,
     };

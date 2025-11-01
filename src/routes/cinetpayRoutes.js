@@ -1,16 +1,17 @@
 // =============================================
-// routes/cinetpayRoutes.js ✅ Version finale
+// routes/cinetpayRoutes.js ✅ Version finale avec verifyToken
 // =============================================
 const express = require("express");
 const router = express.Router();
 const CinetpayController = require("../controllers/cinetpayController");
+const { verifyToken } = require("../middlewares/auth");
 
 // ============================
 // 📌 PAYIN (Client → Marketplace → Vendeur)
 // ============================
 
-// Créer un paiement PayIn
-router.post("/payin/create", CinetpayController.createPayIn);
+// Créer un paiement PayIn (utilisateur connecté obligatoire)
+router.post("/payin/create", verifyToken, CinetpayController.createPayIn);
 
 // Vérifier / confirmer un paiement PayIn
 router.post("/payin/verify", CinetpayController.verifyPayIn);

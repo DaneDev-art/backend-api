@@ -15,15 +15,13 @@ const BASE_URL = process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onre
 
 module.exports = {
   // ======================================================
-// 🟢 CREATE PAYIN (version production avec clientId intégré)
+// 🟢 CREATE PAYIN (version production avec clientId depuis l'utilisateur connecté)
 // ======================================================
 createPayIn: async (req, res) => {
   try {
     const {
       amount,
       currency = "XOF",
-      buyerEmail,
-      buyerPhone,
       description,
       sellerId,
       returnUrl,
@@ -32,28 +30,28 @@ createPayIn: async (req, res) => {
 
     console.log("📦 Requête PAYIN reçue:", req.body);
 
-    // Vérifications des champs requis
-    if (!sellerId || !amount || !buyerEmail || !buyerPhone) {
+    // Vérification des champs obligatoires
+    if (!sellerId || !amount) {
       return res.status(400).json({
-        error: "sellerId, amount, buyerEmail et buyerPhone requis",
+        error: "sellerId et amount sont requis",
       });
     }
 
-    // ✅ Recherche du vendeur dans "Seller" ou "User"
+    // ✅ Récupération du clientId depuis l'utilisateur connecté
+    const clientId = req.user?.id || req.user?._id;
+    if (!clientId) {
+      console.error("🚨 clientId introuvable dans req.user !");
+      return res.status(500).json({
+        error: "Impossible de déterminer l'utilisateur connecté (clientId manquant)",
+      });
+    }
+
+    // Recherche du vendeur dans "Seller" ou "User"
     let seller = await Seller.findById(sellerId);
     if (!seller) seller = await User.findById(sellerId);
 
     if (!seller || (seller.role && seller.role !== "seller")) {
       return res.status(404).json({ error: "Vendeur introuvable ou invalide" });
-    }
-
-    // ✅ Injection automatique du clientId depuis les variables d'environnement
-    const clientId = process.env.CINETPAY_SITE_ID;
-    if (!clientId) {
-      console.error("🚨 CINETPAY_CLIENT_ID manquant dans les variables d'environnement !");
-      return res.status(500).json({
-        error: "Configuration serveur incomplète (CINETPAY_CLIENT_ID manquant)",
-      });
     }
 
     // URL de retour et notification
@@ -66,11 +64,11 @@ createPayIn: async (req, res) => {
     const result = await CinetPayService.createPayIn({
       amount,
       currency,
-      email: buyerEmail,
-      phone_number: buyerPhone,
+      email: req.user.email || "", // email de l'acheteur connecté
+      phone_number: req.user.phone || "", // phone de l'acheteur connecté
       description: description || `Paiement vers ${seller.name || "vendeur"}`,
       sellerId,
-      clientId, // ✅ ajouté automatiquement
+      clientId, // ✅ clientId correct
       return_url: safeReturnUrl,
       notify_url: safeNotifyUrl,
     });
