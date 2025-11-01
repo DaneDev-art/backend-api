@@ -23,8 +23,8 @@ const SellerSchema = new mongoose.Schema(
 
     // 🔹 Intégration CinetPay
     cinetpay_contact_added: { type: Boolean, default: false },
-    cinetpay_contact_id: { type: String, default: null },    // ID du contact côté CinetPay
-    cinetpay_contact_meta: { type: Object, default: null },  // Données brutes CinetPay
+    cinetpay_contact_id: { type: String, default: null },
+    cinetpay_contact_meta: { type: Object, default: null },
 
     // 🔹 Type de compte pour PayOut
     payout_method: {
@@ -33,13 +33,16 @@ const SellerSchema = new mongoose.Schema(
       default: "MOBILE_MONEY",
     },
     payout_account: {
-      type: String, // Numéro de compte ou mobile money
+      type: String,
       trim: true,
     },
 
     // 🔹 Solde
     balance_locked: { type: Number, default: 0 },
     balance_available: { type: Number, default: 0 },
+
+    // 🔹 Role ajouté pour compatibilité controller
+    role: { type: String, default: "seller" },
   },
   { timestamps: true }
 );
