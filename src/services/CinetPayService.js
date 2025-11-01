@@ -187,16 +187,40 @@ class CinetPayService {
   // ============================ Ensure Contact (PAYOUT) ============================
   // creates contact(s) using POST /transfer/contact with 'data' urlencoded param and token query
   static async ensureSellerContact(mongoSellerId) {
-    if (!mongoSellerId) throw new Error("sellerId requis pour créer contact CinetPay");
-    const seller = await Seller.findById(mongoSellerId);
-    if (!seller) throw new Error("Seller introuvable");
+  if (!mongoSellerId) throw new Error("sellerId requis pour créer contact CinetPay");
 
-    // cached on seller
-    if (seller.cinetpay_contact_added && seller.cinetpay_contact_meta) {
-      const meta = seller.cinetpay_contact_meta;
-      if (meta?.id) return meta.id;
-      return meta;
+  // Cherche d'abord dans Seller, puis dans User (compatibilité)
+  let seller = await Seller.findById(mongoSellerId);
+  if (!seller) {
+    const userSeller = await User.findById(mongoSellerId);
+    if (userSeller && userSeller.role === "seller") {
+      // créer un objet compatible "Seller" à la volée
+      seller = {
+        _id: userSeller._id,
+        name: userSeller.name || userSeller.fullName || userSeller.shopName || "",
+        surname: userSeller.surname || "",
+        email: userSeller.email,
+        phone: userSeller.phone,
+        prefix: userSeller.prefix || userSeller.countryPrefix || "+228" || "",
+        balance_available: userSeller.balance_available || 0,
+        balance_locked: userSeller.balance_locked || 0,
+        // save shim si besoin (seulement si on modifie userSeller)
+        save: async () => await userSeller.save(),
+        // conserver champs cinetpay si existants
+        cinetpay_contact_added: userSeller.cinetpayContactAdded || userSeller.cinetpay_contact_added || false,
+        cinetpay_contact_meta: userSeller.cinetpayContactMeta || userSeller.cinetpay_contact_meta || null,
+      };
+    } else {
+      throw new Error("Seller introuvable");
     }
+  }
+
+  // cached on seller
+  if (seller.cinetpay_contact_added && seller.cinetpay_contact_meta) {
+    const meta = seller.cinetpay_contact_meta || seller.cinetpayContactMeta || seller.cinetpay_contact_meta;
+    if (meta?.id) return meta.id;
+    return meta;
+  }
 
     // simple lock to avoid concurrent creates
     const lockKey = `${seller.prefix || ""}:${seller.phone || ""}`;
@@ -318,11 +342,15 @@ static async createPayIn({
     throw new Error("amount, sellerId et clientId sont requis");
   }
 
-  // Recherche seller
-  const seller = await Seller.findById(sellerId);
-  if (!seller || (seller.role && seller.role !== "seller")) {
-    throw new Error("Seller introuvable ou invalide");
-  }
+  // Recherche seller (compatibilité Seller -> User)
+let seller = await Seller.findById(sellerId);
+if (!seller) {
+  seller = await User.findById(sellerId);
+}
+console.log("[CinetPay][createPayIn] seller lookup:", seller ? "found" : "not found", "for id", sellerId);
+if (!seller || (seller.role && seller.role !== "seller")) {
+  throw new Error("Seller introuvable ou invalide");
+}
 
   // Résolution clientId en ObjectId
   let resolvedClientId;
