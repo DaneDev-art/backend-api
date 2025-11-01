@@ -4,7 +4,7 @@
 const express = require("express");
 const router = express.Router();
 const CinetpayController = require("../controllers/cinetpayController");
-const { verifyToken } = require("../middlewares/auth");
+const { verifyToken } = require("../middleware/auth.middleware");
 
 // ============================
 // 📌 PAYIN (Client → Marketplace → Vendeur)
