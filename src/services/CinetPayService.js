@@ -189,26 +189,8 @@ class CinetPayService {
   static async ensureSellerContact(mongoSellerId) {
     if (!mongoSellerId) throw new Error("sellerId requis pour créer contact CinetPay");
     const seller = await Seller.findById(mongoSellerId);
-    // 🔹 Si pas trouvé dans Seller, on cherche dans User (cas où les vendeurs sont dans users)
-if (!seller) {
-  const userSeller = await User.findById(sellerId);
-  if (userSeller && userSeller.role === "seller") {
-    // créer un objet temporaire façon "Seller" pour compatibilité
-    seller = {
-      _id: userSeller._id,
-      name: userSeller.name,
-      surname: userSeller.surname,
-      email: userSeller.email,
-      phone: userSeller.phone,
-      prefix: userSeller.prefix || "+228", // à ajuster selon ton pays
-      balance_available: userSeller.balance_available || 0,
-      balance_locked: userSeller.balance_locked || 0,
-      save: async () => await userSeller.save(), // pour garder compatibilité avec .save()
-    };
-  } else {
-    throw new Error("Seller introuvable dans Seller ni User collection");
-  }
-}
+    if (!seller) throw new Error("Seller introuvable");
+
     // cached on seller
     if (seller.cinetpay_contact_added && seller.cinetpay_contact_meta) {
       const meta = seller.cinetpay_contact_meta;
@@ -334,9 +316,11 @@ if (!seller) {
   }) {
     if (!amount || !sellerId || !clientId) throw new Error("amount, sellerId et clientId sont requis");
 
-    const seller = await Seller.findById(sellerId);
-    if (!seller) throw new Error("Seller introuvable");
-
+ // ✅ Recherche dans Seller puis User (compatibilité)
+    const seller = await Seller.findById(sellerId) || await User.findById(sellerId);
+if (!seller || (seller.role && seller.role !== "seller")) {
+  throw new Error("Seller introuvable ou invalide");
+}
     // resolve clientId to ObjectId
     let resolvedClientId;
     try {
