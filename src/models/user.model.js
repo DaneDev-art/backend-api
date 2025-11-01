@@ -139,4 +139,4 @@ userSchema.index({
 // ==========================================
 // ✅ Export du modèle
 // ==========================================
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model("User", userSchema, "users");
