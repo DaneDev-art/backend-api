@@ -184,30 +184,39 @@ class CinetPayService {
     return this.getAuthToken();
   }
 
-  // ============================ Ensure Contact (PAYOUT) ============================
-  // creates contact(s) using POST /transfer/contact with 'data' urlencoded param and token query
-  static async ensureSellerContact(mongoSellerId) {
+  // ============================ ENSURE / CREATE SELLER CONTACT ============================
+/**
+ * Assure qu'un vendeur a un contact CinetPay.
+ * Si le contact n'existe pas, le crée.
+ *
+ * @param {string|ObjectId} mongoSellerId - _id du seller ou user
+ * @returns {Promise<string>} contact_id CinetPay
+ */
+static async ensureSellerContact(mongoSellerId) {
   if (!mongoSellerId) throw new Error("sellerId requis pour créer contact CinetPay");
 
-  // Cherche d'abord dans Seller, puis dans User (compatibilité)
+  // Cherche d'abord dans Seller
   let seller = await Seller.findById(mongoSellerId);
+  
+  // Sinon cherche dans User (compatibilité)
   if (!seller) {
     const userSeller = await User.findById(mongoSellerId);
     if (userSeller && userSeller.role === "seller") {
-      // créer un objet compatible "Seller" à la volée
+      // création d'un objet compatible Seller à la volée
       seller = {
         _id: userSeller._id,
         name: userSeller.name || userSeller.fullName || userSeller.shopName || "",
         surname: userSeller.surname || "",
         email: userSeller.email,
         phone: userSeller.phone,
-        prefix: userSeller.prefix || userSeller.countryPrefix || "+228" || "",
+        prefix: userSeller.prefix || userSeller.countryPrefix || "+228",
         balance_available: userSeller.balance_available || 0,
         balance_locked: userSeller.balance_locked || 0,
-        // save shim si besoin (seulement si on modifie userSeller)
+        // sauvegarde shim si besoin
         save: async () => await userSeller.save(),
-        // conserver champs cinetpay si existants
+        // champs CinetPay
         cinetpay_contact_added: userSeller.cinetpayContactAdded || userSeller.cinetpay_contact_added || false,
+        cinetpay_contact_id: userSeller.cinetpay_contact_id || null,
         cinetpay_contact_meta: userSeller.cinetpayContactMeta || userSeller.cinetpay_contact_meta || null,
       };
     } else {
@@ -215,83 +224,91 @@ class CinetPayService {
     }
   }
 
-  // cached on seller
-  if (seller.cinetpay_contact_added && seller.cinetpay_contact_meta) {
-    const meta = seller.cinetpay_contact_meta || seller.cinetpayContactMeta || seller.cinetpay_contact_meta;
-    if (meta?.id) return meta.id;
-    return meta;
+  // ✅ Si déjà ajouté et meta existante, retourne l'id
+  if (seller.cinetpay_contact_added && seller.cinetpay_contact_meta?.id) {
+    return seller.cinetpay_contact_meta.id;
   }
 
-    // simple lock to avoid concurrent creates
-    const lockKey = `${seller.prefix || ""}:${seller.phone || ""}`;
-    if (this.contactLocks.get(lockKey)) {
-      for (let i = 0; i < 10; i++) {
-        await new Promise((r) => setTimeout(r, 200));
-        const s = await Seller.findById(mongoSellerId).lean();
-        if (s && s.cinetpay_contact_added && s.cinetpay_contact_meta) {
-          const meta = s.cinetpay_contact_meta;
-          return meta?.id || meta;
-        }
-      }
-    }
-    this.contactLocks.set(lockKey, true);
-
-    try {
-      const token = await this.getAuthToken();
-      const payloadArray = [
-        {
-          prefix: seller.prefix ? String(seller.prefix).replace(/^\+/, "") : "",
-          phone: String(seller.phone || ""),
-          name: seller.name || "",
-          surname: seller.surname || "",
-          email: seller.email || "",
-        },
-      ];
-
-      const paramsBody = new URLSearchParams();
-      paramsBody.append("data", JSON.stringify(payloadArray));
-
-      let resp;
-      try {
-        resp = await axios.post(`${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/transfer/contact`, paramsBody.toString(), {
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          params: { token },
-          timeout: 20000,
-        });
-      } catch (err) {
-        const body = err.response?.data || err.message;
-        console.error("[CinetPay][ensureSellerContact] request failed:", body);
-        throw new Error("Add contact request failed: " + (body?.message || body));
-      }
-
-      const respData = resp.data;
-      // success if code 0 or status success
-      const ok =
-        respData &&
-        (respData.code === 0 || respData.code === "0" || respData.message === "OPERATION_SUCCES" || respData.status === "success");
-
-      if (!ok) {
-        // if already exists CinetPay might return a structure indicating 'already'
-        const maybe = respData?.data && Array.isArray(respData.data) ? respData.data[0] : respData.data;
-        if (maybe?.status === "already" || maybe?.status === "ALREADY") {
-          // update seller and return id if provided
-          await Seller.findByIdAndUpdate(mongoSellerId, {
-            cinetpay_contact_added: true,
-            cinetpay_contact_meta: maybe,
-          });
-          return maybe?.id || null;
-        }
-        console.error("[CinetPay][ensureSellerContact] not ok:", respData);
-        throw new Error("Add contact failed: " + JSON.stringify(respData));
-      }
-
-      const meta = Array.isArray(respData.data) ? respData.data[0] : respData.data;
-      await Seller.findByIdAndUpdate(mongoSellerId, { cinetpay_contact_added: true, cinetpay_contact_meta: meta });
-      return meta?.id || null;
-    } finally {
-      this.contactLocks.delete(lockKey);
+  // ------------------ LOCK simple pour éviter les appels concurrents ------------------
+  if (!this.contactLocks) this.contactLocks = new Map();
+  const lockKey = `${seller.prefix}:${seller.phone}`;
+  if (this.contactLocks.get(lockKey)) {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const s = await Seller.findById(mongoSellerId).lean();
+      if (s && s.cinetpay_contact_added && s.cinetpay_contact_meta?.id) return s.cinetpay_contact_meta.id;
     }
   }
+  this.contactLocks.set(lockKey, true);
+
+  try {
+    // Appel à la méthode interne de création de contact
+    const contactId = await this.createSellerContact(seller);
+    return contactId;
+  } finally {
+    this.contactLocks.delete(lockKey);
+  }
+}
+
+/**
+ * Crée le contact vendeur sur CinetPay
+ * @param {Object} seller - objet vendeur (Seller ou User converti)
+ * @returns {Promise<string>} contact_id CinetPay
+ */
+static async createSellerContact(seller) {
+  if (!seller) throw new Error("Seller manquant pour création de contact");
+
+  // Nettoyage et validation des champs requis
+  const prefix = (seller.prefix || "228").replace("+", "").trim();
+  const phone = (seller.phone || "").replace(/^\+/, "").trim();
+  const email = seller.email?.trim() || "";
+  const name = seller.name?.trim() || "";
+  const surname = seller.surname?.trim() || name || "Shop";
+
+  if (!phone || !email) throw new Error("Numéro de téléphone ou email manquant pour le vendeur");
+
+  const payload = [{ prefix, phone, name, surname, email }];
+  console.log("[CinetPay][createSellerContact] payload:", payload);
+
+  try {
+    const token = await this.getAuthToken(); // auth Payout
+
+    const paramsBody = new URLSearchParams();
+    paramsBody.append("data", JSON.stringify(payload));
+
+    const resp = await axios.post(
+      `${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/transfer/contact`,
+      paramsBody.toString(),
+      {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        params: { token },
+        timeout: 20000,
+      }
+    );
+
+    const respData = resp.data;
+    console.log("[CinetPay][createSellerContact] response:", respData);
+
+    if (!respData || respData.code !== 0) {
+      throw new Error(`Echec création contact CinetPay: ${respData.message || "réponse invalide"}`);
+    }
+
+    const contactInfo = Array.isArray(respData.data) ? respData.data[0] : respData.data;
+
+    // Sauvegarde du contact dans la base
+    seller.cinetpay_contact_added = true;
+    seller.cinetpay_contact_id = contactInfo.id;
+    seller.cinetpay_contact_meta = contactInfo;
+
+    if (typeof seller.save === "function") await seller.save();
+
+    console.log(`[CinetPay] Contact ajouté: ${contactInfo.id} (${seller.email})`);
+    return contactInfo.id;
+  } catch (err) {
+    console.error("[CinetPay][createSellerContact] request failed:", err.response?.data || err.message);
+    throw new Error("Echec création contact CinetPay");
+  }
+}
 
   // ============================ CHECKOUT AUTH TEST ============================
   static async authCheckoutCredentials() {
