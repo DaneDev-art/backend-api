@@ -1,5 +1,5 @@
 // =============================================
-// controllers/cinetpayController.js ✅ Version corrigée et stabilisée
+// controllers/cinetpayController.js ✅ Version corrigée finale
 // =============================================
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller"); // Ancienne collection (compatibilité)
@@ -11,11 +11,12 @@ const PayoutTransaction = require("../models/PayoutTransaction");
 const FEES = { payinCinetPay: 0.035, payoutCinetPay: 0.015, app: 0.02 };
 const TOTAL_FEES = FEES.payinCinetPay + FEES.payoutCinetPay + FEES.app;
 
-const BASE_URL = process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
+const BASE_URL =
+  process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
 
 module.exports = {
   // ======================================================
-  // 🟢 CREATE PAYIN (version finale)
+  // 🟢 CREATE PAYIN (production)
   // ======================================================
   createPayIn: async (req, res) => {
     try {
@@ -30,63 +31,75 @@ module.exports = {
 
       console.log("📦 Requête PAYIN reçue:", req.body);
 
-      // Vérification des champs requis
+      // Vérification des champs obligatoires
       if (!sellerId || !amount) {
-        return res.status(400).json({ error: "sellerId et amount sont requis" });
+        return res.status(400).json({
+          error: "sellerId et amount sont requis",
+        });
       }
 
-      // 🔹 Vérifie si le token contient bien l'utilisateur
-      if (!req.user || !req.user._id) {
-        console.error("🚨 Aucun utilisateur connecté (req.user manquant)");
-        return res.status(401).json({ error: "Utilisateur non authentifié" });
+      // ✅ Récupération du clientId depuis l'utilisateur connecté
+      const clientId = req.user?.id || req.user?._id;
+      if (!clientId) {
+        console.error("🚨 clientId introuvable dans req.user !");
+        return res.status(500).json({
+          error:
+            "Impossible de déterminer l'utilisateur connecté (clientId manquant)",
+        });
       }
 
-      const clientId = req.user._id.toString();
+      // Recherche du vendeur dans "Seller" ou "User"
+      let seller = await Seller.findById(sellerId);
+      if (!seller) seller = await User.findById(sellerId);
 
-      // 🔎 Recherche du vendeur
-      let seller = await User.findById(sellerId);
-      if (!seller) seller = await Seller.findById(sellerId);
-
-      console.log("🧩 Vérification vendeur:", seller ? "✅ trouvé" : "❌ introuvable");
-
-      if (!seller || seller.role !== "seller") {
-        return res.status(404).json({ error: "Seller introuvable ou invalide" });
+      // ✅ Validation assouplie
+      if (!seller) {
+        return res.status(404).json({ error: "Vendeur introuvable" });
       }
 
-      // 🔗 URLs sûres
-      const safeReturnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-      const safeNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      if (seller.role && seller.role.toLowerCase() !== "seller") {
+        return res
+          .status(400)
+          .json({ error: "Ce compte n’est pas un vendeur valide" });
+      }
+
+      console.log("🧩 Vérification vendeur: ✅ trouvé");
+
+      // URL de retour et notification
+      const safeReturnUrl =
+        returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      const safeNotifyUrl =
+        notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
       console.log("🔗 URLs:", { safeReturnUrl, safeNotifyUrl });
 
-      // 🔹 Création du paiement
+      // Appel du service CinetPay
       const result = await CinetPayService.createPayIn({
         amount,
         currency,
         email: req.user.email || "",
         phone_number: req.user.phone || "",
-        description: description || `Paiement de ${amount} XOF au vendeur ${seller.shopName || seller.email}`,
-        sellerId: seller._id.toString(),
-        clientId, // ✅ c’est l’acheteur connecté
+        description: description || `Paiement vers ${seller.name || "vendeur"}`,
+        sellerId,
+        clientId, // ✅ clientId correct
         return_url: safeReturnUrl,
         notify_url: safeNotifyUrl,
       });
 
       if (!result || !result.payment_url) {
-        console.error("⚠️ Erreur CinetPay:", result);
+        console.error("⚠️ Erreur de réponse CinetPay:", result);
         return res.status(502).json({ error: "Erreur création paiement CinetPay" });
       }
 
-      // 🔢 Calcul du montant net
+      // Calcul du montant net et verrouillage temporaire
       const netAmount = amount - amount * TOTAL_FEES;
       seller.balance_locked = (seller.balance_locked || 0) + netAmount;
       await seller.save();
 
-      // 💾 Enregistre la transaction
+      // Sauvegarde transaction
       await PayinTransaction.create({
         transactionId: result.transaction_id,
-        sellerId: seller._id,
-        buyerId: clientId,
+        sellerId,
         amount,
         currency,
         status: "PENDING",
@@ -98,8 +111,8 @@ module.exports = {
       res.status(201).json({
         success: true,
         transaction_id: result.transaction_id,
-        payment_url: result.payment_url,
         netAmount,
+        payment_url: result.payment_url,
       });
     } catch (err) {
       console.error("❌ Erreur createPayIn:", err.response?.data || err.message);
@@ -136,18 +149,24 @@ module.exports = {
       if (!sellerId || !amount)
         return res.status(400).json({ error: "sellerId et amount requis" });
 
-      let seller = await User.findById(sellerId);
-      if (!seller) seller = await Seller.findById(sellerId);
+      // ✅ Recherche du vendeur dans "Seller" ou "User"
+      let seller = await Seller.findById(sellerId);
+      if (!seller) seller = await User.findById(sellerId);
 
-      if (!seller || seller.role !== "seller") {
-        return res.status(404).json({ error: "Vendeur introuvable ou invalide" });
+      if (!seller) {
+        return res.status(404).json({ error: "Vendeur introuvable" });
+      }
+
+      if (seller.role && seller.role.toLowerCase() !== "seller") {
+        return res
+          .status(400)
+          .json({ error: "Ce compte n’est pas un vendeur valide" });
       }
 
       if ((seller.balance_available || 0) < amount)
-        return res.status(400).json({
-          error: "Solde insuffisant",
-          balance: seller.balance_available,
-        });
+        return res
+          .status(400)
+          .json({ error: "Solde insuffisant", balance: seller.balance_available });
 
       const result = await CinetPayService.createPayOutForSeller({
         sellerId,
@@ -194,16 +213,19 @@ module.exports = {
       if (!name || !email || !phone || !prefix)
         return res.status(400).json({ error: "Champs requis manquants" });
 
+      // Vérifie dans User d’abord
       const existingUser = await User.findOne({ email });
       if (existingUser && existingUser.role === "seller") {
         return res.status(409).json({ error: "Vendeur existe déjà" });
       }
 
+      // Vérifie aussi dans Seller (ancien modèle)
       const existingSeller = await Seller.findOne({ email });
       if (existingSeller) {
         return res.status(409).json({ error: "Vendeur existe déjà" });
       }
 
+      // Crée un vendeur dans "users"
       const seller = await User.create({
         name,
         surname,
