@@ -346,53 +346,64 @@ static async createSellerContact(seller) {
 static async createPayIn({
   amount,
   currency = "XOF",
-  email,
-  phone_number,
+  buyerEmail,
+  buyerPhone,
   description = "Paiement Marketplace",
-  return_url = null,
-  notify_url = null,
+  returnUrl = null,
+  notifyUrl = null,
   sellerId,
-  clientId, // doit venir du frontend / token connecté
+  clientId,
   customer = {},
 }) {
-  if (!amount || !sellerId || !clientId) {
-    throw new Error("amount, sellerId et clientId sont requis");
+  // 🧩 Vérifications de base
+  if (!amount || !sellerId) {
+    throw new Error("amount et sellerId sont requis");
   }
 
-  // Recherche seller (compatibilité Seller -> User)
-let seller = await Seller.findById(sellerId);
-if (!seller) {
-  seller = await User.findById(sellerId);
-}
-console.log("[CinetPay][createPayIn] seller lookup:", seller ? "found" : "not found", "for id", sellerId);
-if (!seller || (seller.role && seller.role !== "seller")) {
-  throw new Error("Seller introuvable ou invalide");
-}
+  // 🔍 1. Récupération du vendeur
+  let seller = await Seller.findById(sellerId);
+  if (!seller) {
+    seller = await User.findById(sellerId);
+    if (!seller || (seller.role && seller.role !== "seller")) {
+      throw new Error("Seller introuvable ou invalide");
+    }
+  }
 
-  // Résolution clientId en ObjectId
-  let resolvedClientId;
+  // 🆔 2. Génération transaction_id
+  const transaction_id = this.generateTransactionId("PAYIN");
+  if (!transaction_id) throw new Error("Échec de génération du transaction_id");
+
+  // 👤 3. Résolution clientId robuste
+  let resolvedClientId = null;
   try {
     resolvedClientId = await this.resolveClientObjectId(
       clientId,
-      email || phone_number || customer.email || customer.phone
+      buyerEmail || buyerPhone || customer.email || customer.phone
     );
   } catch (err) {
-    console.error("[CinetPay][createPayIn] resolve clientId failed:", err.message || err);
-    throw err;
+    console.warn("[CinetPay][createPayIn] Impossible de résoudre clientId:", err.message);
+  }
+  if (!resolvedClientId) {
+    // fallback de sécurité
+    resolvedClientId = seller._id;
   }
 
-  // Calcul des frais
+  // 💰 4. Calcul des frais et du netAmount
   const feesBreakdown = {
     payinCinetPay: roundCFA(amount * FEES.payinCinetPay),
     payoutCinetPay: roundCFA(amount * FEES.payoutCinetPay),
     appFlutter: roundCFA(amount * FEES.appFlutter),
   };
-  const totalFeesAmount = roundCFA(feesBreakdown.payinCinetPay + feesBreakdown.payoutCinetPay + feesBreakdown.appFlutter);
-  const netAmount = roundCFA(amount - totalFeesAmount);
+  const totalFees = roundCFA(
+    feesBreakdown.payinCinetPay + feesBreakdown.payoutCinetPay + feesBreakdown.appFlutter
+  );
+  const netAmount = roundCFA(amount - totalFees);
 
-  const transaction_id = this.generateTransactionId("PAYIN");
+  if (isNaN(netAmount) || netAmount <= 0) {
+    throw new Error("Montant net invalide après déduction des frais");
+  }
 
-  // Création transaction locale
+  // 🪣 5. Création transaction MongoDB
   let payinTx;
   try {
     payinTx = await PayinTransaction.create({
@@ -402,35 +413,37 @@ if (!seller || (seller.role && seller.role !== "seller")) {
       transaction_id,
       amount,
       netAmount,
-      fees: totalFeesAmount,
-      fees_breakdown: feesBreakdown,
       currency,
+      fees: totalFees,
+      fees_breakdown: feesBreakdown,
+      description,
       status: "PENDING",
       customer: {
-        email: email || customer.email || "",
-        phone_number: phone_number || customer.phone || "",
+        email: buyerEmail || customer.email || "",
+        phone_number: buyerPhone || customer.phone || "",
         name: customer.name || "",
       },
-      description,
       createdAt: new Date(),
     });
   } catch (err) {
-    console.error("[CinetPay][PayIn] Save PayinTransaction failed:", err);
-    throw new Error("Impossible de créer la transaction locale");
+    console.error("[CinetPay][PayIn] Échec de création de la transaction MongoDB:", err);
+    throw new Error("Impossible d’enregistrer la transaction dans la base de données");
   }
 
-  // Non-bloquant: assure le contact pour le seller
-  try {
-    await this.ensureSellerContact(seller._id).catch((e) => {
-      console.warn("[CinetPay][createPayIn] ensureSellerContact non bloquant:", e?.message || e);
-    });
-  } catch (e) {
-    // ignore entièrement
-  }
+  // 🧾 6. Construction du payload CinetPay
+  const notifyUrlFinal =
+    notifyUrl ||
+    (NGROK_URL
+      ? `${NGROK_URL}/api/cinetpay/webhook`
+      : BASE_URL
+      ? `${BASE_URL}/api/cinetpay/webhook`
+      : "https://ton-backend.com/api/cinetpay/webhook");
 
-  // Construction payload checkout
-  const notifyUrlFinal = notify_url || (NGROK_URL ? `${NGROK_URL}/api/cinetpay/webhook` : (BASE_URL ? `${BASE_URL}/api/cinetpay/webhook` : "https://ton-backend.com/api/cinetpay/webhook"));
-  const returnUrlFinal = return_url || (FRONTEND_URL ? `${FRONTEND_URL}/success` : "https://ton-frontend.com/success");
+  const returnUrlFinal =
+    returnUrl ||
+    (FRONTEND_URL
+      ? `${FRONTEND_URL}/success`
+      : "https://ton-frontend.com/success");
 
   const payload = {
     apikey: CINETPAY_API_KEY,
@@ -439,60 +452,64 @@ if (!seller || (seller.role && seller.role !== "seller")) {
     amount,
     currency,
     description,
-    customer_email: email || customer.email || "",
-    customer_phone_number: phone_number || customer.phone || "",
+    customer_email: buyerEmail || customer.email || "",
+    customer_phone_number: buyerPhone || customer.phone || "",
     notify_url: notifyUrlFinal,
     return_url: returnUrlFinal,
     channels: "ALL",
     lang: "FR",
   };
 
-  // URL paiement
-  let payinUrl = CINETPAY_BASE_URL || "https://api-checkout.cinetpay.com/v2";
-  payinUrl = payinUrl.replace(/\/+$/, "");
-  if (!payinUrl.endsWith("/payment")) payinUrl = `${payinUrl}/payment`;
+  // 🌍 7. Envoi vers CinetPay
+  const payinUrl = `${CINETPAY_BASE_URL.replace(/\/$/, "")}/payment`;
 
   let response;
   try {
-    response = await axios.post(payinUrl, payload, { headers: { "Content-Type": "application/json" }, timeout: 20000 });
+    response = await axios.post(payinUrl, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 20000,
+    });
   } catch (err) {
-    console.error("[CinetPay][PayIn] request failed:", err.response?.data || err.message);
-    try {
-      payinTx.status = "FAILED";
-      payinTx.raw_response = { error: err.message, details: err.response?.data || null };
-      await payinTx.save();
-    } catch (e) {
-      console.error("[CinetPay][PayIn] failed to update tx after error:", e.message);
-    }
+    console.error("[CinetPay][PayIn] Erreur HTTP:", err.response?.data || err.message);
+
+    // Mise à jour de la transaction en échec
+    payinTx.status = "FAILED";
+    payinTx.raw_response = { error: err.message, details: err.response?.data || null };
+    await payinTx.save();
+
     throw new Error("Erreur lors de la création du paiement CinetPay");
   }
 
+  // 🔄 8. Traitement de la réponse CinetPay
   const normalized = normalizeResponse(response);
   try {
     payinTx.raw_response = normalized.raw;
     payinTx.cinetpay_status = normalized.status || null;
     await payinTx.save();
   } catch (err) {
-    console.error("[CinetPay][PayIn] failed to save normalized response:", err.message);
+    console.warn("[CinetPay][PayIn] Échec sauvegarde réponse normalisée:", err.message);
   }
 
-  // Mise à jour balance_locked du seller
+  // 💵 9. Mise à jour du solde bloqué du vendeur
   try {
-    const s = await Seller.findById(seller._id);
-    if (s) {
-      s.balance_locked = roundCFA((s.balance_locked || 0) + netAmount);
-      await s.save();
-    }
+    seller.balance_locked = roundCFA((seller.balance_locked || 0) + netAmount);
+    await seller.save();
   } catch (err) {
-    console.error("[CinetPay][PayIn] update locked_balance failed:", err.message);
+    console.warn("[CinetPay][PayIn] Échec mise à jour du solde du vendeur:", err.message);
   }
 
+  // 🔔 10. Contact vendeur (non bloquant)
+  this.ensureSellerContact(seller._id).catch((e) =>
+    console.warn("[CinetPay][createPayIn] ensureSellerContact (warning):", e.message)
+  );
+
+  // ✅ 11. Retour final
   return {
     success: true,
     transaction_id,
     payment_url: normalized.raw?.data?.payment_url || null,
     netAmount,
-    fees: totalFeesAmount,
+    fees: totalFees,
     fees_breakdown: feesBreakdown,
     payment_response: normalized.raw,
   };
@@ -574,199 +591,179 @@ if (!seller || (seller.role && seller.role !== "seller")) {
     return { success: true, normalized };
   }
 
-  // ============================ PAYOUT (CORRECTED) ============================
-  static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
-    if (!sellerId || typeof amount !== "number" || isNaN(amount)) throw new Error("sellerId et amount requis");
-
-    const seller = await Seller.findById(sellerId);
-    if (!seller) throw new Error("Seller introuvable");
-
-    const available = Number(seller.balance_available || 0);
-    if (available < amount) throw new Error("Solde insuffisant");
-
-    const payoutFeeAmount = roundCFA(amount * FEES.payoutCinetPay);
-    const netToSend = roundCFA(amount - payoutFeeAmount);
-
-    // optimistic debit
-    seller.balance_available = roundCFA(available - amount);
-    await seller.save();
-
-    const client_transaction_id = this.generateTransactionId("PAYOUT");
-    const tx = new PayoutTransaction({
-      seller: seller._id,
-      sellerId: seller._id,
-      client_transaction_id,
-      amount,
-      currency,
-      sent_amount: netToSend,
-      fees: payoutFeeAmount,
-      status: "PENDING",
-      createdAt: new Date(),
-      prefix: seller.prefix,
-      phone: seller.phone,
-    });
-    await tx.save();
-
-    // If payout API configured, call it (requires auth)
-    if (CINETPAY_PAYOUT_URL && CINETPAY_API_KEY && CINETPAY_API_PASSWORD) {
-      try {
-        // ensure contact exists on CinetPay
-        const contactId = await this.ensureSellerContact(seller._id);
-        if (!contactId) {
-          tx.status = "FAILED";
-          tx.raw_response = { error: "no_contact_id", message: "Impossible de récupérer contact CinetPay" };
-          await tx.save();
-          // restore balance
-          seller.balance_available = roundCFA((seller.balance_available || 0) + amount);
-          await seller.save();
-          throw new Error("Pas de contact CinetPay pour le seller");
-        }
-
-        // get token
-        const token = await this.getAuthToken();
-
-        // Build 'data' payload as an array (stringified) — matches Postman example and API
-        const dataArray = [
-          {
-            amount: String(netToSend),
-            phone: String(seller.phone || ""),
-            prefix: seller.prefix ? String(seller.prefix).replace(/^\+/, "") : "",
-            notify_url: notifyUrl || (NGROK_URL ? `${NGROK_URL}/api/cinetpay/payout-webhook` : (BASE_URL ? `${BASE_URL}/api/cinetpay/payout-webhook` : "")),
-            client_transaction_id,
-          },
-        ];
-
-        const paramsBody = new URLSearchParams();
-        paramsBody.append("data", JSON.stringify(dataArray));
-
-        // According to Postman sample: POST /v1/transfer/money/send/contact?token=...&transaction_id=...
-        const url = `${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/transfer/money/send/contact`;
-
-        let resp;
-        try {
-          resp = await axios.post(url, paramsBody.toString(), {
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            params: { token, transaction_id: client_transaction_id },
-            timeout: 20000,
-          });
-        } catch (err) {
-          const body = err.response?.data || err.message;
-          console.error("[CinetPay][createPayOutForSeller] payout request failed:", body);
-          // mark failed, attach response
-          tx.status = "FAILED";
-          tx.raw_response = body;
-          await tx.save();
-          // restore balance
-          seller.balance_available = roundCFA((seller.balance_available || 0) + amount);
-          await seller.save();
-          // throw with attached info
-          const e = new Error("PayOut request failed");
-          e.cinetpay = body;
-          throw e;
-        }
-
-        const respData = resp.data;
-        tx.raw_response = respData;
-
-        // consider success when code is 0 or message/status success
-        const ok =
-          respData &&
-          (respData.code === 0 ||
-            respData.code === "0" ||
-            respData.message === "OPERATION_SUCCES" ||
-            respData.status === "success" ||
-            (Array.isArray(respData.data) && respData.data[0]?.status && respData.data[0].status.toLowerCase() === "success"));
-
-        if (ok) {
-          // Keep as PENDING because transfer may still be processed async by the provider.
-          tx.status = "PENDING";
-          await tx.save();
-
-          // record payout fee as platform revenue
-          if (payoutFeeAmount > 0) {
-            try {
-              await PlatformRevenue.create({ transaction: tx._id, amount: payoutFeeAmount, note: "Payout fee" });
-            } catch (err) {
-              console.error("[CinetPay][createPayOutForSeller] save PlatformRevenue failed:", err.message);
-            }
-          }
-
-          return { client_transaction_id, txId: tx._id, data: respData, netToSend, fees: payoutFeeAmount };
-        } else {
-          // Non-ok response — mark failed & restore balance
-          tx.status = "FAILED";
-          await tx.save();
-          seller.balance_available = roundCFA((seller.balance_available || 0) + amount);
-          await seller.save();
-
-          const e = new Error("Payout API returned error");
-          e.cinetpay = respData;
-          throw e;
-        }
-      } catch (err) {
-        // if not already restored, ensure balance restored
-        try {
-          const s = await Seller.findById(seller._id);
-          if (s && s.balance_available < 0) {
-            s.balance_available = roundCFA((s.balance_available || 0) + amount);
-            await s.save();
-          }
-        } catch (inner) {
-          console.error("[CinetPay][createPayOutForSeller] restore balance failed:", inner.message || inner);
-        }
-        throw err;
-      }
-    }
-
-    // If no payout API configured, keep tx PENDING for manual processing
-    return { client_transaction_id, txId: tx._id, netToSend, fees: payoutFeeAmount };
+  // ============================ PAYOUT (FINAL PRODUCTION VERSION) ============================
+static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
+  if (!sellerId || typeof amount !== "number" || isNaN(amount)) {
+    throw new Error("sellerId et amount (numérique) sont requis");
   }
 
-  static async verifyPayOut(transaction_id) {
-    if (!transaction_id) throw new Error("transaction_id requis");
-    if (!CINETPAY_PAYOUT_URL || !CINETPAY_API_KEY || !CINETPAY_API_PASSWORD) throw new Error("Payout API non configurée");
+  // 🔍 1. Vérifier le vendeur
+  const seller = await Seller.findById(sellerId);
+  if (!seller) throw new Error("Vendeur introuvable");
+  if (!seller.phone || !seller.prefix) {
+    throw new Error("Vendeur invalide : numéro ou préfixe manquant");
+  }
 
+  // 💰 2. Vérifier solde disponible
+  const available = Number(seller.balance_available || 0);
+  if (available < amount) {
+    throw new Error("Solde insuffisant pour le retrait demandé");
+  }
+
+  // 💵 3. Calcul des frais
+  const payoutFeeAmount = roundCFA(amount * FEES.payoutCinetPay);
+  const netToSend = roundCFA(amount - payoutFeeAmount);
+  if (netToSend <= 0) throw new Error("Montant net à envoyer invalide");
+
+  // 💳 4. Débit optimiste du solde vendeur
+  seller.balance_available = roundCFA(available - amount);
+  await seller.save();
+
+  // 🆔 5. Création de l'ID de transaction
+  const client_transaction_id = this.generateTransactionId("PAYOUT");
+
+  // ✅ 6. Enregistrement initial en base (toujours complet)
+  const payoutTx = await PayoutTransaction.create({
+    seller: seller._id,
+    sellerId: seller._id,
+    client_transaction_id,
+    amount,
+    currency,
+    sent_amount: netToSend,
+    fees: payoutFeeAmount,
+    status: "PENDING",
+    createdAt: new Date(),
+    prefix: seller.prefix.toString().replace(/^\+/, ""), // nettoyage du prefix
+    phone: String(seller.phone),
+  });
+
+  // ⚙️ 7. Vérifier si l’API CinetPay est configurée
+  if (!CINETPAY_PAYOUT_URL || !CINETPAY_API_KEY || !CINETPAY_API_PASSWORD) {
+    console.warn("[CinetPay][Payout] API non configurée → traitement manuel requis.");
+    return { client_transaction_id, txId: payoutTx._id, netToSend, fees: payoutFeeAmount };
+  }
+
+  try {
+    // 👤 8. Vérifier ou créer le contact CinetPay du vendeur
+    const contactId = await this.ensureSellerContact(seller._id);
+    if (!contactId) {
+      throw new Error("Impossible de créer ou récupérer le contact CinetPay");
+    }
+
+    // 🔐 9. Authentification API
     const token = await this.getAuthToken();
+    if (!token) throw new Error("Échec d'obtention du token CinetPay");
 
+    // 🌍 10. Construction du payload
+    const dataArray = [
+      {
+        amount: String(netToSend),
+        phone: String(seller.phone),
+        prefix: String(seller.prefix).replace(/^\+/, ""),
+        notify_url:
+          notifyUrl ||
+          (NGROK_URL
+            ? `${NGROK_URL}/api/cinetpay/payout-webhook`
+            : BASE_URL
+            ? `${BASE_URL}/api/cinetpay/payout-webhook`
+            : ""),
+        client_transaction_id,
+      },
+    ];
+
+    const paramsBody = new URLSearchParams();
+    paramsBody.append("data", JSON.stringify(dataArray));
+
+    const url = `${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/transfer/money/send/contact`;
+
+    // 🚀 11. Envoi de la requête CinetPay
     let resp;
     try {
-      resp = await axios.get(`${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/transfer/check/money`, {
-        params: { token, transaction_id },
-        timeout: 15000,
+      resp = await axios.post(url, paramsBody.toString(), {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        params: { token, transaction_id: client_transaction_id },
+        timeout: 20000,
       });
     } catch (err) {
-      const body = err.response?.data || err.message;
-      console.error("[CinetPay][verifyPayOut] request failed:", body);
-      throw new Error("Erreur lors de la vérification PayOut: " + (body?.message || body));
+      const errBody = err.response?.data || err.message;
+      console.error("[CinetPay][Payout] Erreur requête API:", errBody);
+
+      payoutTx.status = "FAILED";
+      payoutTx.raw_response = errBody;
+      await payoutTx.save();
+
+      // 🩹 Restaure le solde
+      seller.balance_available = roundCFA((seller.balance_available || 0) + amount);
+      await seller.save();
+
+      const e = new Error("Échec de la requête PayOut CinetPay");
+      e.cinetpay = errBody;
+      throw e;
     }
 
-    const data = resp.data;
-    // Data shape can be { code, data: { status: 'SUCCESS' } } or similar. Normalize:
-    const status = (data?.data?.status || data?.status || data?.message || "").toString().toUpperCase();
-    const tx = await PayoutTransaction.findOne({ client_transaction_id: transaction_id });
+    const respData = resp.data || {};
+    payoutTx.raw_response = respData;
 
-    if (tx) {
-      if (status.includes("SUCCESS")) {
-        tx.status = "SUCCESS";
-        tx.completedAt = new Date();
-      } else if (status.includes("FAILED") || status.includes("CANCEL")) {
-        tx.status = "FAILED";
-        // restore seller balance
-        const seller = await Seller.findById(tx.seller || tx.sellerId);
-        if (seller) {
-          seller.balance_available = roundCFA((seller.balance_available || 0) + (tx.amount || 0));
-          await seller.save();
+    // 🧾 12. Vérification de la réponse
+    const ok =
+      respData &&
+      (respData.code === 0 ||
+        respData.code === "0" ||
+        respData.message === "OPERATION_SUCCES" ||
+        respData.status?.toLowerCase() === "success" ||
+        (Array.isArray(respData.data) &&
+          respData.data[0]?.status?.toLowerCase() === "success"));
+
+    if (ok) {
+      payoutTx.status = "PENDING"; // reste en attente de vérif asynchrone
+      await payoutTx.save();
+
+      // 💰 Enregistrement revenu plateforme
+      if (payoutFeeAmount > 0) {
+        try {
+          await PlatformRevenue.create({
+            transaction: payoutTx._id,
+            amount: payoutFeeAmount,
+            note: "Commission sur payout",
+          });
+        } catch (err) {
+          console.warn("[CinetPay][Payout] Enregistrement PlatformRevenue échoué:", err.message);
         }
-      } else {
-        tx.status = "PENDING";
       }
-      tx.raw_response = data;
-      tx.updatedAt = new Date();
-      await tx.save();
-    }
 
-    return { success: true, data };
+      return {
+        success: true,
+        client_transaction_id,
+        txId: payoutTx._id,
+        data: respData,
+        netToSend,
+        fees: payoutFeeAmount,
+      };
+    } else {
+      payoutTx.status = "FAILED";
+      await payoutTx.save();
+
+      seller.balance_available = roundCFA((seller.balance_available || 0) + amount);
+      await seller.save();
+
+      const e = new Error("Réponse CinetPay non valide");
+      e.cinetpay = respData;
+      throw e;
+    }
+  } catch (err) {
+    // 🔁 Sécurité : restauration du solde si erreur
+    try {
+      const s = await Seller.findById(seller._id);
+      if (s && s.balance_available < 0) {
+        s.balance_available = roundCFA((s.balance_available || 0) + amount);
+        await s.save();
+      }
+    } catch (inner) {
+      console.error("[CinetPay][Payout] Échec de restauration du solde:", inner.message);
+    }
+    throw err;
   }
+}
 
   // ============================ WEBHOOK ============================
   static async handleWebhook(webhookPayload, headers = {}) {
