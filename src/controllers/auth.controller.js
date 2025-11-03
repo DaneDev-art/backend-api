@@ -42,7 +42,7 @@ router.post("/register", async (req, res) => {
     if (role === "buyer") {
       const { fullName, phone, address, zone, country, city, avatarUrl } = req.body;
       userData = { ...userData, fullName, phone, address, zone, country, city, avatarUrl };
-    } 
+    }
     // 🔸 Seller
     else if (role === "seller") {
       const { ownerName, shopName, phone, address, country, shopDescription, logoUrl } = req.body;
@@ -57,7 +57,7 @@ router.post("/register", async (req, res) => {
         logoUrl,
         status: "approved",
       };
-    } 
+    }
     // 🔸 Delivery
     else if (role === "delivery") {
       const {
@@ -72,7 +72,7 @@ router.post("/register", async (req, res) => {
         idCardFrontUrl, idCardBackUrl, selfieUrl,
         status: "pending",
       };
-    } 
+    }
     // 🔸 Par défaut : Buyer
     else {
       userData.role = "buyer";
@@ -88,10 +88,14 @@ router.post("/register", async (req, res) => {
     // ==========================
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
+
       try {
         let seller = await Seller.findOne({ email: user.email });
+
         if (!seller) {
+          // ⚠️ On fixe le _id du seller identique à celui du user
           seller = await Seller.create({
+            _id: user._id,
             name: user.ownerName || user.shopName || user.email.split("@")[0],
             surname: "",
             email: user.email,
@@ -104,6 +108,12 @@ router.post("/register", async (req, res) => {
             cinetpay_contact_meta: [],
           });
           console.log(`✅ Seller créé automatiquement pour ${user.email}`);
+        } else {
+          // Mise à jour automatique
+          seller.name = user.ownerName || user.shopName || seller.name;
+          seller.phone = user.phone || seller.phone;
+          await seller.save();
+          console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
         }
       } catch (err) {
         console.error(`❌ Erreur lors de la synchronisation du Seller pour ${user.email}:`, err.message);
@@ -126,7 +136,6 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
     const user = await User.findOne({ email }).select("+password");
@@ -150,6 +159,7 @@ router.get("/profile", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
     res.json({ user: user.toPublicJSON() });
   } catch (err) {
     logger.error("❌ Profile error:", err);
@@ -174,9 +184,11 @@ router.put("/profile", authMiddleware, async (req, res) => {
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
       try {
-        let seller = await Seller.findOne({ email: user.email });
+        let seller = await Seller.findById(user._id);
         if (!seller) {
+          // ⚠️ On fixe le _id du seller identique à celui du user
           seller = await Seller.create({
+            _id: user._id,
             name: user.ownerName || user.shopName || user.email.split("@")[0],
             surname: "",
             email: user.email,
