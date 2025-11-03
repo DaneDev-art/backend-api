@@ -50,4 +50,32 @@ router.get("/test", (req, res) => {
   });
 });
 
+// ======================================================
+// 📌 GET SELLER BY ID (utilisé par le frontend pour autoSyncCart / seller infos)
+// ======================================================
+const Seller = require("../models/Seller");
+
+router.get("/seller/:id", verifyToken, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.params.id);
+
+    if (!seller) {
+      return res.status(404).json({ message: "Seller introuvable" });
+    }
+
+    // 🔒 Sécurité : seul le vendeur connecté ou un admin peut voir ses infos
+    if (req.user.role !== "admin" && req.user.id !== seller._id.toString()) {
+      return res.status(401).json({ message: "Utilisateur non authentifié" });
+    }
+
+    res.status(200).json({
+      success: true,
+      seller,
+    });
+  } catch (err) {
+    console.error("❌ Erreur GET /api/cinetpay/seller/:id :", err);
+    res.status(500).json({ message: "Erreur serveur lors de la récupération du vendeur" });
+  }
+});
+
 module.exports = router;
