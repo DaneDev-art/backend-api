@@ -102,9 +102,31 @@ router.post("/register", async (req, res) => {
       userData.role = "buyer";
     }
 
-    // ✅ Sauvegarde en base
+    // ✅ Sauvegarde de l'utilisateur
     const user = new User(userData);
     await user.save();
+
+    // ✅ Création automatique du Seller si role === "seller"
+    if (user.role === "seller") {
+      const Seller = require("../models/Seller"); // ✅ importe ton modèle Seller
+
+      const existingSeller = await Seller.findOne({ email: user.email });
+      if (!existingSeller) {
+        await Seller.create({
+          name: user.ownerName || user.shopName || user.email.split("@")[0],
+          surname: "",
+          email: user.email,
+          phone: user.phone || "",
+          prefix: "228",
+          balance_locked: 0,
+          balance_available: 0,
+          payout_method: "MOBILE_MONEY",
+          cinetpay_contact_added: false,
+          cinetpay_contact_meta: [],
+        });
+        console.log(`✅ Seller créé automatiquement pour ${user.email}`);
+      }
+    }
 
     // ✅ Token JWT
     const token = signToken(user);
