@@ -370,11 +370,21 @@ static async createPayIn({
   // 🔹 Génère un ID unique
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  // 🔹 Crée une transaction Mongo valide
+  // 🔹 Définit des URLs sûres
+  returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+
+  // 🔹 Nettoyage infos client
+  buyerEmail = (buyerEmail || "").trim() || null;
+  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null; // supprime tout sauf chiffres
+
+  const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
+
+  // 🔹 Crée une transaction Mongo
   const tx = new PayinTransaction({
     seller: seller._id,
     sellerId: seller._id,
-    clientId: clientId || new mongoose.Types.ObjectId(), // fallback si client non fourni
+    clientId: clientId || new mongoose.Types.ObjectId(),
     amount,
     netAmount,
     fees: feeAmount,
@@ -382,9 +392,9 @@ static async createPayIn({
     transaction_id,
     description: description || `Paiement vendeur ${seller.name || seller._id}`,
     customer: {
-      email: buyerEmail || null,
-      phone_number: buyerPhone || null,
-      name: buyerEmail ? buyerEmail.split("@")[0] : "Client",
+      email: buyerEmail,
+      phone_number: buyerPhone,
+      name: customerName,
     },
     status: "PENDING",
   });
@@ -392,6 +402,7 @@ static async createPayIn({
   await tx.save();
 
   // 🔹 Construction du payload CinetPay
+  const payinUrl = CINETPAY_PAYIN_URL || `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
   const payload = {
     amount,
     currency,
@@ -399,17 +410,17 @@ static async createPayIn({
     transaction_id,
     return_url: returnUrl,
     notify_url: notifyUrl,
-    customer_name: buyerEmail?.split("@")[0] || "client",
+    customer_name: customerName,
     customer_surname: "achat",
     customer_email: buyerEmail,
-    customer_phone_number: buyerPhone?.replace("+", "") || "",
+    customer_phone_number: buyerPhone || "",
     metadata: { sellerId },
   };
 
   console.log("[CinetPay][createPayIn] Payload:", payload);
 
   try {
-    const resp = await axios.post(CINETPAY_PAYIN_URL, payload, {
+    const resp = await axios.post(payinUrl, payload, {
       headers: {
         Authorization: `Bearer ${CINETPAY_API_KEY}`,
         "Content-Type": "application/json",
@@ -420,7 +431,6 @@ static async createPayIn({
     const respData = resp.data;
     tx.raw_response = respData;
 
-    // ✅ Réponse correcte
     if (respData.code === 0 || respData.code === "0") {
       tx.status = "PENDING";
       tx.payment_token = respData.data?.payment_token;
@@ -435,7 +445,6 @@ static async createPayIn({
         fees: feeAmount,
       };
     } else {
-      // ❌ Réponse CinetPay non valide
       tx.status = "FAILED";
       tx.message = respData.message || "Erreur CinetPay";
       await tx.save();
