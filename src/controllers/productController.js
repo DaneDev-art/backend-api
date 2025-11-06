@@ -94,7 +94,7 @@ exports.getProductsBySeller = async (req, res) => {
 exports.addProduct = async (req, res) => {
   try {
     const { name, description, price, category, images } = req.body;
-    const sellerId = req.user.id;
+    const sellerId = req.user._id; // ✅ Correction ici
 
     if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
     if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
@@ -160,7 +160,7 @@ exports.addProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user.id;
+    const sellerId = req.user._id; // ✅ Correction ici
     const { name, description, price, category, images } = req.body;
 
     const product = await Product.findOne({ _id: productId, seller: sellerId });
@@ -194,7 +194,7 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user.id;
+    const sellerId = req.user._id; // ✅ Correction ici
 
     const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
     if (!deleted) return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });

@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 
 // 🔹 Middleware pour vérifier que l'utilisateur est connecté
 const verifyToken = (req, res, next) => {
+  // Vérifie les deux variantes d'en-tête possibles
   const authHeader = req.headers.authorization || req.headers.Authorization;
 
   console.log("🧾 [DEBUG AUTH] Headers reçus:", req.headers);
