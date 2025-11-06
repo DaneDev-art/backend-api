@@ -1,11 +1,16 @@
+// ==========================================
+// src/middleware/auth.middleware.js
+// ==========================================
 const jwt = require("jsonwebtoken");
 
 // 🔹 Middleware pour vérifier que l'utilisateur est connecté
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+
+  console.log("🧾 [DEBUG AUTH] Headers reçus:", req.headers);
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    console.warn("⚠️ Middleware Auth: Token manquant ou mal formaté");
+    console.warn("⚠️ [DEBUG AUTH] Token manquant ou mal formaté:", authHeader);
     return res.status(401).json({ message: "Token manquant ou invalide" });
   }
 
@@ -18,6 +23,7 @@ const verifyToken = (req, res, next) => {
     }
 
     const payload = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("✅ [DEBUG AUTH] Token décodé:", payload);
 
     // Stocke les informations utiles dans req.user
     req.user = {
@@ -29,7 +35,7 @@ const verifyToken = (req, res, next) => {
 
     next();
   } catch (err) {
-    console.error("❌ JWT invalide:", err.message);
+    console.error("❌ [DEBUG AUTH] JWT invalide:", err.message);
     return res.status(401).json({ message: "Token invalide" });
   }
 };
