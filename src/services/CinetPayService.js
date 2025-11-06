@@ -52,6 +52,14 @@ const {
   BASE_URL,
 } = config;
 
+// ✅ Définir CINETPAY_PAYIN_URL (évite l'erreur "is not defined")
+const CINETPAY_PAYIN_URL =
+  config.CINETPAY_PAYIN_URL ||
+  process.env.CINETPAY_PAYIN_URL ||
+  (CINETPAY_BASE_URL
+    ? `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`
+    : "https://api-checkout.cinetpay.com/v2/payment");
+
 // =================== FRAIS ===================
 const FEES = {
   payinCinetPay: 0.035,
