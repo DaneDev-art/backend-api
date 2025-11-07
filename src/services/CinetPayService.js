@@ -425,7 +425,7 @@ static async createPayIn({
     customer_surname: "achat",
     customer_email: buyerEmail,
     customer_phone_number: buyerPhone || "",
-    metadata: { sellerId },
+    metadata: JSON.stringify({ sellerId }), // ✅ correction ici
   };
 
   console.log("[CinetPay][createPayIn] Payload:", payload);
