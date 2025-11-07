@@ -431,44 +431,54 @@ static async createPayIn({
   console.log("[CinetPay][createPayIn] Payload:", payload);
 
   try {
-    const resp = await axios.post(payinUrl, payload, {
-      headers: {
-        "Content-Type": "application/json",
-      },
-      timeout: 20000,
+  const resp = await axios.post(payinUrl, payload, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 20000,
+  });
+
+  const respData = resp.data;
+  tx.raw_response = respData;
+
+  // ✅ Vérifie plusieurs formats possibles de succès
+  const isSuccess =
+    respData.code === 0 ||
+    respData.code === "0" ||
+    respData.code === 201 ||
+    respData.code === "201" ||
+    (respData.message && respData.message.toUpperCase() === "CREATED");
+
+  if (isSuccess) {
+    tx.status = "PENDING";
+    tx.payment_token = respData.data?.payment_token;
+    tx.message = respData.message || "Transaction créée avec succès";
+    await tx.save();
+
+    console.log("✅ [CinetPay] Transaction créée avec succès :", {
+      transaction_id,
+      payment_url: respData.data?.payment_url,
     });
 
-    const respData = resp.data;
-    tx.raw_response = respData;
-
-    if (respData.code === 0 || respData.code === "0") {
-      tx.status = "PENDING";
-      tx.payment_token = respData.data?.payment_token;
-      tx.message = respData.message;
-      await tx.save();
-
-      return {
-        success: true,
-        transaction_id,
-        payment_url: respData.data?.payment_url,
-        netAmount,
-        fees: feeAmount,
-      };
-    } else {
-      tx.status = "FAILED";
-      tx.message = respData.message || "Erreur CinetPay";
-      await tx.save();
-      throw new Error(`CinetPay erreur: ${tx.message}`);
-    }
-  } catch (err) {
-    const body = err.response?.data || err.message;
-    console.error("[CinetPay][createPayIn] API error:", body);
+    return {
+      success: true,
+      transaction_id,
+      payment_url: respData.data?.payment_url,
+      netAmount,
+      fees: feeAmount,
+    };
+  } else {
     tx.status = "FAILED";
-    tx.raw_response = body;
-    tx.message = body?.message || body?.description || body;
+    tx.message = respData.message || respData.description || "Erreur CinetPay";
     await tx.save();
-    throw new Error(`Erreur interne createPayIn: ${tx.message}`);
+    throw new Error(`CinetPay erreur: ${tx.message}`);
   }
+} catch (err) {
+  const body = err.response?.data || err.message;
+  console.error("[CinetPay][createPayIn] API error:", body);
+  tx.status = "FAILED";
+  tx.raw_response = body;
+  tx.message = body?.message || body?.description || body;
+  await tx.save();
+  throw new Error(`Erreur interne createPayIn: ${tx.message}`);
 }
 
   // ============================ VERIFY PAYIN (FINAL & SAFE) ============================
