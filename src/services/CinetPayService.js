@@ -379,13 +379,13 @@ static async createPayIn({
   const transaction_id = this.generateTransactionId("PAYIN");
 
   // 🔹 Définit des URLs sûres
-  returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-  notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  const safeBaseUrl = BASE_URL || NGROK_URL || "https://backend-api-m0tf.onrender.com";
+  const safeReturnUrl = returnUrl || `${safeBaseUrl}/api/cinetpay/payin/verify`;
+  const safeNotifyUrl = notifyUrl || `${safeBaseUrl}/api/cinetpay/payin/verify`;
 
   // 🔹 Nettoyage infos client
   buyerEmail = (buyerEmail || "").trim() || null;
-  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null; // supprime tout sauf chiffres
-
+  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null;
   const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
 
   // 🔹 Crée une transaction Mongo
@@ -398,7 +398,7 @@ static async createPayIn({
     fees: feeAmount,
     currency,
     transaction_id,
-    description: description || `Paiement vendeur ${seller.name || seller._id}`,
+    description: description || `Paiement vendeur ${seller.shopName || seller.name || seller._id}`,
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
@@ -409,15 +409,18 @@ static async createPayIn({
 
   await tx.save();
 
-  // 🔹 Construction du payload CinetPay
-  const payinUrl = CINETPAY_PAYIN_URL || `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+  // ✅ Construction du payload CinetPay (avec les champs obligatoires)
+  const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+
   const payload = {
+    apikey: CINETPAY_API_KEY,
+    site_id: CINETPAY_SITE_ID,
+    transaction_id,
     amount,
     currency,
-    description: description || "Paiement eMarket",
-    transaction_id,
-    return_url: returnUrl,
-    notify_url: notifyUrl,
+    description: description || `Paiement vers ${seller.shopName || "vendeur"}`,
+    return_url: safeReturnUrl,
+    notify_url: safeNotifyUrl,
     customer_name: customerName,
     customer_surname: "achat",
     customer_email: buyerEmail,
@@ -430,7 +433,6 @@ static async createPayIn({
   try {
     const resp = await axios.post(payinUrl, payload, {
       headers: {
-        Authorization: `Bearer ${CINETPAY_API_KEY}`,
         "Content-Type": "application/json",
       },
       timeout: 20000,
