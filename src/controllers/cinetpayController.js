@@ -96,20 +96,80 @@ module.exports = {
   },
 
   // ======================================================
-  // 🟡 VERIFY PAYIN
-  // ======================================================
-  verifyPayIn: async (req, res) => {
-    try {
-      const { transaction_id } = req.body;
-      if (!transaction_id) return res.status(400).json({ error: "transaction_id requis" });
+// 🟡 VERIFY PAYIN — Corrigé (gère CinetPay et manuel)
+// ======================================================
+verifyPayIn: async (req, res) => {
+  try {
+    // CinetPay peut envoyer "cpm_trans_id" ou "transaction_id"
+    const transactionId =
+      req.body.transaction_id ||
+      req.body.cpm_trans_id ||
+      req.query.transaction_id;
 
-      const result = await CinetPayService.verifyPayIn(transaction_id);
-      res.json({ success: true, data: result });
-    } catch (err) {
-      console.error("❌ verifyPayIn:", err);
-      res.status(500).json({ error: err.message });
+    if (!transactionId) {
+      console.warn("⚠️ verifyPayIn appelé sans transaction_id:", req.body);
+      return res.status(400).json({ error: "transaction_id requis" });
     }
-  },
+
+    console.log("🔍 [verifyPayIn] Vérification transaction:", transactionId);
+
+    // 🔹 Vérifie la transaction auprès de CinetPay
+    const result = await CinetPayService.verifyPayIn(transactionId);
+    const status = result.status || result.cpm_result || "UNKNOWN";
+
+    console.log("✅ [verifyPayIn] Statut CinetPay:", status);
+
+    // 🔹 Récupère la transaction locale
+    const transaction = await PayinTransaction.findOne({ transaction_id: transactionId });
+    if (!transaction) {
+      console.warn("⚠️ Transaction introuvable dans la base:", transactionId);
+      return res.status(404).json({ error: "Transaction inconnue" });
+    }
+
+    // 🔹 Si succès → débloque le solde du vendeur
+    if (status.toUpperCase() === "ACCEPTED" || status.toUpperCase() === "SUCCESS") {
+      const seller = await Seller.findById(transaction.sellerId);
+      if (seller) {
+        seller.balance_locked = Math.max((seller.balance_locked || 0) - transaction.netAmount, 0);
+        seller.balance_available = (seller.balance_available || 0) + transaction.netAmount;
+        await seller.save();
+      }
+
+      transaction.status = "SUCCESS";
+      transaction.cinetpay_status = status;
+      transaction.verifiedAt = new Date();
+      transaction.message = "Paiement validé avec succès.";
+      await transaction.save();
+
+      console.log(`💰 Paiement confirmé: ${transactionId}`);
+      return res.status(200).json({ success: true, status: "SUCCESS", transaction });
+    }
+
+    // 🔹 Si échec
+    if (status.toUpperCase() === "REFUSED" || status.toUpperCase() === "FAILED") {
+      transaction.status = "FAILED";
+      transaction.cinetpay_status = status;
+      transaction.message = "Paiement refusé ou échoué.";
+      await transaction.save();
+
+      return res.status(200).json({ success: false, status: "FAILED" });
+    }
+
+    // 🔹 Sinon, paiement toujours en attente
+    transaction.cinetpay_status = status;
+    transaction.message = "Paiement en attente de confirmation.";
+    await transaction.save();
+
+    return res.status(200).json({
+      success: true,
+      status: "PENDING",
+      message: "Paiement en attente",
+    });
+  } catch (err) {
+    console.error("❌ verifyPayIn:", err);
+    res.status(500).json({ error: err.message });
+  }
+},
 
   // ======================================================
   // 🔵 CREATE PAYOUT
