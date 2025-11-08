@@ -15,85 +15,88 @@ const BASE_URL =
 
 module.exports = {
   // ======================================================
-  // 🟢 CREATE PAYIN
-  // ======================================================
-  createPayIn: async (req, res) => {
-    try {
-      const { amount, currency = "XOF", description, sellerId, returnUrl, notifyUrl } = req.body;
+ // 🟢 CREATE PAYIN — corrigé avec frais fixe
+// ======================================================
+createPayIn: async (req, res) => {
+  try {
+    const { amount, currency = "XOF", description, sellerId, returnUrl, notifyUrl } = req.body;
 
-      if (!sellerId || !amount)
-        return res.status(400).json({ error: "sellerId et amount sont requis" });
+    if (!sellerId || !amount)
+      return res.status(400).json({ error: "sellerId et amount sont requis" });
 
-      const clientId = req.user?.id || req.user?._id;
-      if (!clientId) return res.status(500).json({ error: "clientId introuvable" });
+    const clientId = req.user?.id || req.user?._id;
+    if (!clientId) return res.status(500).json({ error: "clientId introuvable" });
 
-      // Recherche vendeur
-      let seller = await Seller.findById(sellerId);
-      if (!seller) seller = await User.findById(sellerId);
-      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
-      if (seller.role && seller.role.toLowerCase() !== "seller")
-        return res.status(400).json({ error: "Compte non vendeur" });
+    // Recherche vendeur
+    let seller = await Seller.findById(sellerId);
+    if (!seller) seller = await User.findById(sellerId);
+    if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
+    if (seller.role && seller.role.toLowerCase() !== "seller")
+      return res.status(400).json({ error: "Compte non vendeur" });
 
-      const safeReturnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-      const safeNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+    const safeReturnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+    const safeNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-      console.log("📦 Requête PAYIN reçue:", req.body);
-      console.log("🔗 URLs:", { safeReturnUrl, safeNotifyUrl });
+    console.log("📦 Requête PAYIN reçue:", req.body);
+    console.log("🔗 URLs:", { safeReturnUrl, safeNotifyUrl });
 
-      // 🔹 Appel du service CinetPay
-      const result = await CinetPayService.createPayIn({
-        amount,
-        currency,
-        buyerEmail: req.user?.email || null,
-        buyerPhone: req.user?.phone || null,
-        description: description || `Paiement vers ${seller.name || "vendeur"}`,
-        sellerId,
-        clientId,
-        returnUrl: safeReturnUrl,
-        notifyUrl: safeNotifyUrl,
-      });
+    // 🔹 Appel du service CinetPay
+    const result = await CinetPayService.createPayIn({
+      amount,
+      currency,
+      buyerEmail: req.user?.email || null,
+      buyerPhone: req.user?.phone || null,
+      description: description || `Paiement vers ${seller.name || "vendeur"}`,
+      sellerId,
+      clientId,
+      returnUrl: safeReturnUrl,
+      notifyUrl: safeNotifyUrl,
+    });
 
-      if (!result || !result.payment_url) {
-        console.error("⚠️ Erreur de réponse CinetPay:", result);
-        return res.status(502).json({ error: "Erreur création paiement CinetPay" });
-      }
-
-      // 🔹 Calcul montant net et verrouillage
-      const netAmount = result.netAmount || amount - amount * TOTAL_FEES;
-      seller.balance_locked = (seller.balance_locked || 0) + netAmount;
-      await seller.save();
-
-      // 🔹 Sauvegarde transaction MongoDB
-      await PayinTransaction.create({
-        transaction_id: result.transaction_id,
-        seller: seller._id,
-        sellerId: seller._id,
-        clientId,
-        amount,
-        netAmount,
-        currency,
-        status: "PENDING",
-        payment_token: result.payment_token,
-        paymentUrl: result.payment_url,
-      });
-
-      console.log("✅ PAYIN créé:", result.transaction_id);
-
-      return res.status(201).json({
-        success: true,
-        transaction_id: result.transaction_id,
-        payment_url: result.payment_url,
-        netAmount,
-        fees: result.fees,
-      });
-    } catch (err) {
-      console.error("❌ Erreur createPayIn:", err.response?.data || err.message);
-      res.status(500).json({
-        error: "Erreur interne serveur createPayIn",
-        details: err.response?.data || err.message,
-      });
+    if (!result || !result.payment_url) {
+      console.error("⚠️ Erreur de réponse CinetPay:", result);
+      return res.status(502).json({ error: "Erreur création paiement CinetPay" });
     }
-  },
+
+    // =================== CALCUL DES FRAIS ===================
+    // Frais fixes : 3,5% CinetPay + 1,5% payout + 2% app = 7%
+    const netAmount = amount - amount * TOTAL_FEES;
+
+    seller.balance_locked = (seller.balance_locked || 0) + netAmount;
+    await seller.save();
+
+    // 🔹 Sauvegarde transaction MongoDB
+    await PayinTransaction.create({
+      transaction_id: result.transaction_id,
+      seller: seller._id,
+      sellerId: seller._id,
+      clientId,
+      amount,
+      netAmount,
+      currency,
+      status: "PENDING",
+      payment_token: result.payment_token,
+      paymentUrl: result.payment_url,
+      fees: amount * TOTAL_FEES, // sauvegarde les frais calculés
+    });
+
+    console.log("✅ PAYIN créé:", result.transaction_id);
+
+    return res.status(201).json({
+      success: true,
+      transaction_id: result.transaction_id,
+      payment_url: result.payment_url,
+      netAmount,
+      fees: amount * TOTAL_FEES,
+    });
+  } catch (err) {
+    console.error("❌ Erreur createPayIn:", err.response?.data || err.message);
+    res.status(500).json({
+      error: "Erreur interne serveur createPayIn",
+      details: err.response?.data || err.message,
+    });
+  }
+},
 
   // ======================================================
 // 🟡 VERIFY PAYIN — Corrigé (gère CinetPay et manuel)
