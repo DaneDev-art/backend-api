@@ -378,23 +378,16 @@ static async createPayIn({
   // 🔹 Génère un ID unique
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  // =====================================================
-  // ✅ Construction des URLs sûres
-  // =====================================================
-  const backendBase =
-    BASE_URL ||
-    process.env.BASE_URL ||
-    "https://backend-api-m0tf.onrender.com";
-
-  const safeReturnUrl = (returnUrl || `${backendBase}/api/cinetpay/payin/verify`).replace(/\/+$/, "");
-  const safeNotifyUrl = (notifyUrl || `${backendBase}/api/cinetpay/payin/verify`).replace(/\/+$/, "");
+  // 🔹 Définit des URLs fallback sûres
+  returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
   // 🔹 Nettoyage infos client
   buyerEmail = (buyerEmail || "").trim() || null;
-  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null;
+  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null; // supprime tout sauf chiffres
   const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
 
-  // 🔹 Crée la transaction MongoDB
+  // 🔹 Crée la transaction MongoDB (tous champs requis garantis)
   const tx = new PayinTransaction({
     seller: seller._id,
     sellerId: seller._id,
@@ -413,6 +406,7 @@ static async createPayIn({
     status: "PENDING",
   });
 
+  console.log("[PayIn] Création transaction:", { transaction_id, netAmount, clientId: tx.clientId, seller: tx.seller });
   await tx.save();
 
   // 🔹 Construction du payload CinetPay
@@ -424,8 +418,8 @@ static async createPayIn({
     amount,
     currency,
     description: description || "Paiement eMarket",
-    return_url: safeReturnUrl,
-    notify_url: safeNotifyUrl,
+    return_url: returnUrl,
+    notify_url: notifyUrl,
     customer_name: customerName,
     customer_surname: "achat",
     customer_email: buyerEmail,
@@ -444,7 +438,6 @@ static async createPayIn({
     const respData = resp.data;
     tx.raw_response = respData;
 
-    // ✅ Vérifie les différents formats de succès
     const isSuccess =
       respData.code === 0 ||
       respData.code === "0" ||
@@ -458,11 +451,7 @@ static async createPayIn({
       tx.message = respData.message || "Transaction créée avec succès";
       await tx.save();
 
-      console.log("✅ [CinetPay] Transaction créée avec succès :", {
-        transaction_id,
-        payment_url: respData.data?.payment_url,
-      });
-
+      console.log("✅ [CinetPay] Transaction créée :", { transaction_id, payment_url: respData.data?.payment_url });
       return {
         success: true,
         transaction_id,
