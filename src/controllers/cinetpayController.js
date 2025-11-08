@@ -99,14 +99,15 @@ createPayIn: async (req, res) => {
 },
 
   // ======================================================
-// 🟡 VERIFY PAYIN — Corrigé (gère CinetPay et manuel)
+// 🟡 VERIFY PAYIN — robuste et compatible tous formats
 // ======================================================
 verifyPayIn: async (req, res) => {
   try {
-    // CinetPay peut envoyer "cpm_trans_id" ou "transaction_id"
+    // Supporte tous les noms possibles de la transaction
     const transactionId =
       req.body.transaction_id ||
       req.body.cpm_trans_id ||
+      req.body.transactionId ||   // Accepté côté frontend / webhook
       req.query.transaction_id;
 
     if (!transactionId) {
@@ -130,7 +131,7 @@ verifyPayIn: async (req, res) => {
     }
 
     // 🔹 Si succès → débloque le solde du vendeur
-    if (status.toUpperCase() === "ACCEPTED" || status.toUpperCase() === "SUCCESS") {
+    if (["ACCEPTED", "SUCCESS"].includes(status.toUpperCase())) {
       const seller = await Seller.findById(transaction.sellerId);
       if (seller) {
         seller.balance_locked = Math.max((seller.balance_locked || 0) - transaction.netAmount, 0);
@@ -149,7 +150,7 @@ verifyPayIn: async (req, res) => {
     }
 
     // 🔹 Si échec
-    if (status.toUpperCase() === "REFUSED" || status.toUpperCase() === "FAILED") {
+    if (["REFUSED", "FAILED"].includes(status.toUpperCase())) {
       transaction.status = "FAILED";
       transaction.cinetpay_status = status;
       transaction.message = "Paiement refusé ou échoué.";
