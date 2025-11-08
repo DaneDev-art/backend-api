@@ -378,13 +378,20 @@ static async createPayIn({
   // 🔹 Génère un ID unique
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  // 🔹 Définit des URLs sûres
-  returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-  notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  // =====================================================
+  // ✅ Construction des URLs sûres
+  // =====================================================
+  const backendBase =
+    BASE_URL ||
+    process.env.BASE_URL ||
+    "https://backend-api-m0tf.onrender.com";
+
+  const safeReturnUrl = (returnUrl || `${backendBase}/api/cinetpay/payin/verify`).replace(/\/+$/, "");
+  const safeNotifyUrl = (notifyUrl || `${backendBase}/api/cinetpay/payin/verify`).replace(/\/+$/, "");
 
   // 🔹 Nettoyage infos client
   buyerEmail = (buyerEmail || "").trim() || null;
-  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null; // supprime tout sauf chiffres
+  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null;
   const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
 
   // 🔹 Crée la transaction MongoDB
@@ -417,8 +424,8 @@ static async createPayIn({
     amount,
     currency,
     description: description || "Paiement eMarket",
-    return_url: returnUrl,
-    notify_url: notifyUrl,
+    return_url: safeReturnUrl,
+    notify_url: safeNotifyUrl,
     customer_name: customerName,
     customer_surname: "achat",
     customer_email: buyerEmail,
