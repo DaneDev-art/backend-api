@@ -582,40 +582,9 @@ static async verifyPayIn(transaction_id) {
   }
 
   // =====================================================
-  // ⚠️ CAS EN ATTENTE / ANNULÉ / REFUSÉ
-  // =====================================================
-  if (["REFUSED", "CANCELED", "FAILED"].includes(status)) {
-    tx.status = "FAILED";
-    await tx.save();
-
-    console.warn(`[CinetPay][VerifyPayIn] Paiement refusé ou annulé: ${transaction_id}`);
-    return {
-      success: false,
-      message: `Paiement ${status.toLowerCase()}`,
-      transaction_id,
-      status,
-    };
-  }
-
-  // =====================================================
-  // ⏳ CAS PAR DÉFAUT (toujours en attente)
-  // =====================================================
-  tx.status = "PENDING";
-  await tx.save();
-
-  console.log(`[CinetPay][VerifyPayIn] Paiement en attente: ${transaction_id}`);
-  return {
-    success: false,
-    message: "Paiement en attente de confirmation",
-    transaction_id,
-    status,
-  };
-}
-
-  // =====================================================
   // ❌ CAS ÉCHEC / ANNULATION
   // =====================================================
-  else if (statusString.includes("FAILED") || statusString.includes("CANCEL")) {
+  else if (["REFUSED", "CANCELED", "CANCELLED", "FAILED"].includes(status)) {
     if (tx.status !== "FAILED") {
       tx.status = "FAILED";
       await tx.save();
@@ -632,6 +601,14 @@ static async verifyPayIn(transaction_id) {
         console.error("[CinetPay][VerifyPayIn] Échec déverrouillage balance vendeur:", err.message);
       }
     }
+
+    console.warn(`[CinetPay][VerifyPayIn] Paiement refusé/annulé: ${transaction_id}`);
+    return {
+      success: false,
+      message: `Paiement ${status.toLowerCase()}`,
+      transaction_id,
+      status,
+    };
   }
 
   // =====================================================
@@ -640,9 +617,15 @@ static async verifyPayIn(transaction_id) {
   else {
     tx.status = "PENDING";
     await tx.save();
-  }
 
-  return { success: true, normalized };
+    console.log(`[CinetPay][VerifyPayIn] Paiement en attente: ${transaction_id}`);
+    return {
+      success: false,
+      message: "Paiement en attente de confirmation",
+      transaction_id,
+      status,
+    };
+  }
 }
 
   // ============================ PAYOUT (FINAL PRODUCTION VERSION) ============================
