@@ -410,22 +410,25 @@ static async createPayIn({
   await tx.save();
 
   // 🔹 Construction du payload CinetPay
-  const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
-  const payload = {
-    apikey: CINETPAY_API_KEY,
-    site_id: CINETPAY_SITE_ID,
-    transaction_id,
-    amount,
-    currency,
-    description: description || "Paiement eMarket",
-    return_url: returnUrl,
-    notify_url: notifyUrl,
-    customer_name: customerName,
-    customer_surname: "achat",
-    customer_email: buyerEmail,
-    customer_phone_number: buyerPhone || "",
-    metadata: JSON.stringify({ sellerId }),
-  };
+const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+
+const payload = {
+  apikey: CINETPAY_API_KEY,
+  site_id: CINETPAY_SITE_ID,
+  transaction_id,
+  amount,
+  currency: currency || "XOF",
+  description: description || "Paiement eMarket",
+  return_url: returnUrl,
+  notify_url: notifyUrl,
+  customer_name: customerName || "Client",
+  customer_surname: "achat",
+  customer_email: buyerEmail || "client@emarket.tg",
+  customer_phone_number: buyerPhone?.replace("+228", "").trim() || "",
+  customer_address: "Lome, Togo",
+  channels: "MOBILE_MONEY", // ✅ Force l’opérateur mobile money
+  metadata: JSON.stringify({ sellerId: sellerId || null }),
+};
 
   console.log("[CinetPay][createPayIn] Payload:", payload);
 
