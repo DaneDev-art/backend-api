@@ -1,9 +1,11 @@
 // ===============================
-// routes/messageRoutes.js (Version Debug/Améliorée)
+// routes/messageRoutes.js (Version PRO)
 // ===============================
 const express = require("express");
 const router = express.Router();
 const Message = require("../models/Message");
+const User = require("../models/User");
+const Product = require("../models/Product");
 
 // ============================================
 // ⚙️ Configuration Socket.IO (injection depuis server.js)
@@ -20,7 +22,6 @@ router.post("/", async (req, res) => {
   try {
     const { senderId, receiverId, message, productId } = req.body;
 
-    // Vérifications détaillées
     if (!senderId) return res.status(400).json({ error: "Champs manquant: senderId" });
     if (!receiverId) return res.status(400).json({ error: "Champs manquant: receiverId" });
     if (!message || typeof message !== "string" || message.trim() === "") {
@@ -50,13 +51,13 @@ router.post("/", async (req, res) => {
   }
 });
 
+
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user
+// 🔹 Récupérer toutes les conversations d’un user (avec infos vendeur + produit)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-
     if (!userId) return res.status(400).json({ error: "Champs manquant: userId" });
 
     const messages = await Message.find({
@@ -65,8 +66,9 @@ router.get("/conversations/:userId", async (req, res) => {
 
     const convMap = new Map();
 
-    messages.forEach((msg) => {
-      if (!msg.from || !msg.to) return;
+    // 🧩 Regrouper par (autre utilisateur + produit)
+    for (const msg of messages) {
+      if (!msg.from || !msg.to) continue;
       const otherUserId = msg.from === userId ? msg.to : msg.from;
       const key = `${otherUserId}_${msg.productId || "no_product"}`;
 
@@ -79,14 +81,57 @@ router.get("/conversations/:userId", async (req, res) => {
           unread: msg.unread?.includes(userId),
         });
       }
+    }
+
+    const conversations = Array.from(convMap.values());
+
+    // 🧠 Charger les infos utilisateurs
+    const userIds = conversations.map((c) => c.otherUserId);
+    const users = await User.find({ _id: { $in: userIds } })
+      .select("name username fullName shopName nom email avatar profileImage isOnline");
+
+    const userMap = Object.fromEntries(users.map((u) => [u._id.toString(), u]));
+
+    // 🧩 Charger les produits associés
+    const productIds = conversations
+      .map((c) => c.productId)
+      .filter((id) => id && id !== "no_product");
+
+    let products = [];
+    if (productIds.length > 0) {
+      products = await Product.find({ _id: { $in: productIds } })
+        .select("name title price images");
+    }
+
+    const productMap = Object.fromEntries(products.map((p) => [p._id.toString(), p]));
+
+    // 🔗 Enrichir les conversations
+    const enrichedConversations = conversations.map((c) => {
+      const product = productMap[c.productId];
+      return {
+        ...c,
+        otherUser:
+          userMap[c.otherUserId] || {
+            name: "Utilisateur inconnu",
+            avatar: "",
+            isOnline: false,
+          },
+        productName: product?.name || product?.title || null,
+        productPrice: product?.price || null,
+        productImage: product?.images?.[0] || null,
+      };
     });
 
-    res.json(Array.from(convMap.values()));
+    res.json(enrichedConversations);
   } catch (err) {
     console.error("❌ Erreur GET /conversations :", err);
-    res.status(500).json({ error: "Erreur serveur lors de la récupération des conversations", details: err.message });
+    res.status(500).json({
+      error: "Erreur serveur lors de la récupération des conversations",
+      details: err.message,
+    });
   }
 });
+
 
 // ============================================
 // 🔹 Récupérer tous les messages entre 2 utilisateurs
@@ -110,6 +155,7 @@ router.get("/:user1/:user2", async (req, res) => {
     res.status(500).json({ error: "Erreur serveur lors de la récupération des messages", details: err.message });
   }
 });
+
 
 // ============================================
 // 🔹 Marquer les messages comme lus
@@ -138,6 +184,7 @@ router.put("/markAsRead", async (req, res) => {
     res.status(500).json({ error: "Erreur serveur lors du marquage des messages", details: err.message });
   }
 });
+
 
 // ============================================
 // ✅ Export du router et initSocket
