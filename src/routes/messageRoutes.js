@@ -1,5 +1,5 @@
 // ===============================
-// routes/messageRoutes.js (Version PRO)
+// routes/messageRoutes.js (Version PRO corrigée)
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -51,9 +51,8 @@ router.post("/", async (req, res) => {
   }
 });
 
-
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user (avec infos vendeur + produit)
+// 🔹 Récupérer toutes les conversations d’un user (avec infos utilisateur + produit)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
@@ -66,7 +65,6 @@ router.get("/conversations/:userId", async (req, res) => {
 
     const convMap = new Map();
 
-    // 🧩 Regrouper par (autre utilisateur + produit)
     for (const msg of messages) {
       if (!msg.from || !msg.to) continue;
       const otherUserId = msg.from === userId ? msg.to : msg.from;
@@ -123,6 +121,7 @@ router.get("/conversations/:userId", async (req, res) => {
     });
 
     res.json(enrichedConversations);
+
   } catch (err) {
     console.error("❌ Erreur GET /conversations :", err);
     res.status(500).json({
@@ -132,14 +131,12 @@ router.get("/conversations/:userId", async (req, res) => {
   }
 });
 
-
 // ============================================
 // 🔹 Récupérer tous les messages entre 2 utilisateurs
 // ============================================
 router.get("/:user1/:user2", async (req, res) => {
   try {
     const { user1, user2 } = req.params;
-
     if (!user1 || !user2) return res.status(400).json({ error: "Champs manquants: user1 et user2" });
 
     const messages = await Message.find({
@@ -150,12 +147,12 @@ router.get("/:user1/:user2", async (req, res) => {
     }).sort({ createdAt: 1 });
 
     res.json(messages);
+
   } catch (err) {
     console.error("❌ Erreur GET /messages :", err);
     res.status(500).json({ error: "Erreur serveur lors de la récupération des messages", details: err.message });
   }
 });
-
 
 // ============================================
 // 🔹 Marquer les messages comme lus
@@ -163,7 +160,6 @@ router.get("/:user1/:user2", async (req, res) => {
 router.put("/markAsRead", async (req, res) => {
   try {
     const { userId, otherUserId, productId } = req.body;
-
     if (!userId) return res.status(400).json({ error: "Champs manquant: userId" });
     if (!otherUserId) return res.status(400).json({ error: "Champs manquant: otherUserId" });
 
@@ -184,7 +180,6 @@ router.put("/markAsRead", async (req, res) => {
     res.status(500).json({ error: "Erreur serveur lors du marquage des messages", details: err.message });
   }
 });
-
 
 // ============================================
 // ✅ Export du router et initSocket
