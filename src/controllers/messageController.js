@@ -100,22 +100,31 @@ exports.markAsRead = async (req, res) => {
 exports.getConversations = async (req, res) => {
   try {
     const { userId } = req.params;
-
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
-    // Récupérer tous les messages de l'utilisateur, triés par date décroissante
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
-    }).sort({ createdAt: -1 });
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!messages || messages.length === 0) {
+      return res.json([]);
+    }
 
     const conversationsMap = new Map();
 
     for (const msg of messages) {
-      const otherUserId = msg.from.toString() === userId ? msg.to.toString() : msg.from.toString();
+      const fromId = msg.from?.toString();
+      const toId = msg.to?.toString();
+      if (!fromId || !toId) continue;
+
+      const otherUserId = fromId === userId ? toId : fromId;
+      if (!otherUserId) continue;
+
       const key = `${otherUserId}_${msg.productId || "none"}`;
 
       if (!conversationsMap.has(key)) {
-        // Récupérer les infos de l'autre utilisateur
         const otherUser = await User.findById(otherUserId).select(
           "name username fullName shopName avatar isOnline"
         );
@@ -140,8 +149,14 @@ exports.getConversations = async (req, res) => {
           productName: msg.productName || "",
           productImage: msg.productImage || "",
           productPrice: msg.productPrice || null,
-          unread: msg.unread.includes(userId) ? 1 : 0,
+          unread: msg.unread?.includes(userId) ? 1 : 0,
         });
+      } else {
+        // cumule les non-lus si plusieurs messages de cette conversation
+        const existing = conversationsMap.get(key);
+        if (msg.unread?.includes(userId)) {
+          existing.unread += 1;
+        }
       }
     }
 
