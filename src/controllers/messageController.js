@@ -2,6 +2,7 @@
 // controllers/messageController.js
 // ===============================
 const Message = require("../models/Message");
+const User = require("../models/user.model");
 
 // 🔹 Envoyer un message (texte, image ou audio)
 exports.sendMessage = async (req, res) => {
@@ -41,7 +42,7 @@ exports.editMessage = async (req, res) => {
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from !== editorId) {
+    if (msg.from.toString() !== editorId) {
       return res.status(403).json({ error: "Vous ne pouvez modifier que vos propres messages" });
     }
 
@@ -64,7 +65,7 @@ exports.deleteMessage = async (req, res) => {
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from !== userId) {
+    if (msg.from.toString() !== userId) {
       return res.status(403).json({ error: "Vous ne pouvez supprimer que vos propres messages" });
     }
 
@@ -102,27 +103,49 @@ exports.getConversations = async (req, res) => {
 
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
+    // Récupérer tous les messages de l'utilisateur, triés par date décroissante
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
     }).sort({ createdAt: -1 });
 
-    // Regrouper par (otherUser + productId)
-    const conversations = {};
-    messages.forEach((msg) => {
-      const otherUserId = msg.from === userId ? msg.to : msg.from;
-      const key = `${otherUserId}_${msg.productId || "none"}`;
-      if (!conversations[key]) {
-        conversations[key] = {
-          otherUserId,
-          productId: msg.productId,
-          lastMessage: msg.content,
-          lastDate: msg.createdAt,
-          unread: msg.unread.includes(userId) ? 1 : 0,
-        };
-      }
-    });
+    const conversationsMap = new Map();
 
-    return res.json(Object.values(conversations));
+    for (const msg of messages) {
+      const otherUserId = msg.from.toString() === userId ? msg.to.toString() : msg.from.toString();
+      const key = `${otherUserId}_${msg.productId || "none"}`;
+
+      if (!conversationsMap.has(key)) {
+        // Récupérer les infos de l'autre utilisateur
+        const otherUser = await User.findById(otherUserId).select(
+          "name username fullName shopName avatar isOnline"
+        );
+
+        conversationsMap.set(key, {
+          otherUserId,
+          otherUser: otherUser
+            ? {
+                name:
+                  otherUser.name ||
+                  otherUser.fullName ||
+                  otherUser.username ||
+                  otherUser.shopName ||
+                  "Utilisateur",
+                avatar: otherUser.avatar || "",
+                isOnline: otherUser.isOnline || false,
+              }
+            : { name: "Utilisateur", avatar: "", isOnline: false },
+          lastMessage: msg.content || "",
+          lastDate: msg.createdAt,
+          productId: msg.productId || "",
+          productName: msg.productName || "",
+          productImage: msg.productImage || "",
+          productPrice: msg.productPrice || null,
+          unread: msg.unread.includes(userId) ? 1 : 0,
+        });
+      }
+    }
+
+    return res.json([...conversationsMap.values()]);
   } catch (err) {
     console.error("Erreur getConversations:", err);
     return res.status(500).json({ error: "Erreur serveur" });

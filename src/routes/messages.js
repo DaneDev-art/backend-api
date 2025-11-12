@@ -1,4 +1,3 @@
-// routes/messages.js
 const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth.middleware");
@@ -17,6 +16,7 @@ router.get("/:userId", auth, async (req, res) => {
       return res.status(400).json({ message: "IDs utilisateur manquants" });
     }
 
+    // Sélectionner uniquement messages valides
     const messages = await Message.find({
       $and: [
         { from: { $ne: null } },
@@ -43,30 +43,36 @@ router.get("/:userId", auth, async (req, res) => {
 router.get("/conversations/:userId", auth, async (req, res) => {
   try {
     const currentUserId = req.user.id;
-    if (!currentUserId) {
-      return res.status(400).json({ message: "ID utilisateur manquant" });
-    }
+    if (!currentUserId) return res.status(400).json({ message: "ID utilisateur manquant" });
 
-    // Récupérer tous les messages de cet utilisateur, triés par date décroissante
+    // 🔹 Récupérer tous les messages de l'utilisateur, triés par date décroissante
     const messages = await Message.find({
       $or: [{ from: currentUserId }, { to: currentUserId }],
     }).sort({ createdAt: -1 });
 
     const conversationsMap = new Map();
 
+    // 🔹 Identifier tous les autresUserId uniques
+    const otherUserIds = [...new Set(messages.map(msg =>
+      msg.from.toString() === currentUserId ? msg.to.toString() : msg.from.toString()
+    ))];
+
+    // 🔹 Récupérer tous les utilisateurs en une seule requête
+    const users = await User.find({ _id: { $in: otherUserIds } })
+      .select("name username fullName shopName avatar isOnline");
+    const usersMap = new Map(users.map(u => [u._id.toString(), u]));
+
+    // 🔹 Construire les conversations
     for (const msg of messages) {
       const otherUserId = msg.from.toString() === currentUserId ? msg.to.toString() : msg.from.toString();
-
       if (!conversationsMap.has(otherUserId)) {
-        // Récupérer infos de l'autre utilisateur
-        const otherUser = await User.findById(otherUserId).select("name username fullName shopName avatar isOnline");
-
+        const u = usersMap.get(otherUserId);
         conversationsMap.set(otherUserId, {
           otherUserId,
-          otherUser: otherUser ? {
-            name: otherUser.name || otherUser.fullName || otherUser.username || otherUser.shopName || "Utilisateur",
-            avatar: otherUser.avatar || "",
-            isOnline: otherUser.isOnline || false,
+          otherUser: u ? {
+            name: u.name || u.fullName || u.username || u.shopName || "Utilisateur",
+            avatar: u.avatar || "",
+            isOnline: u.isOnline || false,
           } : { name: "Utilisateur", avatar: "", isOnline: false },
           lastMessage: msg.text || "",
           lastDate: msg.createdAt,
