@@ -1,5 +1,5 @@
 // ===============================
-// routes/messageRoutes.js (Version PRO complète)
+// routes/messageRoutes.js (Version PRO compatible User & Seller)
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -8,6 +8,7 @@ const path = require("path");
 const fs = require("fs");
 const Message = require("../models/Message");
 const User = require("../models/user.model");
+const Seller = require("../models/Seller");
 const Product = require("../models/Product");
 
 // ============================================
@@ -32,7 +33,6 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
-
 const upload = multer({ storage });
 
 // ============================================
@@ -41,7 +41,6 @@ const upload = multer({ storage });
 router.post("/", async (req, res) => {
   try {
     const { senderId, receiverId, message, productId } = req.body;
-
     if (!senderId || !receiverId || !message?.trim())
       return res.status(400).json({ error: "Champs manquants ou invalides" });
 
@@ -105,7 +104,6 @@ router.put("/update/:messageId", async (req, res) => {
   try {
     const { messageId } = req.params;
     const { senderId, newContent } = req.body;
-
     if (!senderId || !newContent?.trim())
       return res.status(400).json({ error: "Champs manquants ou invalides" });
 
@@ -135,14 +133,12 @@ router.delete("/delete/:messageId", async (req, res) => {
   try {
     const { messageId } = req.params;
     const { senderId } = req.body;
-
     if (!senderId) return res.status(400).json({ error: "Champs manquants" });
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
     if (msg.from !== senderId) return res.status(403).json({ error: "Permission refusée" });
 
-    // Option: marquer comme supprimé plutôt que delete
     msg.content = "[message supprimé]";
     await msg.save();
 
@@ -203,7 +199,7 @@ router.put("/markAsRead", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user
+// 🔹 Récupérer toutes les conversations d’un user (User ou Seller)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
@@ -211,9 +207,10 @@ router.get("/conversations/:userId", async (req, res) => {
 
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }).lean();
 
     const convMap = new Map();
+
     for (const msg of messages) {
       const otherUserId = msg.from === userId ? msg.to : msg.from;
       const key = `${otherUserId}_${msg.productId || "no_product"}`;
@@ -223,35 +220,41 @@ router.get("/conversations/:userId", async (req, res) => {
           productId: msg.productId,
           lastMessage: msg.content,
           lastDate: msg.createdAt,
-          unread: msg.unread?.includes(userId),
+          unread: msg.unread?.includes(userId) ? 1 : 0,
         });
+      } else {
+        const existing = convMap.get(key);
+        if (msg.unread?.includes(userId)) existing.unread += 1;
       }
     }
 
     const conversations = Array.from(convMap.values());
+    const userIds = conversations.map(c => c.otherUserId);
 
-    const userIds = conversations.map((c) => c.otherUserId);
     const users = await User.find({ _id: { $in: userIds } })
-      .select("name username fullName shopName nom email avatar profileImage isOnline");
-    const userMap = Object.fromEntries(users.map((u) => [u._id.toString(), u]));
+      .select("name username fullName shopName avatar isOnline");
+    const sellers = await Seller.find({ _id: { $in: userIds } })
+      .select("name shopName avatar isOnline");
 
-    const productIds = conversations
-      .map((c) => c.productId)
-      .filter((id) => id && id !== "no_product");
+    const userMap = Object.fromEntries([
+      ...users.map(u => [u._id.toString(), { ...u.toObject(), isSeller: false }]),
+      ...sellers.map(s => [s._id.toString(), { ...s.toObject(), isSeller: true }])
+    ]);
 
+    const productIds = conversations.map(c => c.productId).filter(id => id && id !== "no_product");
     let products = [];
     if (productIds.length > 0) {
       products = await Product.find({ _id: { $in: productIds } })
         .select("name title price images");
     }
-    const productMap = Object.fromEntries(products.map((p) => [p._id.toString(), p]));
+    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
-    const enrichedConversations = conversations.map((c) => {
+    const enrichedConversations = conversations.map(c => {
       const product = productMap[c.productId];
+      const otherUser = userMap[c.otherUserId] || { name: "Utilisateur inconnu", avatar: "", isOnline: false, isSeller: false };
       return {
         ...c,
-        otherUser:
-          userMap[c.otherUserId] || { name: "Utilisateur inconnu", avatar: "", isOnline: false },
+        otherUser,
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,

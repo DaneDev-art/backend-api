@@ -3,6 +3,7 @@
 // ===============================
 const Message = require("../models/Message");
 const User = require("../models/user.model");
+const Seller = require("../models/Seller");
 
 // 🔹 Envoyer un message (texte, image ou audio)
 exports.sendMessage = async (req, res) => {
@@ -96,7 +97,7 @@ exports.markAsRead = async (req, res) => {
   }
 };
 
-// 🔹 Récupérer les conversations d'un utilisateur
+// 🔹 Récupérer les conversations d'un utilisateur (Users et Sellers)
 exports.getConversations = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -108,9 +109,7 @@ exports.getConversations = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    if (!messages || messages.length === 0) {
-      return res.json([]);
-    }
+    if (!messages || messages.length === 0) return res.json([]);
 
     const conversationsMap = new Map();
 
@@ -125,24 +124,36 @@ exports.getConversations = async (req, res) => {
       const key = `${otherUserId}_${msg.productId || "none"}`;
 
       if (!conversationsMap.has(key)) {
-        const otherUser = await User.findById(otherUserId).select(
+        // 🔹 Cherche d'abord dans User, sinon dans Seller
+        let otherUser = await User.findById(otherUserId).select(
           "name username fullName shopName avatar isOnline"
         );
+        let isSeller = false;
+
+        if (!otherUser) {
+          otherUser = await Seller.findById(otherUserId).select(
+            "name shopName avatar isOnline"
+          );
+          isSeller = true;
+        }
+
+        const otherUserData = otherUser
+          ? {
+              name:
+                otherUser.name ||
+                otherUser.fullName ||
+                otherUser.username ||
+                otherUser.shopName ||
+                "Utilisateur",
+              avatar: otherUser.avatar || "",
+              isOnline: otherUser.isOnline || false,
+              isSeller,
+            }
+          : { name: "Utilisateur", avatar: "", isOnline: false, isSeller: false };
 
         conversationsMap.set(key, {
           otherUserId,
-          otherUser: otherUser
-            ? {
-                name:
-                  otherUser.name ||
-                  otherUser.fullName ||
-                  otherUser.username ||
-                  otherUser.shopName ||
-                  "Utilisateur",
-                avatar: otherUser.avatar || "",
-                isOnline: otherUser.isOnline || false,
-              }
-            : { name: "Utilisateur", avatar: "", isOnline: false },
+          otherUser: otherUserData,
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
           productId: msg.productId || "",
@@ -167,7 +178,7 @@ exports.getConversations = async (req, res) => {
   }
 };
 
-// 🔹 Récupérer l'historique entre deux utilisateurs
+// 🔹 Récupérer l'historique entre deux utilisateurs (ou seller)
 exports.getMessages = async (req, res) => {
   try {
     const { userId, otherUserId } = req.params;
