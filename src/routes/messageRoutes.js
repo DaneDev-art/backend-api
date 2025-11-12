@@ -199,26 +199,35 @@ router.put("/markAsRead", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user (User ou Seller)
+// 🔹 Récupérer toutes les conversations d’un user (version corrigée)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    if (!userId) return res.status(400).json({ error: "userId requis" });
 
+    // 🔹 Récupérer tous les messages où l'utilisateur est impliqué
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
     }).sort({ createdAt: -1 }).lean();
 
     const convMap = new Map();
 
+    // 🔹 Construire les conversations
     for (const msg of messages) {
-      const otherUserId = msg.from === userId ? msg.to : msg.from;
-      const key = `${otherUserId}_${msg.productId || "no_product"}`;
+      const fromId = msg.from?.toString();
+      const toId = msg.to?.toString();
+      if (!fromId || !toId) continue;
+
+      const otherUserId = fromId === userId ? toId : fromId;
+      const productKey = msg.productId ? msg.productId.toString() : "no_product";
+      const key = `${otherUserId}_${productKey}`;
+
       if (!convMap.has(key)) {
         convMap.set(key, {
           otherUserId,
-          productId: msg.productId,
-          lastMessage: msg.content,
+          productId: msg.productId ? msg.productId.toString() : null,
+          lastMessage: msg.content || "",
           lastDate: msg.createdAt,
           unread: msg.unread?.includes(userId) ? 1 : 0,
         });
@@ -229,19 +238,19 @@ router.get("/conversations/:userId", async (req, res) => {
     }
 
     const conversations = Array.from(convMap.values());
+
+    // 🔹 Récupérer tous les utilisateurs impliqués (User ou Seller)
     const userIds = conversations.map(c => c.otherUserId);
-
     const users = await User.find({ _id: { $in: userIds } })
-      .select("name username fullName shopName avatar isOnline");
-    const sellers = await Seller.find({ _id: { $in: userIds } })
-      .select("name shopName avatar isOnline");
+      .select("name username fullName shopName nom email avatar profileImage isOnline");
 
-    const userMap = Object.fromEntries([
-      ...users.map(u => [u._id.toString(), { ...u.toObject(), isSeller: false }]),
-      ...sellers.map(s => [s._id.toString(), { ...s.toObject(), isSeller: true }])
-    ]);
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
 
-    const productIds = conversations.map(c => c.productId).filter(id => id && id !== "no_product");
+    // 🔹 Récupérer les produits liés
+    const productIds = conversations
+      .map(c => c.productId)
+      .filter(id => id);
+    
     let products = [];
     if (productIds.length > 0) {
       products = await Product.find({ _id: { $in: productIds } })
@@ -249,12 +258,18 @@ router.get("/conversations/:userId", async (req, res) => {
     }
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
+    // 🔹 Enrichir les conversations avec user et product
     const enrichedConversations = conversations.map(c => {
+      const user = userMap[c.otherUserId];
       const product = productMap[c.productId];
-      const otherUser = userMap[c.otherUserId] || { name: "Utilisateur inconnu", avatar: "", isOnline: false, isSeller: false };
+
       return {
         ...c,
-        otherUser,
+        otherUser: user ? {
+          name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
+          avatar: user.avatar || user.profileImage || "",
+          isOnline: user.isOnline || false,
+        } : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
