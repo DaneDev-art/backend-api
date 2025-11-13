@@ -1,5 +1,6 @@
 // ===============================
 // controllers/messageController.js
+// Version PRO compatible User & Seller
 // ===============================
 const Message = require("../models/Message");
 const User = require("../models/user.model");
@@ -18,13 +19,13 @@ exports.sendMessage = async (req, res) => {
     }
 
     const newMessage = new Message({
-      from: senderId,
-      to: receiverId,
+      from: senderId.toString(),
+      to: receiverId.toString(),
       content: message || (mediaUrl || ""),
       productId: productId || null,
       type: type || "text",
       mediaUrl: mediaUrl || null,
-      unread: [receiverId],
+      unread: [receiverId.toString()],
     });
 
     const savedMessage = await newMessage.save();
@@ -48,7 +49,7 @@ exports.editMessage = async (req, res) => {
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from !== editorId) {
+    if (msg.from.toString() !== editorId.toString()) {
       return res.status(403).json({ error: "Vous ne pouvez modifier que vos propres messages" });
     }
 
@@ -73,11 +74,10 @@ exports.deleteMessage = async (req, res) => {
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from !== userId) {
+    if (msg.from.toString() !== userId.toString()) {
       return res.status(403).json({ error: "Vous ne pouvez supprimer que vos propres messages" });
     }
 
-    // On peut soit supprimer physiquement, soit marquer comme supprimé
     msg.content = "[message supprimé]";
     await msg.save();
 
@@ -98,8 +98,8 @@ exports.markAsRead = async (req, res) => {
     if (!userId || !otherUserId) return res.status(400).json({ error: "Champs manquants" });
 
     await Message.updateMany(
-      { from: otherUserId, to: userId, productId: productId || null },
-      { $pull: { unread: userId } }
+      { from: otherUserId.toString(), to: userId.toString(), productId: productId || null },
+      { $pull: { unread: userId.toString() } }
     );
 
     return res.json({ success: true });
@@ -118,7 +118,7 @@ exports.getConversations = async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
     const messages = await Message.find({
-      $or: [{ from: userId }, { to: userId }],
+      $or: [{ from: userId.toString() }, { to: userId.toString() }],
     }).sort({ createdAt: -1 }).lean();
 
     if (!messages || messages.length === 0) return res.json([]);
@@ -126,37 +126,36 @@ exports.getConversations = async (req, res) => {
     const convMap = new Map();
 
     for (const msg of messages) {
-      const fromId = msg.from;
-      const toId = msg.to;
-      const otherUserId = fromId === userId ? toId : fromId;
-      const productKey = msg.productId || "no_product";
+      const fromId = msg.from.toString();
+      const toId = msg.to.toString();
+      const otherUserId = fromId === userId.toString() ? toId : fromId;
+      const productKey = msg.productId ? msg.productId.toString() : "no_product";
       const key = `${otherUserId}_${productKey}`;
 
       if (!convMap.has(key)) {
         convMap.set(key, {
           otherUserId,
-          productId: msg.productId || null,
+          productId: msg.productId ? msg.productId.toString() : null,
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
-          unread: msg.unread?.includes(userId) ? 1 : 0,
+          unread: msg.unread?.includes(userId.toString()) ? 1 : 0,
         });
       } else {
         const existing = convMap.get(key);
-        if (msg.unread?.includes(userId)) existing.unread += 1;
+        if (msg.unread?.includes(userId.toString())) existing.unread += 1;
       }
     }
 
     const conversations = Array.from(convMap.values());
 
-    // 🔹 Récupérer les infos utilisateurs
+    // 🔹 Récupérer les utilisateurs et sellers
     const userIds = conversations.map(c => c.otherUserId);
     const users = await User.find({ _id: { $in: userIds } })
       .select("name username fullName shopName avatar isOnline");
-    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
-
-    const sellerIds = userIds.filter(id => !userMap[id]);
-    const sellers = await Seller.find({ _id: { $in: sellerIds } })
+    const sellers = await Seller.find({ _id: { $in: userIds } })
       .select("name shopName avatar isOnline");
+
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
     const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), s]));
 
     // 🔹 Récupérer les produits liés
@@ -171,7 +170,7 @@ exports.getConversations = async (req, res) => {
     // 🔹 Enrichir conversations
     const enrichedConversations = conversations.map(c => {
       const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
-      const product = productMap[c.productId];
+      const product = c.productId ? productMap[c.productId] : null;
 
       return {
         ...c,
@@ -204,8 +203,8 @@ exports.getMessages = async (req, res) => {
 
     const messages = await Message.find({
       $or: [
-        { from: userId, to: otherUserId },
-        { from: otherUserId, to: userId },
+        { from: userId.toString(), to: otherUserId.toString() },
+        { from: otherUserId.toString(), to: userId.toString() },
       ],
     }).sort({ createdAt: 1 });
 
