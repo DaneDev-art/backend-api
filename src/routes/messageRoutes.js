@@ -199,7 +199,7 @@ router.put("/markAsRead", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user (version corrigée)
+// 🔹 Récupérer toutes les conversations d’un user (User + Seller compatible)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
@@ -238,38 +238,46 @@ router.get("/conversations/:userId", async (req, res) => {
     }
 
     const conversations = Array.from(convMap.values());
-
-    // 🔹 Récupérer tous les utilisateurs impliqués (User ou Seller)
     const userIds = conversations.map(c => c.otherUserId);
-    const users = await User.find({ _id: { $in: userIds } })
-      .select("name username fullName shopName nom email avatar profileImage isOnline");
 
-    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
+    // 🔹 Récupérer les infos des interlocuteurs (User + Seller)
+    const [users, sellers] = await Promise.all([
+      User.find({ _id: { $in: userIds } })
+        .select("name username fullName nom email avatar profileImage isOnline"),
+      Seller.find({ _id: { $in: userIds } })
+        .select("shopName email logo isOnline"),
+    ]);
+
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), {
+      name: u.name || u.fullName || u.username || u.nom || "Utilisateur",
+      avatar: u.avatar || u.profileImage || "",
+      isOnline: u.isOnline || false,
+      type: "user",
+    }]));
+
+    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), {
+      name: s.shopName || "Boutique",
+      avatar: s.logo || "",
+      isOnline: s.isOnline || false,
+      type: "seller",
+    }]));
 
     // 🔹 Récupérer les produits liés
-    const productIds = conversations
-      .map(c => c.productId)
-      .filter(id => id);
-    
-    let products = [];
-    if (productIds.length > 0) {
-      products = await Product.find({ _id: { $in: productIds } })
-        .select("name title price images");
-    }
+    const productIds = conversations.map(c => c.productId).filter(Boolean);
+    const products = productIds.length
+      ? await Product.find({ _id: { $in: productIds } }).select("name title price images")
+      : [];
+
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
-    // 🔹 Enrichir les conversations avec user et product
+    // 🔹 Enrichir les conversations
     const enrichedConversations = conversations.map(c => {
-      const user = userMap[c.otherUserId];
+      const profile = userMap[c.otherUserId] || sellerMap[c.otherUserId];
       const product = productMap[c.productId];
 
       return {
         ...c,
-        otherUser: user ? {
-          name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
-          avatar: user.avatar || user.profileImage || "",
-          isOnline: user.isOnline || false,
-        } : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
+        otherUser: profile || { name: "Utilisateur inconnu", avatar: "", isOnline: false },
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
