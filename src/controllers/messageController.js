@@ -103,6 +103,7 @@ exports.getConversations = async (req, res) => {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
+    // 🧩 Récupère tous les messages liés à cet utilisateur
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
     })
@@ -114,38 +115,33 @@ exports.getConversations = async (req, res) => {
     const conversationsMap = new Map();
 
     for (const msg of messages) {
-      const fromId = msg.from?.toString();
-      const toId = msg.to?.toString();
-      if (!fromId || !toId) continue;
+      if (!msg.from || !msg.to) continue;
 
+      const fromId = msg.from.toString();
+      const toId = msg.to.toString();
       const otherUserId = fromId === userId ? toId : fromId;
-      if (!otherUserId) continue;
 
-      const key = `${otherUserId}_${msg.productId || "none"}`;
+      // ✅ Regrouper uniquement par participant (sans bloquer sur productId)
+      if (!otherUserId) continue;
+      const key = otherUserId;
 
       if (!conversationsMap.has(key)) {
-        // 🔹 Cherche d'abord dans User, sinon dans Seller
-        let otherUser = await User.findById(otherUserId).select(
-          "name username fullName shopName avatar isOnline"
-        );
-        let isSeller = false;
+        // 🔹 Cherche l'utilisateur ou le vendeur correspondant
+        let otherUser =
+          (await User.findById(otherUserId).select("name username fullName avatar isOnline")) ||
+          (await Seller.findById(otherUserId).select("storeName name logo isOnline"));
 
-        if (!otherUser) {
-          otherUser = await Seller.findById(otherUserId).select(
-            "name shopName avatar isOnline"
-          );
-          isSeller = true;
-        }
+        const isSeller = !!(await Seller.findById(otherUserId));
 
         const otherUserData = otherUser
           ? {
               name:
+                otherUser.storeName ||
                 otherUser.name ||
                 otherUser.fullName ||
                 otherUser.username ||
-                otherUser.shopName ||
                 "Utilisateur",
-              avatar: otherUser.avatar || "",
+              avatar: otherUser.avatar || otherUser.logo || "",
               isOnline: otherUser.isOnline || false,
               isSeller,
             }
@@ -154,24 +150,24 @@ exports.getConversations = async (req, res) => {
         conversationsMap.set(key, {
           otherUserId,
           otherUser: otherUserData,
-          lastMessage: msg.content || "",
+          lastMessage: msg.content || msg.mediaUrl || "",
           lastDate: msg.createdAt,
           productId: msg.productId || "",
-          productName: msg.productName || "",
-          productImage: msg.productImage || "",
-          productPrice: msg.productPrice || null,
           unread: msg.unread?.includes(userId) ? 1 : 0,
         });
       } else {
         // cumule les non-lus si plusieurs messages de cette conversation
         const existing = conversationsMap.get(key);
-        if (msg.unread?.includes(userId)) {
-          existing.unread += 1;
-        }
+        if (msg.unread?.includes(userId)) existing.unread += 1;
       }
     }
 
-    return res.json([...conversationsMap.values()]);
+    // ✅ Retourne la liste des conversations triée par date
+    const result = [...conversationsMap.values()].sort(
+      (a, b) => new Date(b.lastDate) - new Date(a.lastDate)
+    );
+
+    return res.json(result);
   } catch (err) {
     console.error("Erreur getConversations:", err);
     return res.status(500).json({ error: "Erreur serveur" });
