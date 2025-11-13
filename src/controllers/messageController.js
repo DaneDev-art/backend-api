@@ -4,8 +4,11 @@
 const Message = require("../models/Message");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
+const Product = require("../models/Product");
 
+// ============================================
 // 🔹 Envoyer un message (texte, image ou audio)
+// ============================================
 exports.sendMessage = async (req, res) => {
   try {
     const { senderId, receiverId, message, productId, type, mediaUrl } = req.body;
@@ -17,7 +20,7 @@ exports.sendMessage = async (req, res) => {
     const newMessage = new Message({
       from: senderId,
       to: receiverId,
-      content: message || "",
+      content: message || (mediaUrl || ""),
       productId: productId || null,
       type: type || "text",
       mediaUrl: mediaUrl || null,
@@ -32,18 +35,20 @@ exports.sendMessage = async (req, res) => {
   }
 };
 
+// ============================================
 // 🔹 Modifier un message (texte uniquement)
+// ============================================
 exports.editMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
-    const { newContent, editorId } = req.body;
+    const { editorId, newContent } = req.body;
 
     if (!newContent) return res.status(400).json({ error: "Le nouveau contenu est requis" });
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from.toString() !== editorId) {
+    if (msg.from !== editorId) {
       return res.status(403).json({ error: "Vous ne pouvez modifier que vos propres messages" });
     }
 
@@ -57,7 +62,9 @@ exports.editMessage = async (req, res) => {
   }
 };
 
+// ============================================
 // 🔹 Supprimer un message
+// ============================================
 exports.deleteMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -66,19 +73,24 @@ exports.deleteMessage = async (req, res) => {
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
 
-    if (msg.from.toString() !== userId) {
+    if (msg.from !== userId) {
       return res.status(403).json({ error: "Vous ne pouvez supprimer que vos propres messages" });
     }
 
-    await Message.findByIdAndDelete(messageId);
-    return res.json({ success: true });
+    // On peut soit supprimer physiquement, soit marquer comme supprimé
+    msg.content = "[message supprimé]";
+    await msg.save();
+
+    return res.json({ success: true, message: msg });
   } catch (err) {
     console.error("Erreur deleteMessage:", err);
     return res.status(500).json({ error: "Erreur serveur" });
   }
 };
 
+// ============================================
 // 🔹 Marquer les messages comme lus
+// ============================================
 exports.markAsRead = async (req, res) => {
   try {
     const { userId, otherUserId, productId } = req.body;
@@ -97,107 +109,93 @@ exports.markAsRead = async (req, res) => {
   }
 };
 
-// 🔹 Récupérer les conversations d'un utilisateur (Users et Sellers)
+// ============================================
+// 🔹 Récupérer les conversations d'un utilisateur
+// ============================================
 exports.getConversations = async (req, res) => {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
-    // 🔸 Convertit l'userId en ObjectId si possible
-    const mongoose = require("mongoose");
-    let objectUserId;
-    try {
-      objectUserId = new mongoose.Types.ObjectId(userId);
-    } catch {
-      objectUserId = null;
-    }
-
-    // 🔸 Trouve tous les messages où l’utilisateur est impliqué
     const messages = await Message.find({
-      $or: [
-        { from: userId },
-        { to: userId },
-        ...(objectUserId
-          ? [{ from: objectUserId }, { to: objectUserId }]
-          : []),
-      ],
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+      $or: [{ from: userId }, { to: userId }],
+    }).sort({ createdAt: -1 }).lean();
 
-    if (!messages || messages.length === 0) {
-      console.log("⚠️ Aucune conversation trouvée pour:", userId);
-      return res.json([]);
-    }
+    if (!messages || messages.length === 0) return res.json([]);
 
-    const conversationsMap = new Map();
+    const convMap = new Map();
 
     for (const msg of messages) {
-      const fromId = msg.from?.toString();
-      const toId = msg.to?.toString();
-      if (!fromId || !toId) continue;
-
+      const fromId = msg.from;
+      const toId = msg.to;
       const otherUserId = fromId === userId ? toId : fromId;
-      if (!otherUserId) continue;
+      const productKey = msg.productId || "no_product";
+      const key = `${otherUserId}_${productKey}`;
 
-      const key = `${otherUserId}_${msg.productId || "none"}`;
-
-      if (!conversationsMap.has(key)) {
-        // 🔹 Cherche dans User, sinon dans Seller
-        let otherUser = await User.findById(otherUserId).select(
-          "name username fullName shopName avatar isOnline"
-        );
-        let isSeller = false;
-
-        if (!otherUser) {
-          otherUser = await Seller.findById(otherUserId).select(
-            "name shopName avatar isOnline"
-          );
-          isSeller = true;
-        }
-
-        const otherUserData = otherUser
-          ? {
-              name:
-                otherUser.name ||
-                otherUser.fullName ||
-                otherUser.username ||
-                otherUser.shopName ||
-                "Utilisateur",
-              avatar: otherUser.avatar || "",
-              isOnline: otherUser.isOnline || false,
-              isSeller,
-            }
-          : { name: "Utilisateur", avatar: "", isOnline: false, isSeller: false };
-
-        conversationsMap.set(key, {
+      if (!convMap.has(key)) {
+        convMap.set(key, {
           otherUserId,
-          otherUser: otherUserData,
+          productId: msg.productId || null,
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
-          productId: msg.productId || "",
-          productName: msg.productName || "",
-          productImage: msg.productImage || "",
-          productPrice: msg.productPrice || null,
           unread: msg.unread?.includes(userId) ? 1 : 0,
         });
       } else {
-        // cumule les non-lus si plusieurs messages de cette conversation
-        const existing = conversationsMap.get(key);
-        if (msg.unread?.includes(userId)) {
-          existing.unread += 1;
-        }
+        const existing = convMap.get(key);
+        if (msg.unread?.includes(userId)) existing.unread += 1;
       }
     }
 
-    return res.json([...conversationsMap.values()]);
+    const conversations = Array.from(convMap.values());
+
+    // 🔹 Récupérer les infos utilisateurs
+    const userIds = conversations.map(c => c.otherUserId);
+    const users = await User.find({ _id: { $in: userIds } })
+      .select("name username fullName shopName avatar isOnline");
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
+
+    const sellerIds = userIds.filter(id => !userMap[id]);
+    const sellers = await Seller.find({ _id: { $in: sellerIds } })
+      .select("name shopName avatar isOnline");
+    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), s]));
+
+    // 🔹 Récupérer les produits liés
+    const productIds = conversations.map(c => c.productId).filter(id => id);
+    let products = [];
+    if (productIds.length > 0) {
+      products = await Product.find({ _id: { $in: productIds } })
+        .select("name title price images");
+    }
+    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
+
+    // 🔹 Enrichir conversations
+    const enrichedConversations = conversations.map(c => {
+      const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
+      const product = productMap[c.productId];
+
+      return {
+        ...c,
+        otherUser: user ? {
+          name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
+          avatar: user.avatar || "",
+          isOnline: user.isOnline || false,
+        } : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
+        productName: product?.name || product?.title || null,
+        productPrice: product?.price || null,
+        productImage: product?.images?.[0] || null,
+      };
+    });
+
+    return res.json(enrichedConversations);
   } catch (err) {
     console.error("Erreur getConversations:", err);
     return res.status(500).json({ error: "Erreur serveur" });
   }
 };
 
-// 🔹 Récupérer l'historique entre deux utilisateurs (ou seller)
+// ============================================
+// 🔹 Récupérer l'historique entre deux utilisateurs
+// ============================================
 exports.getMessages = async (req, res) => {
   try {
     const { userId, otherUserId } = req.params;

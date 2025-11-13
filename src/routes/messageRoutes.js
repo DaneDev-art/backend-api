@@ -1,5 +1,5 @@
 // ===============================
-// routes/messageRoutes.js (Version PRO compatible User & Seller)
+// routes/messageRoutes.js (PRO String IDs)
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -12,7 +12,7 @@ const Seller = require("../models/Seller");
 const Product = require("../models/Product");
 
 // ============================================
-// ⚙️ Configuration Socket.IO (injection depuis server.js)
+// ⚙️ Configuration Socket.IO
 // ============================================
 let io;
 function initSocket(socketInstance) {
@@ -20,7 +20,7 @@ function initSocket(socketInstance) {
 }
 
 // ============================================
-// 🔹 Configuration Multer pour upload fichiers
+// 🔹 Configuration Multer
 // ============================================
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -199,34 +199,28 @@ router.put("/markAsRead", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Récupérer toutes les conversations d’un user (User + Seller compatible)
+// 🔹 Récupérer toutes les conversations d’un user
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
-    // 🔹 Récupérer tous les messages où l'utilisateur est impliqué
     const messages = await Message.find({
       $or: [{ from: userId }, { to: userId }],
     }).sort({ createdAt: -1 }).lean();
 
     const convMap = new Map();
 
-    // 🔹 Construire les conversations
     for (const msg of messages) {
-      const fromId = msg.from?.toString();
-      const toId = msg.to?.toString();
-      if (!fromId || !toId) continue;
-
-      const otherUserId = fromId === userId ? toId : fromId;
-      const productKey = msg.productId ? msg.productId.toString() : "no_product";
+      const otherUserId = msg.from === userId ? msg.to : msg.from;
+      const productKey = msg.productId ? msg.productId : "no_product";
       const key = `${otherUserId}_${productKey}`;
 
       if (!convMap.has(key)) {
         convMap.set(key, {
           otherUserId,
-          productId: msg.productId ? msg.productId.toString() : null,
+          productId: msg.productId || null,
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
           unread: msg.unread?.includes(userId) ? 1 : 0,
@@ -238,46 +232,38 @@ router.get("/conversations/:userId", async (req, res) => {
     }
 
     const conversations = Array.from(convMap.values());
+
+    // 🔹 Récupérer tous les utilisateurs impliqués (User ou Seller)
     const userIds = conversations.map(c => c.otherUserId);
+    const users = await User.find({ _id: { $in: userIds } })
+      .select("name username fullName shopName avatar isOnline");
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
 
-    // 🔹 Récupérer les infos des interlocuteurs (User + Seller)
-    const [users, sellers] = await Promise.all([
-      User.find({ _id: { $in: userIds } })
-        .select("name username fullName nom email avatar profileImage isOnline"),
-      Seller.find({ _id: { $in: userIds } })
-        .select("shopName email logo isOnline"),
-    ]);
+    const sellerIds = userIds.filter(id => !userMap[id]);
+    const sellers = await Seller.find({ _id: { $in: sellerIds } })
+      .select("name shopName avatar isOnline");
+    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), s]));
 
-    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), {
-      name: u.name || u.fullName || u.username || u.nom || "Utilisateur",
-      avatar: u.avatar || u.profileImage || "",
-      isOnline: u.isOnline || false,
-      type: "user",
-    }]));
-
-    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), {
-      name: s.shopName || "Boutique",
-      avatar: s.logo || "",
-      isOnline: s.isOnline || false,
-      type: "seller",
-    }]));
-
-    // 🔹 Récupérer les produits liés
-    const productIds = conversations.map(c => c.productId).filter(Boolean);
-    const products = productIds.length
-      ? await Product.find({ _id: { $in: productIds } }).select("name title price images")
-      : [];
-
+    // 🔹 Enrichir conversations avec info utilisateur / produit
+    const productIds = conversations.map(c => c.productId).filter(id => id);
+    let products = [];
+    if (productIds.length > 0) {
+      products = await Product.find({ _id: { $in: productIds } })
+        .select("name title price images");
+    }
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
-    // 🔹 Enrichir les conversations
     const enrichedConversations = conversations.map(c => {
-      const profile = userMap[c.otherUserId] || sellerMap[c.otherUserId];
+      const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
       const product = productMap[c.productId];
 
       return {
         ...c,
-        otherUser: profile || { name: "Utilisateur inconnu", avatar: "", isOnline: false },
+        otherUser: user ? {
+          name: user.name || user.shopName || "Utilisateur",
+          avatar: user.avatar || "",
+          isOnline: user.isOnline || false,
+        } : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
