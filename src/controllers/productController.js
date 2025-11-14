@@ -3,6 +3,7 @@
 // ==========================================
 const Product = require("../models/Product");
 const User = require("../models/user.model");
+const Seller = require("../models/Seller");
 const cloudinary = require("cloudinary").v2;
 
 // ==========================================
@@ -15,33 +16,59 @@ cloudinary.config({
 });
 
 // ==========================================
+// ✅ Fonction utilitaire pour enrichir un produit
+// ==========================================
+const enrichProduct = async (product) => {
+  let shopName = "";
+  let country = "";
+  let sellerAvatar = "";
+
+  if (product.seller) {
+    // 1️⃣ Récupérer le user
+    const user = await User.findById(product.seller).lean();
+
+    if (user) {
+      shopName = user.shopName || "";
+      country = user.country || "";
+      sellerAvatar = user.avatarUrl || "";
+
+      // 2️⃣ Si seller, vérifier la collection Sellers
+      if (user.role === "seller") {
+        const seller = await Seller.findById(user._id).lean();
+        if (seller) {
+          shopName = seller.name || shopName;
+          country = seller.country || country; // Assurez-vous que ce champ existe ou reste celui de User
+        }
+      }
+    }
+  }
+
+  return {
+    _id: product._id,
+    name: product.name,
+    description: product.description,
+    price: product.price,
+    stock: product.stock,
+    images: product.images,
+    category: product.category,
+    status: product.status,
+    sellerId: product.seller?._id?.toString() || product.seller?.toString() || "",
+    shopName: shopName || "Boutique inconnue",
+    country: country || "Pays inconnu",
+    sellerAvatar,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+  };
+};
+
+// ==========================================
 // ✅ Obtenir tous les produits (avec boutique & pays)
 // ==========================================
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find()
-      .populate({
-        path: "seller",
-        select: "shopName country fullName avatarUrl",
-      })
-      .sort({ createdAt: -1 });
+    const products = await Product.find().sort({ createdAt: -1 });
 
-    const enrichedProducts = products.map((p) => ({
-      _id: p._id,
-      name: p.name,
-      description: p.description,
-      price: p.price,
-      stock: p.stock,
-      images: p.images,
-      category: p.category,
-      status: p.status,
-      sellerId: p.seller?._id?.toString() || "",
-      shopName: p.seller?.shopName || "Boutique inconnue",
-      country: p.seller?.country || "Pays inconnu",
-      sellerAvatar: p.seller?.avatarUrl || "",
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
+    const enrichedProducts = await Promise.all(products.map(enrichProduct));
 
     res.status(200).json(enrichedProducts);
   } catch (err) {
@@ -57,29 +84,9 @@ exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
 
-    const products = await Product.find({ seller: sellerId })
-      .populate({
-        path: "seller",
-        select: "shopName country fullName avatarUrl",
-      })
-      .sort({ createdAt: -1 });
+    const products = await Product.find({ seller: sellerId }).sort({ createdAt: -1 });
 
-    const enrichedProducts = products.map((p) => ({
-      _id: p._id,
-      name: p.name,
-      description: p.description,
-      price: p.price,
-      stock: p.stock,
-      images: p.images,
-      category: p.category,
-      status: p.status,
-      sellerId: p.seller?._id?.toString() || "",
-      shopName: p.seller?.shopName || "Boutique inconnue",
-      country: p.seller?.country || "Pays inconnu",
-      sellerAvatar: p.seller?.avatarUrl || "",
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-    }));
+    const enrichedProducts = await Promise.all(products.map(enrichProduct));
 
     res.status(200).json(enrichedProducts);
   } catch (err) {
@@ -89,67 +96,39 @@ exports.getProductsBySeller = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Ajouter un produit (auth requis, users + sellers)
+// ✅ Ajouter un produit (auth requis)
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
     const { name, description, price, category, images } = req.body;
-    const sellerId = req.user._id; // ID dans users
+    const sellerId = req.user._id;
 
     if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
     if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
 
-    // 🔹 Vérifier que le seller existe dans users
-    const sellerUser = await User.findById(sellerId).select("shopName country fullName avatarUrl");
-    if (!sellerUser) return res.status(404).json({ message: "Vendeur introuvable dans users" });
-
-    // 🔹 Vérifier que le seller existe dans sellers (logique actuelle conservée)
-    const SellerModel = require("../models/seller.model"); // adapte le path si nécessaire
-    const sellerExistsInSellers = await SellerModel.exists({ user: sellerId });
-    if (!sellerExistsInSellers) return res.status(403).json({ message: "Vendeur non enregistré dans sellers" });
-
-    // 🔹 Upload Cloudinary si images fournies
-    let uploadedImages = [];
-    if (images && images.length > 0) {
-      for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
-        uploadedImages.push(uploadRes.secure_url);
-      }
-    }
-
-    // 🔹 Créer le produit en référant uniquement l'ID du user
     const product = new Product({
       name,
       description,
       price,
       category,
-      images: uploadedImages,
-      seller: sellerId,  // Référence à users
+      images: [],
+      seller: sellerId,
       status: "actif",
     });
 
+    // 🔹 Upload Cloudinary
+    if (images && images.length > 0) {
+      for (const img of images) {
+        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
+        product.images.push(uploadRes.secure_url);
+      }
+    }
+
     await product.save();
 
-    // 🔹 Populate seller pour renvoyer shopName et country
-    await product.populate("seller", "shopName country fullName avatarUrl");
+    const enriched = await enrichProduct(product);
 
-    // 🔹 Réponse enrichie pour Flutter
-    res.status(201).json({
-      _id: product._id,
-      name: product.name,
-      description: product.description,
-      price: product.price,
-      stock: product.stock,
-      images: product.images,
-      category: product.category,
-      status: product.status,
-      sellerId: product.seller?._id?.toString() || "",
-      shopName: product.seller?.shopName || "Boutique inconnue",
-      country: product.seller?.country || "Pays inconnu",
-      sellerAvatar: product.seller?.avatarUrl || "",
-      createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
-    });
+    res.status(201).json(enriched);
   } catch (err) {
     console.error("❌ addProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -162,7 +141,7 @@ exports.addProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user._id; // ✅ Correction ici
+    const sellerId = req.user._id;
     const { name, description, price, category, images } = req.body;
 
     const product = await Product.findOne({ _id: productId, seller: sellerId });
@@ -183,7 +162,10 @@ exports.updateProduct = async (req, res) => {
     }
 
     await product.save();
-    res.status(200).json(product);
+
+    const enriched = await enrichProduct(product);
+
+    res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ updateProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -196,7 +178,7 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user._id; // ✅ Correction ici
+    const sellerId = req.user._id;
 
     const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
     if (!deleted) return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
