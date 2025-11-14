@@ -52,18 +52,14 @@ const userSchema = new mongoose.Schema(
     logoUrl: { type: String },
     profileImageUrl: { type: String },
 
-    // ==========================================
-    // 🔸 SOLDES & CINETPAY
-    // ==========================================
+    // 🔸 CINETPAY / Soldes
     cinetpayId: { type: String },
-
     balance_locked: { type: Number, default: 0 },
     balance_available: { type: Number, default: 0 },
-
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
-    // 🔸 Informations livreur
+    // 🔸 Infos livreur
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },
     guarantee: { type: String, trim: true },
@@ -87,6 +83,10 @@ const userSchema = new mongoose.Schema(
 
     // 🔸 Avatar
     avatarUrl: { type: String, default: "" },
+
+    // 🔸 Champs supplémentaires pour sellers
+    prefix: { type: String, default: "228" },
+    fullNumber: { type: String, default: "" },
   },
   { timestamps: true }
 );
@@ -111,10 +111,8 @@ userSchema.pre("save", async function (next) {
 // ==========================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
   if (!this.password) {
-    // arrive si on oublie .select("+password")
     throw new Error("Password not selected in query");
   }
-
   return bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -129,7 +127,7 @@ userSchema.methods.toPublicJSON = function () {
 };
 
 // ==========================================
-// 🔍 Index utile pour les recherches
+// 🔍 Index pour les recherches
 // ==========================================
 userSchema.index({
   email: "text",

@@ -10,21 +10,18 @@ const SellerSchema = new mongoose.Schema(
 
     // 🔹 Téléphone et identifiants
     phone: { type: String, required: true, trim: true },     // Numéro sans préfixe
-    prefix: { type: String, required: true, trim: true },    // Exemple : "225"
-    full_phone: {
+    prefix: { type: String, required: true, trim: true },    // Exemple : "228"
+    fullNumber: {
       type: String,
       unique: true,
       sparse: true,
       trim: true,
-      set: function () {
-        return `${this.prefix}${this.phone}`;
-      },
     },
 
     // 🔹 Intégration CinetPay
     cinetpay_contact_added: { type: Boolean, default: false },
     cinetpay_contact_id: { type: String, default: null },
-    cinetpay_contact_meta: { type: Object, default: null },
+    cinetpay_contact_meta: { type: Object, default: {} },
 
     // 🔹 Type de compte pour PayOut
     payout_method: {
@@ -46,5 +43,16 @@ const SellerSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// 🔹 Middleware pour générer automatiquement fullNumber
+SellerSchema.pre("save", function (next) {
+  if (this.prefix && this.phone) {
+    this.fullNumber = `${this.prefix}${this.phone}`;
+  }
+  next();
+});
+
+// 🔹 Index pour recherche rapide sur email ou téléphone
+SellerSchema.index({ email: 1, fullNumber: 1 });
 
 module.exports = mongoose.model("Seller", SellerSchema);

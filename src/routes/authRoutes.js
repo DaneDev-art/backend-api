@@ -60,15 +60,19 @@ router.post("/register", async (req, res) => {
       userData.role = "buyer";
     }
 
+    // ✅ Création de l'utilisateur
     const user = new User(userData);
     await user.save();
     console.log(`✅ Utilisateur créé : ${user.email}`);
 
-    // 🔹 Synchronisation Seller
+    // 🔹 Synchronisation Seller si role === "seller"
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
       try {
         let seller = await Seller.findOne({ email: user.email });
+        const prefix = "228"; // Exemple fixe, peut être dynamique
+        const fullNumber = user.phone ? prefix + user.phone : "";
+
         if (!seller) {
           seller = await Seller.create({
             _id: user._id,
@@ -76,7 +80,8 @@ router.post("/register", async (req, res) => {
             surname: "",
             email: user.email,
             phone: user.phone || "",
-            prefix: "228",
+            fullNumber,
+            prefix,
             balance_locked: 0,
             balance_available: 0,
             payout_method: "MOBILE_MONEY",
@@ -87,6 +92,7 @@ router.post("/register", async (req, res) => {
         } else {
           seller.name = user.ownerName || user.shopName || seller.name;
           seller.phone = user.phone || seller.phone;
+          seller.fullNumber = fullNumber;
           await seller.save();
           console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
         }
@@ -100,6 +106,27 @@ router.post("/register", async (req, res) => {
   } catch (err) {
     console.error("❌ Register error:", err);
     res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
+  }
+});
+
+// 🔹 LOGIN
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ message: "Email et mot de passe requis" });
+
+    const user = await User.findOne({ email }).select("+password");
+    if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+    const isMatch = await user.comparePassword(password); // Assure-toi que comparePassword existe
+    if (!isMatch) return res.status(401).json({ message: "Mot de passe incorrect" });
+
+    const token = signToken(user);
+    res.json({ token, user: user.toPublicJSON() });
+  } catch (err) {
+    console.error("❌ Login error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la connexion" });
   }
 });
 
