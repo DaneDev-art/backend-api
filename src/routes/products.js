@@ -40,24 +40,20 @@ router.delete("/remove/:productId", verifyToken, productController.deleteProduct
 // 🔹 ROUTES ADMINISTRATEUR
 // ==========================================
 
-// ✅ Valider un produit (changer statut -> "validé")
+// 🔸 Valider un produit (statut -> "validé")
 router.put(
   "/validate/:productId",
   verifyToken,
   verifyAdmin,
-  typeof productController.validateProduct === "function"
-    ? productController.validateProduct
-    : (req, res) => res.status(501).json({ message: "Not implemented" })
+  productController.validateProduct
 );
 
-// 🚫 Bloquer un produit (changer statut -> "bloqué")
+// 🔸 Bloquer un produit (statut -> "bloqué")
 router.put(
   "/block/:productId",
   verifyToken,
   verifyAdmin,
-  typeof productController.blockProduct === "function"
-    ? productController.blockProduct
-    : (req, res) => res.status(501).json({ message: "Not implemented" })
+  productController.blockProduct
 );
 
 // ==========================================

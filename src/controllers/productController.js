@@ -2,12 +2,10 @@
 // src/controllers/productController.js
 // ==========================================
 const Product = require("../models/Product");
-const User = require("../models/user.model");
-const Seller = require("../models/Seller");
 const cloudinary = require("cloudinary").v2;
 
 // ==========================================
-// 🔹 Configuration Cloudinary (depuis .env)
+// 🔹 Configuration Cloudinary
 // ==========================================
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -16,33 +14,10 @@ cloudinary.config({
 });
 
 // ==========================================
-// ✅ Fonction utilitaire pour enrichir un produit
+// 🔹 Fonction utilitaire pour enrichir un produit
+// (désormais basé EXCLUSIVEMENT sur Product)
 // ==========================================
 const enrichProduct = async (product) => {
-  let shopName = "";
-  let country = "";
-  let sellerAvatar = "";
-
-  if (product.seller) {
-    // 1️⃣ Récupérer le user
-    const user = await User.findById(product.seller).lean();
-
-    if (user) {
-      shopName = user.shopName || "";
-      country = user.country || "";
-      sellerAvatar = user.avatarUrl || "";
-
-      // 2️⃣ Si seller, vérifier la collection Sellers
-      if (user.role === "seller") {
-        const seller = await Seller.findById(user._id).lean();
-        if (seller) {
-          shopName = seller.name || shopName;
-          country = seller.country || country; // Assurez-vous que ce champ existe ou reste celui de User
-        }
-      }
-    }
-  }
-
   return {
     _id: product._id,
     name: product.name,
@@ -52,25 +27,26 @@ const enrichProduct = async (product) => {
     images: product.images,
     category: product.category,
     status: product.status,
-    sellerId: product.seller?._id?.toString() || product.seller?.toString() || "",
-    shopName: shopName || "Boutique inconnue",
-    country: country || "Pays inconnu",
-    sellerAvatar,
+    rating: product.rating,
+    numReviews: product.numReviews,
+    sellerId: product.seller?.toString() ?? "",
+    shopName: product.shopName || "Boutique inconnue",
+    country: product.country || "Pays inconnu",
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
 };
 
 // ==========================================
-// ✅ Obtenir tous les produits (avec boutique & pays)
+// ✅ Obtenir tous les produits
 // ==========================================
 exports.getAllProducts = async (req, res) => {
   try {
     const products = await Product.find().sort({ createdAt: -1 });
 
-    const enrichedProducts = await Promise.all(products.map(enrichProduct));
+    const enriched = await Promise.all(products.map(enrichProduct));
 
-    res.status(200).json(enrichedProducts);
+    res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getAllProducts error:", err);
     res.status(500).json({ error: err.message });
@@ -84,11 +60,13 @@ exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
 
-    const products = await Product.find({ seller: sellerId }).sort({ createdAt: -1 });
+    const products = await Product.find({ seller: sellerId }).sort({
+      createdAt: -1,
+    });
 
-    const enrichedProducts = await Promise.all(products.map(enrichProduct));
+    const enriched = await Promise.all(products.map(enrichProduct));
 
-    res.status(200).json(enrichedProducts);
+    res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getProductsBySeller error:", err);
     res.status(500).json({ error: err.message });
@@ -100,26 +78,38 @@ exports.getProductsBySeller = async (req, res) => {
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
-    const { name, description, price, category, images } = req.body;
+    const { name, description, price, category, shopName, country, images } =
+      req.body;
+
     const sellerId = req.user._id;
 
-    if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
-    if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
+    if (!sellerId)
+      return res.status(401).json({ message: "Utilisateur non authentifié" });
 
+    if (!name || !price)
+      return res
+        .status(400)
+        .json({ message: "Nom et prix du produit sont obligatoires" });
+
+    // 🔥 Le shopName & country sont directement stockés dans Product
     const product = new Product({
       name,
       description,
       price,
       category,
-      images: [],
       seller: sellerId,
+      images: [],
+      shopName: shopName || "",
+      country: country || "",
       status: "actif",
     });
 
     // 🔹 Upload Cloudinary
     if (images && images.length > 0) {
       for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
+        const uploadRes = await cloudinary.uploader.upload(img, {
+          folder: "products",
+        });
         product.images.push(uploadRes.secure_url);
       }
     }
@@ -142,23 +132,39 @@ exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const sellerId = req.user._id;
-    const { name, description, price, category, images } = req.body;
 
-    const product = await Product.findOne({ _id: productId, seller: sellerId });
-    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+    const { name, description, price, category, shopName, country, images } =
+      req.body;
+
+    const product = await Product.findOne({
+      _id: productId,
+      seller: sellerId,
+    });
+
+    if (!product)
+      return res
+        .status(404)
+        .json({ message: "Produit introuvable ou non autorisé" });
 
     if (name) product.name = name;
     if (description) product.description = description;
     if (price) product.price = price;
     if (category) product.category = category;
 
+    // 🔹 On modifie aussi shopName & country dans Product
+    if (shopName) product.shopName = shopName;
+    if (country) product.country = country;
+
+    // 🔹 Upload Cloudinary si images fournies
     if (images && images.length > 0) {
-      const uploadedImages = [];
+      const uploaded = [];
       for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
-        uploadedImages.push(uploadRes.secure_url);
+        const up = await cloudinary.uploader.upload(img, {
+          folder: "products",
+        });
+        uploaded.push(up.secure_url);
       }
-      product.images = uploadedImages;
+      product.images = uploaded;
     }
 
     await product.save();
@@ -180,8 +186,15 @@ exports.deleteProduct = async (req, res) => {
     const { productId } = req.params;
     const sellerId = req.user._id;
 
-    const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
-    if (!deleted) return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
+    const deleted = await Product.findOneAndDelete({
+      _id: productId,
+      seller: sellerId,
+    });
+
+    if (!deleted)
+      return res
+        .status(404)
+        .json({ message: "Produit non trouvé ou non autorisé" });
 
     res.status(200).json({ message: "Produit supprimé avec succès" });
   } catch (err) {
@@ -196,12 +209,19 @@ exports.deleteProduct = async (req, res) => {
 exports.validateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
+
     const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+
+    if (!product)
+      return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "validé";
+
     await product.save();
-    res.status(200).json({ message: "Produit validé avec succès", product });
+
+    res
+      .status(200)
+      .json({ message: "Produit validé avec succès", product: await enrichProduct(product) });
   } catch (err) {
     console.error("❌ validateProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -214,12 +234,18 @@ exports.validateProduct = async (req, res) => {
 exports.blockProduct = async (req, res) => {
   try {
     const { productId } = req.params;
+
     const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+
+    if (!product)
+      return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "bloqué";
     await product.save();
-    res.status(200).json({ message: "Produit bloqué avec succès", product });
+
+    res
+      .status(200)
+      .json({ message: "Produit bloqué avec succès", product: await enrichProduct(product) });
   } catch (err) {
     console.error("❌ blockProduct error:", err);
     res.status(500).json({ error: err.message });
