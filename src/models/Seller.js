@@ -29,10 +29,7 @@ const SellerSchema = new mongoose.Schema(
       enum: ["MOBILE_MONEY", "BANK", null],
       default: "MOBILE_MONEY",
     },
-    payout_account: {
-      type: String,
-      trim: true,
-    },
+    payout_account: { type: String, trim: true },
 
     // 🔹 Solde
     balance_locked: { type: Number, default: 0 },
@@ -52,7 +49,7 @@ SellerSchema.pre("save", function (next) {
   next();
 });
 
-// 🔹 Index pour recherche rapide sur email ou téléphone
+// 🔹 Index pour recherche rapide sur email ou fullNumber
 SellerSchema.index({ email: 1, fullNumber: 1 });
 
 module.exports = mongoose.model("Seller", SellerSchema);

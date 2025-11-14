@@ -1,8 +1,10 @@
+// src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
+const Seller = require("../models/Seller");
 const logger = require("../utils/logger");
-const { verifyToken, verifyAdmin, verifyRole } = require("../middleware/auth.middleware");
+const { verifyToken, verifyAdmin } = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
@@ -14,7 +16,9 @@ const signToken = (user) =>
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
+// ======================================================
 // 🔹 REGISTER
+// ======================================================
 router.post("/register", async (req, res) => {
   try {
     const { role, email, password } = req.body;
@@ -67,12 +71,11 @@ router.post("/register", async (req, res) => {
 
     // 🔹 Synchronisation Seller si role === "seller"
     if (user.role === "seller") {
-      const Seller = require("../models/Seller");
       try {
-        let seller = await Seller.findOne({ email: user.email });
-        const prefix = "228"; // Exemple fixe, peut être dynamique
+        const prefix = "228"; // Peut être dynamique si besoin
         const fullNumber = user.phone ? prefix + user.phone : "";
 
+        let seller = await Seller.findOne({ email: user.email });
         if (!seller) {
           seller = await Seller.create({
             _id: user._id,
@@ -80,18 +83,19 @@ router.post("/register", async (req, res) => {
             surname: "",
             email: user.email,
             phone: user.phone || "",
-            fullNumber,
             prefix,
+            fullNumber,
             balance_locked: 0,
             balance_available: 0,
             payout_method: "MOBILE_MONEY",
             cinetpay_contact_added: false,
-            cinetpay_contact_meta: [],
+            cinetpay_contact_meta: {},
           });
           console.log(`✅ Seller créé automatiquement pour ${user.email}`);
         } else {
           seller.name = user.ownerName || user.shopName || seller.name;
           seller.phone = user.phone || seller.phone;
+          seller.prefix = prefix;
           seller.fullNumber = fullNumber;
           await seller.save();
           console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
@@ -109,7 +113,9 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// ======================================================
 // 🔹 LOGIN
+// ======================================================
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -119,7 +125,7 @@ router.post("/login", async (req, res) => {
     const user = await User.findOne({ email }).select("+password");
     if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
 
-    const isMatch = await user.comparePassword(password); // Assure-toi que comparePassword existe
+    const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Mot de passe incorrect" });
 
     const token = signToken(user);
@@ -130,7 +136,9 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ======================================================
 // 🔹 UPDATE PROFILE
+// ======================================================
 router.put("/profile", verifyToken, async (req, res) => {
   try {
     const updates = { ...req.body };
@@ -145,9 +153,12 @@ router.put("/profile", verifyToken, async (req, res) => {
     Object.assign(user, updates);
     await user.save();
 
+    // 🔹 Synchronisation Seller
     if (user.role === "seller") {
-      const Seller = require("../models/Seller");
       try {
+        const prefix = "228";
+        const fullNumber = user.phone ? prefix + user.phone : "";
+
         let seller = await Seller.findById(user._id);
         if (!seller) {
           seller = await Seller.create({
@@ -156,16 +167,19 @@ router.put("/profile", verifyToken, async (req, res) => {
             surname: "",
             email: user.email,
             phone: user.phone || "",
-            prefix: "228",
+            prefix,
+            fullNumber,
             balance_locked: 0,
             balance_available: 0,
             payout_method: "MOBILE_MONEY",
             cinetpay_contact_added: false,
-            cinetpay_contact_meta: [],
+            cinetpay_contact_meta: {},
           });
         } else {
           seller.name = user.ownerName || user.shopName || seller.name;
           seller.phone = user.phone || seller.phone;
+          seller.prefix = prefix;
+          seller.fullNumber = fullNumber;
           await seller.save();
         }
       } catch (err) {
@@ -180,7 +194,9 @@ router.put("/profile", verifyToken, async (req, res) => {
   }
 });
 
+// ======================================================
 // 🔹 GET PROFILE
+// ======================================================
 router.get("/profile", verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -192,7 +208,9 @@ router.get("/profile", verifyToken, async (req, res) => {
   }
 });
 
+// ======================================================
 // 🔹 Route admin protégée
+// ======================================================
 router.get("/admin-data", verifyToken, verifyAdmin, async (req, res) => {
   res.json({ message: "✅ Accès admin autorisé", user: req.user });
 });
