@@ -61,20 +61,6 @@ const ProductSchema = new mongoose.Schema(
       required: [true, "Un produit doit être associé à un vendeur"],
     },
 
-    // 🔸 Nom de la boutique du vendeur (dérivé du User)
-    shopName: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
-    // 🔸 Pays du vendeur ou d’origine du produit 🌍
-    country: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
     // 🔸 Statut (utile si tu veux filtrer ou modérer les produits)
     status: {
       type: String,

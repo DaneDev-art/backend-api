@@ -89,21 +89,26 @@ exports.getProductsBySeller = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Ajouter un produit (auth requis)
+// ✅ Ajouter un produit (auth requis, users + sellers)
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
     const { name, description, price, category, images } = req.body;
-    const sellerId = req.user._id; // ✅ Correction ici
+    const sellerId = req.user._id; // ID dans users
 
     if (!sellerId) return res.status(401).json({ message: "Utilisateur non authentifié" });
     if (!name || !price) return res.status(400).json({ message: "Nom et prix obligatoires" });
 
-    // 🔹 Récupérer les infos du vendeur
-    const seller = await User.findById(sellerId).select("shopName country fullName avatarUrl");
-    if (!seller) return res.status(404).json({ message: "Vendeur introuvable" });
+    // 🔹 Vérifier que le seller existe dans users
+    const sellerUser = await User.findById(sellerId).select("shopName country fullName avatarUrl");
+    if (!sellerUser) return res.status(404).json({ message: "Vendeur introuvable dans users" });
 
-    // 🔹 Upload Cloudinary
+    // 🔹 Vérifier que le seller existe dans sellers (logique actuelle conservée)
+    const SellerModel = require("../models/seller.model"); // adapte le path si nécessaire
+    const sellerExistsInSellers = await SellerModel.exists({ user: sellerId });
+    if (!sellerExistsInSellers) return res.status(403).json({ message: "Vendeur non enregistré dans sellers" });
+
+    // 🔹 Upload Cloudinary si images fournies
     let uploadedImages = [];
     if (images && images.length > 0) {
       for (const img of images) {
@@ -112,26 +117,23 @@ exports.addProduct = async (req, res) => {
       }
     }
 
-    // 🔹 Créer le produit
+    // 🔹 Créer le produit en référant uniquement l'ID du user
     const product = new Product({
       name,
       description,
       price,
       category,
       images: uploadedImages,
-      seller: sellerId,
-      shopName: seller.shopName || "",
-      country: seller.country || "",
+      seller: sellerId,  // Référence à users
       status: "actif",
     });
 
     await product.save();
-    await product.populate({
-      path: "seller",
-      select: "shopName country fullName avatarUrl",
-    });
 
-    // 🔹 Réponse enrichie prête pour Flutter
+    // 🔹 Populate seller pour renvoyer shopName et country
+    await product.populate("seller", "shopName country fullName avatarUrl");
+
+    // 🔹 Réponse enrichie pour Flutter
     res.status(201).json({
       _id: product._id,
       name: product.name,
