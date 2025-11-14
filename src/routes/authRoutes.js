@@ -1,185 +1,177 @@
-// src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const { body, validationResult } = require("express-validator");
-const bcrypt = require("bcryptjs");
-
 const User = require("../models/user.model");
-const Seller = require("../models/Seller"); // 🔹 modèle Seller
+const logger = require("../utils/logger");
+const authMiddleware = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
-// 🔹 Fonction pour générer le token JWT
+// ======================================================
+// 🔹 Génération du JWT
+// ======================================================
 const signToken = (user) =>
   jwt.sign(
-    { id: user._id, email: user.email, role: user.role },
-    process.env.JWT_SECRET || "secretkey",
+    {
+      id: user._id,
+      role: user.role,
+      email: user.email,
+    },
+    process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
-// -------------------
-// REGISTER
-// -------------------
-router.post(
-  "/register",
-  [
-    body("email").isEmail().withMessage("Email invalide"),
-    body("password").isLength({ min: 6 }).withMessage("Mot de passe min 6 caractères"),
-    body("role").isIn(["buyer", "seller", "delivery"]).withMessage("Role invalide"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+// ======================================================
+// 🔹 REGISTER (avec synchronisation automatique des Sellers)
+// ======================================================
+router.post("/register", async (req, res) => {
+  try {
+    const { role, email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
-    try {
-      const { role, email, password } = req.body;
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(409).json({ message: "Cet utilisateur existe déjà" });
 
-      // ✅ Vérifier si l'utilisateur existe déjà
-      const existingUser = await User.findOne({ email });
-      if (existingUser) return res.status(400).json({ message: "Cet email est déjà utilisé" });
+    let userData = { email, password, role };
 
-      // -----------------------------
-      // 🔹 Hash du mot de passe
-      // -----------------------------
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // -----------------------------
-      // 🔹 Préparer les données utilisateur
-      // -----------------------------
-      let userData = { email, password: hashedPassword, role };
-
-      if (role === "buyer") {
-        const { fullName, phone, address, zone, country, city } = req.body;
-        userData = { ...userData, fullName, phone, address, zone, country, city };
-      } else if (role === "seller") {
-        const { ownerName, shopName, phone, address, country } = req.body;
-        userData = { ...userData, ownerName, shopName, phone, address, country };
-      } else if (role === "delivery") {
-        const {
-          fullName,
-          phone,
-          address,
-          zone,
-          country,
-          city,
-          plate,
-          idNumber,
-          guarantee,
-          transportMode,
-          idCardFrontUrl,
-          idCardBackUrl,
-          selfieUrl,
-        } = req.body;
-
-        userData = {
-          ...userData,
-          fullName,
-          phone,
-          address,
-          zone,
-          country,
-          city,
-          plate,
-          idNumber,
-          guarantee,
-          transportMode,
-          idCardFrontUrl,
-          idCardBackUrl,
-          selfieUrl,
-          status: "pending",
-        };
-      }
-
-      // -----------------------------
-      // 🔹 Créer l'utilisateur dans users
-      // -----------------------------
-      const user = new User(userData);
-      await user.save();
-
-      // -----------------------------
-      // 🔹 Si seller → créer document dans sellers
-      // -----------------------------
-      if (role === "seller") {
-        const { ownerName, phone, prefix } = req.body;
-        const sellerData = {
-          name: ownerName || "",
-          surname: "",
-          email,
-          phone,
-          prefix: prefix || "225", // par défaut selon pays
-          full_phone: `${prefix || "225"}${phone}`,
-          role: "seller",
-          balance_locked: 0,
-          balance_available: 0,
-        };
-        const seller = new Seller(sellerData);
-        await seller.save();
-      }
-
-      // -----------------------------
-      // 🔹 Générer token
-      // -----------------------------
-      const token = signToken(user);
-
-      res.status(201).json({
-        message: "Utilisateur créé avec succès",
-        token,
-        user: {
-          id: user._id,
-          email: user.email,
-          name: user.fullName || user.ownerName || "",
-          role: user.role,
-          status: user.status || null,
-        },
-      });
-    } catch (error) {
-      console.error("❌ Erreur register:", error);
-      res.status(500).json({ message: "Erreur serveur" });
+    // 🔸 Buyer
+    if (role === "buyer") {
+      const { fullName, phone, address, zone, country, city, avatarUrl } = req.body;
+      userData = { ...userData, fullName, phone, address, zone, country, city, avatarUrl };
     }
-  }
-);
-
-// -------------------
-// LOGIN
-// -------------------
-router.post(
-  "/login",
-  [
-    body("email").isEmail().withMessage("Email invalide"),
-    body("password").exists().withMessage("Mot de passe requis"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-    try {
-      const { email, password } = req.body;
-
-      // ✅ Inclure explicitement le champ password
-      const user = await User.findOne({ email }).select("+password");
-      if (!user) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
-
-      const isMatch = await user.comparePassword(password);
-      if (!isMatch) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
-
-      const token = signToken(user);
-
-      res.json({
-        message: "Connexion réussie",
-        token,
-        user: {
-          id: user._id,
-          email: user.email,
-          name: user.fullName || user.ownerName || "",
-          role: user.role,
-          status: user.status || null,
-        },
-      });
-    } catch (error) {
-      console.error("❌ Erreur login:", error);
-      res.status(500).json({ message: "Erreur serveur" });
+    // 🔸 Seller
+    else if (role === "seller") {
+      const { ownerName, shopName, phone, address, country, shopDescription, logoUrl } = req.body;
+      userData = {
+        ...userData,
+        ownerName,
+        shopName,
+        phone,
+        address,
+        country,
+        shopDescription,
+        logoUrl,
+        status: "approved",
+      };
     }
+    // 🔸 Delivery
+    else if (role === "delivery") {
+      const {
+        fullName, phone, address, zone, country, city,
+        plate, idNumber, guarantee, transportMode,
+        idCardFrontUrl, idCardBackUrl, selfieUrl
+      } = req.body;
+      userData = {
+        ...userData,
+        fullName, phone, address, zone, country, city,
+        plate, idNumber, guarantee, transportMode,
+        idCardFrontUrl, idCardBackUrl, selfieUrl,
+        status: "pending",
+      };
+    }
+    // 🔸 Par défaut : Buyer
+    else {
+      userData.role = "buyer";
+    }
+
+    // ✅ Création de l'utilisateur et hash automatique du mot de passe
+    const user = new User(userData);
+    await user.save();
+    console.log(`✅ Utilisateur créé : ${user.email}`);
+
+    // 🔹 Synchronisation Seller si role === "seller"
+    if (user.role === "seller") {
+      const Seller = require("../models/Seller");
+      try {
+        let seller = await Seller.findOne({ email: user.email });
+        if (!seller) {
+          seller = await Seller.create({
+            _id: user._id,
+            name: user.ownerName || user.shopName || user.email.split("@")[0],
+            surname: "",
+            email: user.email,
+            phone: user.phone || "",
+            prefix: "228",
+            balance_locked: 0,
+            balance_available: 0,
+            payout_method: "MOBILE_MONEY",
+            cinetpay_contact_added: false,
+            cinetpay_contact_meta: [],
+          });
+          console.log(`✅ Seller créé automatiquement pour ${user.email}`);
+        } else {
+          seller.name = user.ownerName || user.shopName || seller.name;
+          seller.phone = user.phone || seller.phone;
+          await seller.save();
+          console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
+        }
+      } catch (err) {
+        console.error(`❌ Erreur synchronisation Seller pour ${user.email}:`, err.message);
+      }
+    }
+
+    const token = signToken(user);
+    res.status(201).json({ token, user: user.toPublicJSON() });
+  } catch (err) {
+    console.error("❌ Register error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
   }
-);
+});
+
+// ======================================================
+// 🔹 UPDATE PROFILE (protégé + synchronisation Sellers)
+// ======================================================
+router.put("/profile", authMiddleware, async (req, res) => {
+  try {
+    const updates = { ...req.body };
+    const user = await User.findById(req.user.id).select("+password");
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    // 🔐 Mise à jour sécurisée du password
+    if (updates.password) {
+      user.password = updates.password; // pré-save hash automatique
+      delete updates.password;
+    }
+
+    // 🔹 Mise à jour des autres champs
+    Object.assign(user, updates);
+    await user.save();
+
+    // 🔹 Synchronisation Seller si role === "seller"
+    if (user.role === "seller") {
+      const Seller = require("../models/Seller");
+      try {
+        let seller = await Seller.findById(user._id);
+        if (!seller) {
+          seller = await Seller.create({
+            _id: user._id,
+            name: user.ownerName || user.shopName || user.email.split("@")[0],
+            surname: "",
+            email: user.email,
+            phone: user.phone || "",
+            prefix: "228",
+            balance_locked: 0,
+            balance_available: 0,
+            payout_method: "MOBILE_MONEY",
+            cinetpay_contact_added: false,
+            cinetpay_contact_meta: [],
+          });
+          console.log(`✅ Seller créé automatiquement pour ${user.email}`);
+        } else {
+          seller.name = user.ownerName || user.shopName || seller.name;
+          seller.phone = user.phone || seller.phone;
+          await seller.save();
+          console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
+        }
+      } catch (err) {
+        console.error(`❌ Erreur synchronisation Seller pour ${user.email}:`, err.message);
+      }
+    }
+
+    res.json({ user: user.toPublicJSON() });
+  } catch (err) {
+    logger.error("❌ Update profile error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la mise à jour du profil" });
+  }
+});
 
 module.exports = router;

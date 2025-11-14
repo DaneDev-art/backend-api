@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       minlength: 6,
-      select: false, // 🔐 Empêche d’être renvoyé par défaut
+      select: false, // 🔐 crucial : à gérer au login
     },
 
     role: {
@@ -45,7 +45,7 @@ const userSchema = new mongoose.Schema(
     country: { type: String, trim: true },
     city: { type: String, trim: true },
 
-    // 🔸 Informations vendeur
+    // 🔸 Infos vendeur
     ownerName: { type: String, trim: true },
     shopName: { type: String, trim: true, index: true },
     shopDescription: { type: String, trim: true },
@@ -53,15 +53,13 @@ const userSchema = new mongoose.Schema(
     profileImageUrl: { type: String },
 
     // ==========================================
-    // 🔸 SOLDES & CINETPAY (compatibles controller)
+    // 🔸 SOLDES & CINETPAY
     // ==========================================
     cinetpayId: { type: String },
 
-    // ✅ Harmonisation des noms pour compatibilité
-    balance_locked: { type: Number, default: 0 }, // utilisé par le contrôleur
+    balance_locked: { type: Number, default: 0 },
     balance_available: { type: Number, default: 0 },
 
-    // 🔸 Métadonnées CinetPay
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
@@ -82,12 +80,12 @@ const userSchema = new mongoose.Schema(
       },
     },
 
-    // 🔸 Documents d’identité (Cloudinary)
+    // 🔸 Documents d’identité
     idCardFrontUrl: { type: String },
     idCardBackUrl: { type: String },
     selfieUrl: { type: String },
 
-    // 🔸 Avatar (pour buyers, admins)
+    // 🔸 Avatar
     avatarUrl: { type: String, default: "" },
   },
   { timestamps: true }
@@ -109,14 +107,19 @@ userSchema.pre("save", async function (next) {
 });
 
 // ==========================================
-// 🔐 Méthode pour comparer les mots de passe
+// 🔐 Comparaison des mots de passe
 // ==========================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!this.password) {
+    // arrive si on oublie .select("+password")
+    throw new Error("Password not selected in query");
+  }
+
   return bcrypt.compare(candidatePassword, this.password);
 };
 
 // ==========================================
-// 🧩 Nettoyage de la sortie publique (profil utilisateur)
+// 🧩 Nettoyage du retour public
 // ==========================================
 userSchema.methods.toPublicJSON = function () {
   const user = this.toObject();
