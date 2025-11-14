@@ -5,7 +5,7 @@ const { body, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
 
 const User = require("../models/user.model");
-const sellerController = require("../controllers/seller.controller"); // 🔹 controller seller
+const Seller = require("../models/Seller"); // 🔹 modèle Seller
 
 const router = express.Router();
 
@@ -34,15 +34,26 @@ router.post(
     try {
       const { role, email, password } = req.body;
 
+      // ✅ Vérifier si l'utilisateur existe déjà
       const existingUser = await User.findOne({ email });
       if (existingUser) return res.status(400).json({ message: "Cet email est déjà utilisé" });
 
-      let userData = { email, password, role };
+      // -----------------------------
+      // 🔹 Hash du mot de passe
+      // -----------------------------
+      const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Champs spécifiques selon le rôle
+      // -----------------------------
+      // 🔹 Préparer les données utilisateur
+      // -----------------------------
+      let userData = { email, password: hashedPassword, role };
+
       if (role === "buyer") {
         const { fullName, phone, address, zone, country, city } = req.body;
         userData = { ...userData, fullName, phone, address, zone, country, city };
+      } else if (role === "seller") {
+        const { ownerName, shopName, phone, address, country } = req.body;
+        userData = { ...userData, ownerName, shopName, phone, address, country };
       } else if (role === "delivery") {
         const {
           fullName,
@@ -79,34 +90,35 @@ router.post(
         };
       }
 
-      // 🔹 Hash du mot de passe
-      const hashedPassword = await bcrypt.hash(userData.password, 10);
-      userData.password = hashedPassword;
-
-      // 🔹 Création de l'utilisateur
+      // -----------------------------
+      // 🔹 Créer l'utilisateur dans users
+      // -----------------------------
       const user = new User(userData);
       await user.save();
 
-      let seller = null;
-
-      // 🔹 Si seller → passer par le controller pour centraliser
+      // -----------------------------
+      // 🔹 Si seller → créer document dans sellers
+      // -----------------------------
       if (role === "seller") {
-        // Ajout des champs nécessaires pour le controller
-        req.body.name = req.body.ownerName || "";
-        req.body.surname = ""; // si tu veux récupérer un champ surname côté Flutter
-        req.body.phone = req.body.phone;
-        req.body.prefix = req.body.prefix || "225"; // par défaut, tu peux ajuster selon le pays
-
-        // Appel du controller
-        const fakeRes = {
-          status: (code) => ({
-            json: (data) => data, // juste pour récupérer l'objet
-          }),
+        const { ownerName, phone, prefix } = req.body;
+        const sellerData = {
+          name: ownerName || "",
+          surname: "",
+          email,
+          phone,
+          prefix: prefix || "225", // par défaut selon pays
+          full_phone: `${prefix || "225"}${phone}`,
+          role: "seller",
+          balance_locked: 0,
+          balance_available: 0,
         };
-        const result = await sellerController.createSeller(req, fakeRes);
-        // 🔹 On pourrait ne rien faire, car la création se fait côté controller
+        const seller = new Seller(sellerData);
+        await seller.save();
       }
 
+      // -----------------------------
+      // 🔹 Générer token
+      // -----------------------------
       const token = signToken(user);
 
       res.status(201).json({
@@ -143,6 +155,7 @@ router.post(
     try {
       const { email, password } = req.body;
 
+      // ✅ Inclure explicitement le champ password
       const user = await User.findOne({ email }).select("+password");
       if (!user) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
 
