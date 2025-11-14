@@ -2,7 +2,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
+const bcrypt = require("bcryptjs");
+
 const User = require("../models/user.model");
+const sellerController = require("../controllers/seller.controller"); // 🔹 controller seller
 
 const router = express.Router();
 
@@ -40,9 +43,6 @@ router.post(
       if (role === "buyer") {
         const { fullName, phone, address, zone, country, city } = req.body;
         userData = { ...userData, fullName, phone, address, zone, country, city };
-      } else if (role === "seller") {
-        const { ownerName, shopName, phone, address, country } = req.body;
-        userData = { ...userData, ownerName, shopName, phone, address, country };
       } else if (role === "delivery") {
         const {
           fullName,
@@ -75,14 +75,40 @@ router.post(
           idCardFrontUrl,
           idCardBackUrl,
           selfieUrl,
-          status: "pending", // ✅ statut initial pour livreur
+          status: "pending",
         };
       }
 
+      // 🔹 Hash du mot de passe
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
+      userData.password = hashedPassword;
+
+      // 🔹 Création de l'utilisateur
       const user = new User(userData);
       await user.save();
 
+      let seller = null;
+
+      // 🔹 Si seller → passer par le controller pour centraliser
+      if (role === "seller") {
+        // Ajout des champs nécessaires pour le controller
+        req.body.name = req.body.ownerName || "";
+        req.body.surname = ""; // si tu veux récupérer un champ surname côté Flutter
+        req.body.phone = req.body.phone;
+        req.body.prefix = req.body.prefix || "225"; // par défaut, tu peux ajuster selon le pays
+
+        // Appel du controller
+        const fakeRes = {
+          status: (code) => ({
+            json: (data) => data, // juste pour récupérer l'objet
+          }),
+        };
+        const result = await sellerController.createSeller(req, fakeRes);
+        // 🔹 On pourrait ne rien faire, car la création se fait côté controller
+      }
+
       const token = signToken(user);
+
       res.status(201).json({
         message: "Utilisateur créé avec succès",
         token,
@@ -91,7 +117,7 @@ router.post(
           email: user.email,
           name: user.fullName || user.ownerName || "",
           role: user.role,
-          status: user.status || null, // ✅ inclut status pour delivery
+          status: user.status || null,
         },
       });
     } catch (error) {
@@ -117,7 +143,6 @@ router.post(
     try {
       const { email, password } = req.body;
 
-      // ✅ Inclure explicitement le champ password
       const user = await User.findOne({ email }).select("+password");
       if (!user) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
 
@@ -125,6 +150,7 @@ router.post(
       if (!isMatch) return res.status(401).json({ message: "Email ou mot de passe incorrect" });
 
       const token = signToken(user);
+
       res.json({
         message: "Connexion réussie",
         token,
