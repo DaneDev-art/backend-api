@@ -72,10 +72,10 @@ router.post("/register", async (req, res) => {
     // 🔹 Synchronisation Seller si role === "seller"
     if (user.role === "seller") {
       try {
-        const prefix = "228"; // Peut être dynamique si besoin
+        const prefix = "228";
         const fullNumber = user.phone ? prefix + user.phone : "";
 
-        let seller = await Seller.findOne({ email: user.email });
+        let seller = await Seller.findById(user._id);
         if (!seller) {
           seller = await Seller.create({
             _id: user._id,
@@ -205,6 +205,50 @@ router.get("/profile", verifyToken, async (req, res) => {
   } catch (err) {
     logger.error("❌ Get profile error:", err);
     res.status(500).json({ message: "Erreur serveur lors de la récupération du profil" });
+  }
+});
+
+// ======================================================
+// 🔹 GET USER BY ID (users + sellers)
+// ======================================================
+router.get("/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1️⃣ Cherche dans users
+    let user = await User.findById(id).lean();
+
+    // 2️⃣ Si pas trouvé, cherche dans sellers
+    if (!user) {
+      const seller = await Seller.findById(id).lean();
+      if (!seller) return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+      return res.json({
+        _id: seller._id,
+        email: seller.email,
+        role: "seller",
+        shopName: seller.name || "",
+        country: seller.country || "",
+      });
+    }
+
+    // 3️⃣ Si trouvé dans users, enrichis si seller
+    let sellerInfo = {};
+    if (user.role === "seller") {
+      const seller = await Seller.findById(user._id).lean();
+      sellerInfo = {
+        shopName: seller?.name || user.shopName || "",
+        country: seller?.country || user.country || "",
+      };
+    }
+
+    res.json({
+      ...user,
+      ...sellerInfo,
+    });
+  } catch (err) {
+    console.error("❌ GET /users/:id error:", err.message);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });
 
