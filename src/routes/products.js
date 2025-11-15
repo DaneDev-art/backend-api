@@ -18,29 +18,43 @@ router.use(
 );
 
 // ==========================================
-// 🔹 ROUTES PRODUITS
+// 🔹 ROUTES PRODUITS (version corrigée)
 // ==========================================
 
-// ✅ Tous les produits (public, avec filtres)
+// ✅ GET — Tous les produits (public)
 router.get("/", productController.getAllProducts);
 
-// ✅ Produits d’un vendeur spécifique (public ou auth)
+// ✅ GET — Produits d’un vendeur spécifique
 router.get("/seller/:sellerId", productController.getProductsBySeller);
 
-// ✅ Ajouter un produit (vendeur connecté)
-router.post("/add", verifyToken, productController.addProduct);
+// ============================
+// 🟢 IMPORTANT : COHÉRENCE FLUTTER
+// ============================
+// Flutter envoie POST /api/products
+// Donc ici on remplace "/add" par "/".
+// ============================
 
-// ✅ Modifier un produit (vendeur connecté)
-router.put("/update/:productId", verifyToken, productController.updateProduct);
+// ✅ POST — Ajouter un produit
+router.post("/", verifyToken, productController.addProduct);
 
-// ✅ Supprimer un produit (vendeur connecté)
-router.delete("/remove/:productId", verifyToken, productController.deleteProduct);
+// ============================
+// idem pour update et delete
+// Flutter envoie :
+// PUT    /api/products/:id
+// DELETE /api/products/:id
+// ============================
+
+// ✅ PUT — Modifier un produit
+router.put("/:productId", verifyToken, productController.updateProduct);
+
+// ✅ DELETE — Supprimer un produit
+router.delete("/:productId", verifyToken, productController.deleteProduct);
 
 // ==========================================
 // 🔹 ROUTES ADMINISTRATEUR
 // ==========================================
 
-// 🔸 Valider un produit (statut -> "validé")
+// 🔸 Valider un produit
 router.put(
   "/validate/:productId",
   verifyToken,
@@ -48,7 +62,7 @@ router.put(
   productController.validateProduct
 );
 
-// 🔸 Bloquer un produit (statut -> "bloqué")
+// 🔸 Bloquer un produit
 router.put(
   "/block/:productId",
   verifyToken,
