@@ -1,6 +1,6 @@
 // ===============================
 // routes/messageRoutes.js
-// Version PRO compatible User & Seller
+// Version PRO compatible User & Seller avec Cloudinary
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -12,6 +12,16 @@ const Message = require("../models/Message");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
+const cloudinary = require("cloudinary").v2;
+
+// ============================================
+// ⚙️ Configuration Cloudinary
+// ============================================
+cloudinary.config({
+  cloud_name: process.env.CLOUD_NAME,
+  api_key: process.env.CLOUD_API_KEY,
+  api_secret: process.env.CLOUD_API_SECRET,
+});
 
 // ============================================
 // ⚙️ Configuration Socket.IO (injection depuis server.js)
@@ -68,7 +78,7 @@ router.post("/", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Envoyer un message media (image/audio)
+// 🔹 Envoyer un message media (image/audio) sur Cloudinary
 // ============================================
 router.post("/media", upload.single("file"), async (req, res) => {
   try {
@@ -76,8 +86,15 @@ router.post("/media", upload.single("file"), async (req, res) => {
     if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
       return res.status(400).json({ error: "Champs manquants ou type invalide" });
 
-    const mediaUrl = `/uploads/messages/${req.file.filename}`;
+    // 🔹 Upload sur Cloudinary
+    const cloudResult = await cloudinary.uploader.upload(req.file.path, {
+      folder: `messages/${senderId}_${receiverId}`,
+      resource_type: type === "audio" ? "video" : "image",
+    });
 
+    const mediaUrl = cloudResult.secure_url;
+
+    // 🔹 Créer le message
     const newMessage = await Message.create({
       from: senderId.toString(),
       to: receiverId.toString(),
@@ -87,10 +104,14 @@ router.post("/media", upload.single("file"), async (req, res) => {
       unread: [receiverId.toString()],
     });
 
+    // 🔹 Émettre via Socket.IO
     if (io) {
       io.to(receiverId.toString()).emit("message:received", newMessage);
       io.to(senderId.toString()).emit("message:sent", newMessage);
     }
+
+    // 🔹 Supprimer fichier local après upload
+    fs.unlinkSync(req.file.path);
 
     res.status(201).json(newMessage);
   } catch (err) {
@@ -157,8 +178,7 @@ router.delete("/delete/:messageId", async (req, res) => {
 });
 
 // ============================================
-// 🔹 ✅ D’abord : Récupérer toutes les conversations d’un user
-// (PLACÉ AVANT /:user1/:user2 !)
+// 🔹 Récupérer toutes les conversations d’un user
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
