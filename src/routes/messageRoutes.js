@@ -18,9 +18,9 @@ const cloudinary = require("cloudinary").v2;
 // ⚙️ Configuration Cloudinary
 // ============================================
 cloudinary.config({
-  cloud_name: process.env.CLOUD_NAME,
-  api_key: process.env.CLOUD_API_KEY,
-  api_secret: process.env.CLOUD_API_SECRET,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 // ============================================
@@ -83,35 +83,38 @@ router.post("/", async (req, res) => {
 router.post("/media", upload.single("file"), async (req, res) => {
   try {
     const { senderId, receiverId, productId, type } = req.body;
+
     if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
       return res.status(400).json({ error: "Champs manquants ou type invalide" });
 
-    // 🔹 Upload sur Cloudinary
+    if (!cloudinary.config().api_key) {
+      return res.status(500).json({ error: "Configuration Cloudinary manquante" });
+    }
+
+    // 🔹 Déterminer resource_type
+    const resourceType = type === "audio" ? "raw" : "image";
+
     const cloudResult = await cloudinary.uploader.upload(req.file.path, {
       folder: `messages/${senderId}_${receiverId}`,
-      resource_type: type === "audio" ? "video" : "image",
+      resource_type: resourceType,
     });
 
-    const mediaUrl = cloudResult.secure_url;
+    // 🔹 Supprimer fichier local après upload
+    fs.unlinkSync(req.file.path);
 
-    // 🔹 Créer le message
     const newMessage = await Message.create({
       from: senderId.toString(),
       to: receiverId.toString(),
-      content: mediaUrl,
+      content: cloudResult.secure_url,
       type,
       productId: productId ? productId.toString() : null,
       unread: [receiverId.toString()],
     });
 
-    // 🔹 Émettre via Socket.IO
     if (io) {
       io.to(receiverId.toString()).emit("message:received", newMessage);
       io.to(senderId.toString()).emit("message:sent", newMessage);
     }
-
-    // 🔹 Supprimer fichier local après upload
-    fs.unlinkSync(req.file.path);
 
     res.status(201).json(newMessage);
   } catch (err) {
@@ -187,9 +190,7 @@ router.get("/conversations/:userId", async (req, res) => {
 
     const messages = await Message.find({
       $or: [{ from: userId.toString() }, { to: userId.toString() }],
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+    }).sort({ createdAt: -1 }).lean();
 
     if (!messages || messages.length === 0) return res.json([]);
 
