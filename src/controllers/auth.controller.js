@@ -135,14 +135,25 @@ router.post("/register", async (req, res) => {
 // ======================================================
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+    const { email, password, role } = req.body; // 🔹 role envoyé par frontend
+    if (!email || !password) 
+      return res.status(400).json({ message: "Email et mot de passe requis" });
 
     const user = await User.findOne({ email }).select("+password");
     if (!user) return res.status(401).json({ message: "Identifiants invalides" });
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Identifiants invalides" });
+
+    // 🔹 Vérification du rôle
+    if (role && user.role !== role) {
+      return res.status(401).json({ message: "Rôle invalide pour cet utilisateur" });
+    }
+
+    // 🔹 Vérification que l'admin est approuvé
+    if (user.role.startsWith("admin") && user.status !== "approved") {
+      return res.status(403).json({ message: "Admin non autorisé à se connecter" });
+    }
 
     const token = signToken(user);
     res.json({ token, user: user.toPublicJSON() });
