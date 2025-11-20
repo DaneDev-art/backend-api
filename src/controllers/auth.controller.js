@@ -93,7 +93,6 @@ router.post("/register", async (req, res) => {
         let seller = await Seller.findOne({ email: user.email });
 
         if (!seller) {
-          // ⚠️ On fixe le _id du seller identique à celui du user
           seller = await Seller.create({
             _id: user._id,
             name: user.ownerName || user.shopName || user.email.split("@")[0],
@@ -109,7 +108,6 @@ router.post("/register", async (req, res) => {
           });
           console.log(`✅ Seller créé automatiquement pour ${user.email}`);
         } else {
-          // Mise à jour automatique
           seller.name = user.ownerName || user.shopName || seller.name;
           seller.phone = user.phone || seller.phone;
           await seller.save();
@@ -135,8 +133,8 @@ router.post("/register", async (req, res) => {
 // ======================================================
 router.post("/login", async (req, res) => {
   try {
-    const { email, password, role } = req.body; // 🔹 role envoyé par frontend
-    if (!email || !password) 
+    const { email, password, role } = req.body;
+    if (!email || !password)
       return res.status(400).json({ message: "Email et mot de passe requis" });
 
     const user = await User.findOne({ email }).select("+password");
@@ -145,18 +143,19 @@ router.post("/login", async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Identifiants invalides" });
 
-    // 🔹 Vérification du rôle
+    // 🔹 Vérification du rôle envoyé par le frontend
     if (role && user.role !== role) {
       return res.status(401).json({ message: "Rôle invalide pour cet utilisateur" });
     }
 
-    // 🔹 Vérification que l'admin est approuvé
+    // 🔹 Vérification Admin approuvé
     if (user.role.startsWith("admin") && user.status !== "approved") {
       return res.status(403).json({ message: "Admin non autorisé à se connecter" });
     }
 
     const token = signToken(user);
     res.json({ token, user: user.toPublicJSON() });
+
   } catch (err) {
     logger.error("❌ Login error:", err);
     res.status(500).json({ message: "Erreur serveur lors de la connexion" });
@@ -191,13 +190,12 @@ router.put("/profile", authMiddleware, async (req, res) => {
 
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-    // 🔹 Synchronisation Seller si role === "seller"
+    // 🔹 Synchronisation Seller
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
       try {
         let seller = await Seller.findById(user._id);
         if (!seller) {
-          // ⚠️ On fixe le _id du seller identique à celui du user
           seller = await Seller.create({
             _id: user._id,
             name: user.ownerName || user.shopName || user.email.split("@")[0],
@@ -227,6 +225,47 @@ router.put("/profile", authMiddleware, async (req, res) => {
   } catch (err) {
     logger.error("❌ Update profile error:", err);
     res.status(500).json({ message: "Erreur serveur lors de la mise à jour du profil" });
+  }
+});
+
+// ======================================================
+// 🔹 CREATE ADMIN (Route sécurisée)
+// ======================================================
+router.post("/admin/create", async (req, res) => {
+  try {
+    // 🔐 Protection par clé secrète
+    if (req.headers["x-admin-secret"] !== process.env.ADMIN_CREATION_SECRET) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email et mot de passe requis" });
+    }
+
+    const exists = await User.findOne({ email });
+    if (exists) {
+      return res.status(409).json({ message: "Cet administrateur existe déjà" });
+    }
+
+    const admin = new User({
+      email,
+      password,
+      role: "admin",
+      status: "approved",  // 🔥 Autorise directement la connexion
+    });
+
+    await admin.save();
+
+    res.status(201).json({
+      message: "Administrateur créé avec succès",
+      admin: admin.toPublicJSON(),
+    });
+
+  } catch (err) {
+    console.error("❌ Admin creation error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la création de l'admin" });
   }
 });
 
