@@ -1,4 +1,3 @@
-// src/routes/authRoutes.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
@@ -254,6 +253,8 @@ router.get("/users/:id", async (req, res) => {
 
 // ======================================================
 // 🔹 GET USERS BY ROLE (buyer, seller, delivery…)
+//     - route protégée par token + verifyAdmin (comme tu avais)
+//     - supporte query ?status=pending
 // ======================================================
 router.get("/users/role/:role", verifyToken, verifyAdmin, async (req, res) => {
   try {
@@ -266,9 +267,32 @@ router.get("/users/role/:role", verifyToken, verifyAdmin, async (req, res) => {
 
     const users = await User.find(query).lean();
     res.json(users);
-
   } catch (err) {
     console.error("❌ GET /users/role/:role error:", err.message);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+});
+
+// ======================================================
+// 🔹 PUBLIC GET USERS BY ROLE (DEV / FALLBACK)
+//     - Identique à la route protégée mais *sans* middleware
+//     - UTILE si tu veux charger les delivery sans token (dev only)
+//     - Garde la route protégée pour la production
+// ======================================================
+router.get("/users/role/:role/public", async (req, res) => {
+  try {
+    const { role } = req.params;
+    const { status } = req.query;
+
+    let query = { role };
+    if (status) query.status = status;
+
+    const users = await User.find(query).lean();
+    if (!users) return res.status(404).json({ message: "Aucun utilisateur trouvé." });
+
+    res.json(users);
+  } catch (err) {
+    console.error("❌ GET /users/role/:role/public error:", err.message);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });

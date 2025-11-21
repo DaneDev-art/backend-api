@@ -1,5 +1,5 @@
 // =======================
-// app.js
+// src/app.js
 // =======================
 const express = require("express");
 const dotenv = require("dotenv");
@@ -43,10 +43,9 @@ const allowedOriginsProd = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // ✅ Autoriser Postman, mobile ou server-side
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // Postman, mobile, server-side
 
-      // ✅ Autoriser localhost pour dev
+      // Dev local
       if (
         origin.startsWith("http://localhost:") ||
         origin.startsWith("chrome-extension://")
@@ -55,7 +54,7 @@ app.use(
         return callback(null, true);
       }
 
-      // ✅ Vérification production
+      // Production
       if (process.env.NODE_ENV === "production") {
         if (allowedOriginsProd.includes(origin)) {
           console.log("✅ [CORS PROD] Origine autorisée :", origin);
@@ -65,7 +64,7 @@ app.use(
         return callback(new Error("Origine non autorisée par CORS"));
       }
 
-      // ✅ Environnement dev
+      // Dev générique
       console.log("🔍 [CORS DEV] Autorisé :", origin);
       callback(null, true);
     },
@@ -85,21 +84,22 @@ app.use(express.urlencoded({ extended: true }));
 // 🔹 Routes principales
 // =======================
 
-// ✅ Authentification utilisateurs (clients, livreurs, vendeurs)
+// Auth (users, sellers, deliveries)
 app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/auth/delivery", require("./routes/deliveryAuthRoutes"));
-app.use("/api/sellers", require("./routes/seller.routes")); // Gestion des vendeurs
 
-// ✅ Paiement CinetPay
+// Seller management
+app.use("/api/sellers", require("./routes/seller.routes"));
+
+// Paiement CinetPay
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 
-// ✅ Autres fonctionnalités Marketplace
+// Marketplace features
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
-app.use("/api/upload", require("./routes/uploadRoutes")); // Cloudinary
+app.use("/api/upload", require("./routes/uploadRoutes"));
 app.use("/api/deliveries", require("./routes/deliveries"));
 
-// ✅ Messages (Socket.IO)
+// Messages (Socket.IO)
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
