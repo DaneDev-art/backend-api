@@ -259,4 +259,53 @@ router.get("/admin-data", verifyToken, verifyAdmin, async (req, res) => {
   res.json({ message: "✅ Accès admin autorisé", user: req.user });
 });
 
+/// 🔥 Route sécurisée pour créer les admins
+const ADMINS = [
+  { role: "admin_general", email: "admin_general@gmail.com", password: "AdminGen123!", fullName: "Admin Général" },
+  { role: "admin_seller", email: "admin_seller@gmail.com", password: "AdminSell123!", fullName: "Admin Vendeur" },
+  { role: "admin_buyer", email: "admin_buyer@gmail.com", password: "AdminBuy123!", fullName: "Admin Acheteur" },
+  { role: "admin_delivery", email: "admin_delivery@gmail.com", password: "AdminDel123!", fullName: "Admin Livreur" },
+];
+
+router.get("/create-admins", async (req, res) => {
+  try {
+    // 🔐 Protection par clé secrète
+    const secret = req.headers["x-admin-secret"];
+    if (!secret || secret !== process.env.ADMIN_CREATION_SECRET) {
+      return res.status(401).json({ message: "Unauthorized: invalid secret" });
+    }
+
+    const results = [];
+
+    for (const adminData of ADMINS) {
+      const existing = await User.findOne({ email: adminData.email });
+
+      if (existing) {
+        results.push({
+          email: adminData.email,
+          status: "already_exists",
+        });
+        continue;
+      }
+
+      // Crée le nouvel admin
+      const newAdmin = new User(adminData);
+      await newAdmin.save();
+
+      results.push({
+        email: adminData.email,
+        status: "created",
+      });
+    }
+
+    return res.status(201).json({
+      message: "Admins processing completed",
+      admins: results,
+    });
+  } catch (err) {
+    console.error("❌ /create-admins error:", err.message);
+    return res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
