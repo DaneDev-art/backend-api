@@ -253,6 +253,27 @@ router.get("/users/:id", async (req, res) => {
 });
 
 // ======================================================
+// 🔹 GET USERS BY ROLE (buyer, seller, delivery…)
+// ======================================================
+router.get("/users/role/:role", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { role } = req.params;
+    const { status } = req.query; // ?status=pending optional
+
+    let query = { role };
+
+    if (status) query.status = status;
+
+    const users = await User.find(query).lean();
+    res.json(users);
+
+  } catch (err) {
+    console.error("❌ GET /users/role/:role error:", err.message);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+});
+
+// ======================================================
 // 🔹 Route admin protégée
 // ======================================================
 router.get("/admin-data", verifyToken, verifyAdmin, async (req, res) => {
