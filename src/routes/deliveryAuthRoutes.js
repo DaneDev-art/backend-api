@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const Delivery = require("../models/Delivery"); // Modèle mongoose pour livreurs
+const { verifyToken, verifyAdmin } = require("../middleware/auth.middleware"); // middlewares
 
 // =======================
 // 🔹 REGISTER DELIVERY
@@ -77,7 +78,7 @@ router.post(
     const { email, password } = req.body;
 
     try {
-      const delivery = await Delivery.findOne({ email });
+      const delivery = await Delivery.findOne({ email }).select("+password");
       if (!delivery) return res.status(400).json({ msg: "Utilisateur non trouvé" });
 
       const isMatch = await bcrypt.compare(password, delivery.password);
@@ -93,6 +94,41 @@ router.post(
     } catch (err) {
       console.error(err);
       res.status(500).json({ msg: "Erreur serveur" });
+    }
+  }
+);
+
+// =======================
+// 🔹 UPDATE DELIVERY STATUS (ADMIN ONLY)
+// =======================
+router.put(
+  "/update-status/:id",
+  verifyToken,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!["pending", "approved", "rejected"].includes(status)) {
+        return res.status(400).json({ msg: "Statut invalide" });
+      }
+
+      const delivery = await Delivery.findById(id);
+      if (!delivery) {
+        return res.status(404).json({ msg: "Livreur non trouvé" });
+      }
+
+      delivery.status = status;
+      await delivery.save();
+
+      res.json({
+        msg: `Statut du livreur mis à jour: ${status}`,
+        delivery,
+      });
+    } catch (err) {
+      console.error("❌ UPDATE DELIVERY STATUS error:", err.message);
+      res.status(500).json({ msg: "Erreur serveur", error: err.message });
     }
   }
 );

@@ -84,8 +84,11 @@ app.use(express.urlencoded({ extended: true }));
 // 🔹 Routes principales
 // =======================
 
-// Auth (users, sellers, deliveries)
+// Auth routes (login/register)
 app.use("/api/auth", require("./routes/authRoutes"));
+
+// Users routes (admin + public)
+app.use("/api/users", require("./routes/users.routes"));
 
 // Seller management
 app.use("/api/sellers", require("./routes/seller.routes"));
@@ -97,6 +100,8 @@ app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/upload", require("./routes/uploadRoutes"));
+
+// Delivery routes
 app.use("/api/deliveries", require("./routes/deliveries"));
 
 // Messages (Socket.IO)
