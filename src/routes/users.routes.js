@@ -52,6 +52,40 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
 });
 
 // =======================
+// 🔹 GET APPROVED DELIVERY MEN (PUBLIC)
+// =======================
+router.get("/delivery/approved", async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    const query = {
+      role: "delivery",       // <-- correspond exactement à ta base
+      status: "approved",     // <-- approuvé uniquement
+    };
+
+    // Recherche optionnelle
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const livreurs = await User.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      livreurs,
+      total: livreurs.length,
+    });
+  } catch (err) {
+    console.error("❌ GET /users/delivery/approved error:", err.message);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+});
+
+// =======================
 // 🔹 GET USERS BY ROLE PUBLIC
 // =======================
 router.get("/role/:role/public", async (req, res) => {
