@@ -52,32 +52,55 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
 });
 
 // =======================
-// 🔹 GET APPROVED DELIVERY MEN (PUBLIC)
+// 🔹 GET APPROVED DELIVERY MEN (PUBLIC, PAGINATED & SEARCHABLE)
 // =======================
 router.get("/delivery/approved", async (req, res) => {
   try {
-    const { search } = req.query;
+    const { search, page = 1, limit = 10, sort = "-createdAt" } = req.query;
 
     const query = {
-      role: "delivery",       // <-- correspond exactement à ta base
-      status: "approved",     // <-- approuvé uniquement
+      role: "delivery",
+      status: "approved",
     };
 
-    // Recherche optionnelle
+    // Recherche optionnelle sur plusieurs champs
     if (search) {
       query.$or = [
         { fullName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
+        { city: { $regex: search, $options: "i" } },
+        { deliveryZone: { $regex: search, $options: "i" } },
       ];
     }
 
+    // Pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Tri
+    const sortObj = {};
+    if (sort.startsWith("-")) {
+      sortObj[sort.substring(1)] = -1;
+    } else {
+      sortObj[sort] = 1;
+    }
+
+    // Récupération des livreurs
     const livreurs = await User.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortObj)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select(
+        "fullName phone email city country deliveryZone avatar status createdAt"
+      )
       .lean();
+
+    const total = await User.countDocuments(query);
 
     res.json({
       livreurs,
-      total: livreurs.length,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
     });
   } catch (err) {
     console.error("❌ GET /users/delivery/approved error:", err.message);
