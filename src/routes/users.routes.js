@@ -22,7 +22,6 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
       ];
     }
 
-    // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sortObj = {};
     if (sort.startsWith("-")) {
@@ -69,14 +68,11 @@ router.get("/delivery/approved", async (req, res) => {
         { fullName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
         { city: { $regex: search, $options: "i" } },
-        { deliveryZone: { $regex: search, $options: "i" } },
+        { zone: { $regex: search, $options: "i" } }, // <-- correction ici
       ];
     }
 
-    // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Tri
     const sortObj = {};
     if (sort.startsWith("-")) {
       sortObj[sort.substring(1)] = -1;
@@ -84,14 +80,13 @@ router.get("/delivery/approved", async (req, res) => {
       sortObj[sort] = 1;
     }
 
-    // Récupération des livreurs
     const livreurs = await User.find(query)
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
       .select(
-        "fullName phone email city country deliveryZone avatar status createdAt"
-      )
+        "fullName phone email city country zone avatar status createdAt idCardFrontUrl idCardBackUrl selfieUrl"
+      ) // <-- zone au lieu de deliveryZone
       .lean();
 
     const total = await User.countDocuments(query);
