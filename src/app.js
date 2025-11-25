@@ -104,6 +104,9 @@ app.use("/api/upload", require("./routes/uploadRoutes"));
 // Delivery routes
 app.use("/api/deliveries", require("./routes/deliveries"));
 
+// Delivery assignments
+app.use("/api/deliveryAssignments", require("./routes/deliveryAssignments"));
+
 // Messages (Socket.IO)
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
