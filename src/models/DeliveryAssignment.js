@@ -1,21 +1,29 @@
 const mongoose = require("mongoose");
 
-const DeliveryAssignmentSchema = new mongoose.Schema(
-  {
-    productId: { type: String, required: true },
-    sellerId: { type: String, required: true }, // utilisateur qui soumet
-    deliveryManId: { type: String, required: true }, // livreur
-    deliveryManName: { type: String, required: true },
-    productName: { type: String, required: true },
-    productImage: { type: String },
-    status: {
-      type: String,
-      enum: ["assigned", "accepted", "in_progress", "delivered"],
-      default: "assigned",
-    },
-    assignedAt: { type: Date, default: Date.now },
-  },
-  { timestamps: true }
-);
+const DeliveryAssignmentSchema = new mongoose.Schema({
+  // 🔹 Produit
+  productId: { type: String, required: true },
+  productName: String,
+  productImage: String,
+
+  // 🔹 Vendeur
+  sellerId: { type: String, required: true },
+  sellerName: String,
+
+  // 🔹 Client (celui qui soumet la commande au livreur)
+  clientId: { type: String, required: true },
+  clientName: String,
+  clientPhone: String,
+  clientAddress: String,
+
+  // 🔹 Livreur
+  deliveryManId: { type: String, required: true },
+  deliveryManName: String,
+
+  // 🔹 Statut
+  status: { type: String, default: "pending" },
+
+  assignedAt: { type: Date, default: Date.now },
+});
 
 module.exports = mongoose.model("DeliveryAssignment", DeliveryAssignmentSchema);
