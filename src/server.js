@@ -6,9 +6,9 @@ const app = require("./app");
 const mongoose = require("mongoose");
 const http = require("http");
 const { Server } = require("socket.io");
-const chalk = require("chalk"); // 🌈 Pour les logs colorés
+const chalk = require("chalk");
 
-// ✅ Import fonction initSocket
+// Import messagerie
 const { initSocket } = require("./routes/messageRoutes");
 
 const PORT = process.env.PORT || 5000;
@@ -76,7 +76,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
       },
     });
 
-    // --- Injection socket pour la messagerie
+    // --- Injection socket messagerie
     initSocket(io);
 
     const onlineUsers = new Map();
@@ -84,6 +84,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
     io.on("connection", (socket) => {
       console.log(chalk.blueBright(`🔌 Client connecté : ${socket.id}`));
 
+      // --- Le client rejoint sa room ---
       socket.on("join", (userId) => {
         if (userId) {
           socket.join(userId);
@@ -92,6 +93,7 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
+      // --- Marquage messages lus ---
       socket.on("markAsRead", async ({ userId, otherUserId, productId }) => {
         try {
           const Message = require("./models/Message");
@@ -109,6 +111,37 @@ const connectDB = async (retries = 5, delay = 3000) => {
           console.log(chalk.red("❌ Erreur markAsRead socket:"), chalk.yellow(err.message));
         }
       });
+
+      // =====================================================================
+      // 📦 NOUVEAU : NOTIFICATION SOUMISSION PRODUIT AU LIVREUR
+      // =====================================================================
+      socket.on("delivery:product_submitted", ({ 
+        livreurId,
+        senderId,
+        senderName,
+        productId,
+        productName 
+      }) => {
+        console.log(chalk.green("📦 Produit soumis => Notification envoyée au livreur !"));
+
+        // 🔔 Envoi de notification dans la room du livreur
+        io.to(livreurId).emit("delivery:new_product", {
+          type: "product_submitted",
+          livreurId,
+          senderId,
+          senderName,
+          productId,
+          productName,
+          message: `Un nouveau produit (${productName}) vous a été soumis.`,
+        });
+
+        // 🔔 Confirmation côté utilisateur
+        io.to(senderId).emit("delivery:confirmation", {
+          ok: true,
+          message: `Votre produit a été soumis avec succès au livreur.`,
+        });
+      });
+      // =====================================================================
 
       socket.on("disconnect", () => {
         for (let [userId, id] of onlineUsers.entries()) {
