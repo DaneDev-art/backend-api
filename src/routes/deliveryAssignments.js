@@ -2,7 +2,9 @@ const express = require("express");
 const router = express.Router();
 const DeliveryAssignment = require("../models/DeliveryAssignment");
 
+//
 // 📌 ASSIGNER UN PRODUIT À UN LIVREUR
+//
 router.post("/assign", async (req, res) => {
   try {
     const {
@@ -13,17 +15,21 @@ router.post("/assign", async (req, res) => {
       sellerName,
       deliveryManId,
       deliveryManName,
-      clientId,          // 👈 Nouveau : utilisateur qui soumet le produit
-      clientName,        // 👈 nouveau
-      clientPhone,       // 👈 nouveau
-      clientAddress      // 👈 nouveau
+      clientId,
+      clientName,
+      clientPhone,
+      clientAddress
     } = req.body;
 
+    // 🔍 Vérification des champs obligatoires
     if (!productId || !sellerId || !deliveryManId || !clientId) {
-      return res.status(400).json({ success: false, message: "Missing fields" });
+      return res.status(400).json({
+        success: false,
+        message: "Certains champs obligatoires sont manquants."
+      });
     }
 
-    // 🔍 Empêcher les doublons : le même produit ne doit pas être réassigné
+    // 🔍 Empêcher la double assignation du même produit au même livreur
     const alreadyAssigned = await DeliveryAssignment.findOne({
       productId,
       deliveryManId
@@ -37,21 +43,20 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // 📦 Création en base
+    // 📦 Création d'une nouvelle assignation
     const newAssignment = await DeliveryAssignment.create({
       productId,
-      productName,
+      productName: productName?.trim(),
       productImage,
       sellerId,
-      sellerName,
+      sellerName: sellerName?.trim(),
       deliveryManId,
-      deliveryManName,
+      deliveryManName: deliveryManName?.trim(),
 
-      // 🔥 Ajout des données client
       clientId,
-      clientName,
-      clientPhone,
-      clientAddress,
+      clientName: clientName?.trim(),
+      clientPhone: clientPhone?.trim(),
+      clientAddress: clientAddress?.trim(),
 
       assignedAt: new Date()
     });
@@ -64,24 +69,34 @@ router.post("/assign", async (req, res) => {
 
   } catch (err) {
     console.error("Error assigning product:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de l'assignation."
+    });
   }
 });
 
-
+//
 // 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN LIVREUR
+//
 router.get("/by-delivery-man/:id", async (req, res) => {
   try {
-    const assignments = await DeliveryAssignment.find({
-      deliveryManId: req.params.id
-    })
-    .sort({ assignedAt: -1 });
+    const deliveryManId = req.params.id;
 
-    return res.json({ success: true, assignments });
+    const assignments = await DeliveryAssignment.find({ deliveryManId })
+      .sort({ assignedAt: -1 });
+
+    return res.json({
+      success: true,
+      assignments
+    });
 
   } catch (err) {
     console.error("Error fetching assignments:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération des commandes."
+    });
   }
 });
 
