@@ -18,7 +18,9 @@ router.post("/assign", async (req, res) => {
       clientId,
       clientName,
       clientPhone,
-      clientAddress
+      clientAddress,
+      clientCity,
+      clientZone
     } = req.body;
 
     if (!productId || !sellerId || !deliveryManId || !clientId) {
@@ -53,6 +55,8 @@ router.post("/assign", async (req, res) => {
       clientName: clientName?.trim(),
       clientPhone: clientPhone?.trim(),
       clientAddress: clientAddress?.trim(),
+      clientCity: clientCity?.trim() || "",
+      clientZone: clientZone?.trim() || "",
       assignedAt: new Date(),
       status: "pending"
     });
@@ -120,7 +124,6 @@ router.get("/by-client/:clientId", async (req, res) => {
   }
 });
 
-
 //
 // 📌 METTRE À JOUR LE STATUT D’UNE ASSIGNATION
 //
@@ -144,7 +147,6 @@ router.put("/update-status/:id", async (req, res) => {
       });
     }
 
-    // On récupère l'assignation
     const assignment = await DeliveryAssignment.findById(assignmentId);
 
     if (!assignment) {
@@ -154,12 +156,7 @@ router.put("/update-status/:id", async (req, res) => {
       });
     }
 
-    //
     // 🚨 LOGIQUE : Empêcher les transitions illogiques
-    //
-
-    // 1️⃣ Le livreur NE PEUT PAS mettre "delivery_completed"
-    // si le client n’a pas confirmé
     if (status === "delivery_completed" && assignment.status !== "client_received") {
       return res.status(400).json({
         success: false,
@@ -167,7 +164,6 @@ router.put("/update-status/:id", async (req, res) => {
       });
     }
 
-    // 2️⃣ Une fois livré => bloquer toute modification
     if (assignment.status === "delivery_completed") {
       return res.status(400).json({
         success: false,
@@ -175,7 +171,6 @@ router.put("/update-status/:id", async (req, res) => {
       });
     }
 
-    // Mise à jour du statut
     assignment.status = status;
     await assignment.save();
 

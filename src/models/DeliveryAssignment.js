@@ -16,6 +16,8 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
     clientName: { type: String, trim: true },
     clientPhone: { type: String, trim: true },
     clientAddress: { type: String, trim: true },
+    clientCity: { type: String, trim: true, default: "" },   // <-- Nouveau champ
+    clientZone: { type: String, trim: true, default: "" },   // <-- Nouveau champ
 
     // 🔹 Livreur
     deliveryManId: { type: String, required: true, trim: true },
