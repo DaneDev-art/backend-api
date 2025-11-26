@@ -21,7 +21,6 @@ router.post("/assign", async (req, res) => {
       clientAddress
     } = req.body;
 
-    // 🔍 Vérification des champs obligatoires
     if (!productId || !sellerId || !deliveryManId || !clientId) {
       return res.status(400).json({
         success: false,
@@ -29,7 +28,6 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // 🔍 Empêcher la double assignation du même produit au même livreur
     const alreadyAssigned = await DeliveryAssignment.findOne({
       productId,
       deliveryManId
@@ -43,7 +41,6 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // 📦 Création d'une nouvelle assignation
     const newAssignment = await DeliveryAssignment.create({
       productId,
       productName: productName?.trim(),
@@ -56,7 +53,8 @@ router.post("/assign", async (req, res) => {
       clientName: clientName?.trim(),
       clientPhone: clientPhone?.trim(),
       clientAddress: clientAddress?.trim(),
-      assignedAt: new Date()
+      assignedAt: new Date(),
+      status: "pending"
     });
 
     return res.status(201).json({
@@ -108,13 +106,6 @@ router.get("/by-client/:clientId", async (req, res) => {
     const assignments = await DeliveryAssignment.find({ clientId })
       .sort({ assignedAt: -1 });
 
-    if (!assignments || assignments.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Aucune assignation trouvée pour ce client."
-      });
-    }
-
     return res.json({
       success: true,
       assignments
@@ -125,6 +116,80 @@ router.get("/by-client/:clientId", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Erreur serveur lors de la récupération des commandes."
+    });
+  }
+});
+
+
+//
+// 📌 METTRE À JOUR LE STATUT D’UNE ASSIGNATION
+//
+router.put("/update-status/:id", async (req, res) => {
+  try {
+    const assignmentId = req.params.id;
+    const { status } = req.body;
+
+    const validStatuses = [
+      "pending",
+      "accepted",
+      "in_delivery",
+      "client_received",
+      "delivery_completed"
+    ];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Statut invalide."
+      });
+    }
+
+    // On récupère l'assignation
+    const assignment = await DeliveryAssignment.findById(assignmentId);
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Assignation introuvable."
+      });
+    }
+
+    //
+    // 🚨 LOGIQUE : Empêcher les transitions illogiques
+    //
+
+    // 1️⃣ Le livreur NE PEUT PAS mettre "delivery_completed"
+    // si le client n’a pas confirmé
+    if (status === "delivery_completed" && assignment.status !== "client_received") {
+      return res.status(400).json({
+        success: false,
+        message: "Impossible : le client doit d'abord confirmer la réception."
+      });
+    }
+
+    // 2️⃣ Une fois livré => bloquer toute modification
+    if (assignment.status === "delivery_completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Cette commande est déjà livrée."
+      });
+    }
+
+    // Mise à jour du statut
+    assignment.status = status;
+    await assignment.save();
+
+    return res.json({
+      success: true,
+      message: "Statut mis à jour.",
+      assignment
+    });
+
+  } catch (err) {
+    console.error("Error updating status:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la mise à jour du statut."
     });
   }
 });

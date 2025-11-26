@@ -21,10 +21,16 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
     deliveryManId: { type: String, required: true, trim: true },
     deliveryManName: { type: String, trim: true },
 
-    // 🔹 Statut
+    // 🔹 Statut avec workflow étendu
     status: {
       type: String,
-      enum: ["pending", "accepted", "delivered", "cancelled"],
+      enum: [
+        "pending",           // en attente
+        "accepted",          // livreur a accepté
+        "in_delivery",       // en cours de livraison
+        "client_received",   // client a confirmé réception
+        "delivery_completed" // livreur a finalisé
+      ],
       default: "pending",
     },
 
@@ -32,8 +38,8 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
     assignedAt: { type: Date, default: Date.now },
   },
   {
-    timestamps: true, // ajoute createdAt + updatedAt automatiquement
-    collection: "delivery_assignments", // nom propre dans Mongo
+    timestamps: true, // createdAt + updatedAt
+    collection: "delivery_assignments",
   }
 );
 
