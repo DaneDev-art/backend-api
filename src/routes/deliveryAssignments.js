@@ -62,7 +62,7 @@ const newAssignment = await DeliveryAssignment.create({
 
 return res.status(201).json({
   success: true,
-  message: `Produit soumis avec succès au livreur ${deliveryManName}.`,
+  message: `Produit soumis avec succes au livreur ${deliveryManName}.`,
   assignment: newAssignment
 });
 ```
