@@ -34,7 +34,7 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean();
+      .lean(); // <-- enlevant select() pour récupérer tous les champs
 
     const total = await User.countDocuments(query);
 
@@ -68,7 +68,7 @@ router.get("/delivery/approved", async (req, res) => {
         { fullName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
         { city: { $regex: search, $options: "i" } },
-        { zone: { $regex: search, $options: "i" } }, // <-- correction ici
+        { zone: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -84,10 +84,7 @@ router.get("/delivery/approved", async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .select(
-        "fullName phone email city country zone avatar status createdAt idCardFrontUrl idCardBackUrl selfieUrl"
-      ) // <-- zone au lieu de deliveryZone
-      .lean();
+      .lean(); // <-- récupère tous les champs pour le front
 
     const total = await User.countDocuments(query);
 
@@ -133,7 +130,7 @@ router.get("/role/:role/public", async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean();
+      .lean(); // <-- récupère tous les champs
 
     if (!users.length) return res.status(404).json({ message: "Aucun utilisateur trouvé" });
 
