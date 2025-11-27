@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const DeliveryAssignment = require("../models/DeliveryAssignment");
+const User = require("../models/user.model"); // <-- modèle User
 
 //
 // 📌 ASSIGNER UN PRODUIT À UN LIVREUR
@@ -77,18 +78,49 @@ router.post("/assign", async (req, res) => {
 });
 
 //
-// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN LIVREUR
+// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN LIVREUR (avec infos complètes)
 //
 router.get("/by-delivery-man/:id", async (req, res) => {
   try {
     const deliveryManId = req.params.id;
 
     const assignments = await DeliveryAssignment.find({ deliveryManId })
-      .sort({ assignedAt: -1 });
+      .sort({ assignedAt: -1 })
+      .lean();
+
+    const enrichedAssignments = await Promise.all(assignments.map(async (a) => {
+      const seller = await User.findById(a.sellerId).lean();
+      const client = await User.findById(a.clientId).lean();
+      const deliveryMan = await User.findById(a.deliveryManId).lean();
+
+      return {
+        ...a,
+        seller: seller ? {
+          name: seller.fullName,
+          phone: seller.phone,
+          city: seller.city,
+          zone: seller.zone,
+          address: seller.address,
+        } : {},
+        client: client ? {
+          name: client.fullName,
+          phone: client.phone,
+          city: client.city,
+          zone: client.zone,
+          address: client.address,
+        } : {},
+        deliveryMan: deliveryMan ? {
+          name: deliveryMan.fullName,
+          phone: deliveryMan.phone,
+          city: deliveryMan.city,
+          zone: deliveryMan.zone,
+        } : {}
+      };
+    }));
 
     return res.json({
       success: true,
-      assignments
+      assignments: enrichedAssignments
     });
 
   } catch (err) {
@@ -101,18 +133,49 @@ router.get("/by-delivery-man/:id", async (req, res) => {
 });
 
 //
-// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN CLIENT
+// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN CLIENT (avec infos complètes)
 //
 router.get("/by-client/:clientId", async (req, res) => {
   try {
     const clientId = req.params.clientId;
 
     const assignments = await DeliveryAssignment.find({ clientId })
-      .sort({ assignedAt: -1 });
+      .sort({ assignedAt: -1 })
+      .lean();
+
+    const enrichedAssignments = await Promise.all(assignments.map(async (a) => {
+      const seller = await User.findById(a.sellerId).lean();
+      const client = await User.findById(a.clientId).lean();
+      const deliveryMan = await User.findById(a.deliveryManId).lean();
+
+      return {
+        ...a,
+        seller: seller ? {
+          name: seller.fullName,
+          phone: seller.phone,
+          city: seller.city,
+          zone: seller.zone,
+          address: seller.address,
+        } : {},
+        client: client ? {
+          name: client.fullName,
+          phone: client.phone,
+          city: client.city,
+          zone: client.zone,
+          address: client.address,
+        } : {},
+        deliveryMan: deliveryMan ? {
+          name: deliveryMan.fullName,
+          phone: deliveryMan.phone,
+          city: deliveryMan.city,
+          zone: deliveryMan.zone,
+        } : {}
+      };
+    }));
 
     return res.json({
       success: true,
-      assignments
+      assignments: enrichedAssignments
     });
 
   } catch (err) {
@@ -156,7 +219,7 @@ router.put("/update-status/:id", async (req, res) => {
       });
     }
 
-    // 🚨 LOGIQUE : Empêcher les transitions illogiques
+    // 🚨 Empêcher les transitions illogiques
     if (status === "delivery_completed" && assignment.status !== "client_received") {
       return res.status(400).json({
         success: false,
