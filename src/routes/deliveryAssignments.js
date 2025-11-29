@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const DeliveryAssignment = require("../models/DeliveryAssignment");
-const User = require("../models/user.model"); // <-- modèle User
+const User = require("../models/user.model"); // Modèle User (clients, livreurs, vendeurs)
 
-//
+// -------------------------------------------------------
 // 📌 ASSIGNER UN PRODUIT À UN LIVREUR
-//
+// -------------------------------------------------------
 router.post("/assign", async (req, res) => {
   try {
     const {
@@ -77,9 +77,9 @@ router.post("/assign", async (req, res) => {
   }
 });
 
-//
-// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN LIVREUR (avec infos complètes)
-//
+// -------------------------------------------------------
+// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN LIVREUR (infos complètes)
+// -------------------------------------------------------
 router.get("/by-delivery-man/:id", async (req, res) => {
   try {
     const deliveryManId = req.params.id;
@@ -114,6 +114,8 @@ router.get("/by-delivery-man/:id", async (req, res) => {
           phone: deliveryMan.phone,
           city: deliveryMan.city,
           zone: deliveryMan.zone,
+          country: deliveryMan.country || "",
+          avatar: deliveryMan.avatar || ""
         } : {}
       };
     }));
@@ -132,9 +134,9 @@ router.get("/by-delivery-man/:id", async (req, res) => {
   }
 });
 
-//
-// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN CLIENT (avec infos complètes)
-//
+// -------------------------------------------------------
+// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN CLIENT (infos complètes)
+// -------------------------------------------------------
 router.get("/by-client/:clientId", async (req, res) => {
   try {
     const clientId = req.params.clientId;
@@ -169,6 +171,8 @@ router.get("/by-client/:clientId", async (req, res) => {
           phone: deliveryMan.phone,
           city: deliveryMan.city,
           zone: deliveryMan.zone,
+          country: deliveryMan.country || "",
+          avatar: deliveryMan.avatar || ""
         } : {}
       };
     }));
@@ -187,9 +191,9 @@ router.get("/by-client/:clientId", async (req, res) => {
   }
 });
 
-//
+// -------------------------------------------------------
 // 📌 METTRE À JOUR LE STATUT D’UNE ASSIGNATION
-//
+// -------------------------------------------------------
 router.put("/update-status/:id", async (req, res) => {
   try {
     const assignmentId = req.params.id;
