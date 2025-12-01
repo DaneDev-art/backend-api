@@ -285,6 +285,92 @@ router.get("/by-client/:clientId", /* verifyToken, */ async (req, res) => {
   }
 });
 
+// -------------------------------------------------------
+// 📌 OBTENIR LES PRODUITS ASSIGNÉS À UN VENDEUR (infos enrichies)
+//    Route : GET /by-seller/:sellerId
+//    Params optionnels : ?page=1&limit=50&search=...
+// -------------------------------------------------------
+router.get("/by-seller/:sellerId", /* verifyToken, */ async (req, res) => {
+  try {
+    const sellerId = req.params.sellerId;
+    const { page = 1, limit = 50, search } = req.query;
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+
+    const baseQuery = { sellerId };
+
+    // Recherche optionnelle par nom produit / client / livreur
+    if (search) {
+      baseQuery.$or = [
+        { productName: { $regex: search, $options: "i" } },
+        { clientName: { $regex: search, $options: "i" } },
+        { deliveryManName: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const assignments = await DeliveryAssignment.find(baseQuery)
+      .sort({ assignedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit, 10))
+      .lean();
+
+    // Enrichir avec les données utilisateurs actuelles (seller/client/delivery) si besoin
+    const enriched = await Promise.all(assignments.map(async (a) => {
+      const [seller, client, deliveryMan] = await Promise.all([
+        User.findById(a.sellerId).lean(),
+        User.findById(a.clientId).lean(),
+        User.findById(a.deliveryManId).lean(),
+      ]);
+
+      return {
+        ...a,
+        seller: seller ? {
+          _id: seller._id,
+          name: seller.shopName ?? seller.fullName ?? "",
+          phone: seller.phone ?? "",
+          city: seller.city ?? "",
+          zone: seller.zone ?? "",
+          address: seller.address ?? "",
+          role: seller.role ?? "seller",
+        } : null,
+        client: client ? {
+          _id: client._id,
+          name: client.fullName ?? client.email ?? "",
+          phone: client.phone ?? "",
+          city: client.city ?? "",
+          zone: client.zone ?? "",
+          address: client.address ?? "",
+          role: client.role ?? "buyer",
+        } : null,
+        deliveryMan: deliveryMan ? {
+          _id: deliveryMan._id,
+          name: deliveryMan.fullName ?? "",
+          phone: deliveryMan.phone ?? "",
+          city: deliveryMan.city ?? "",
+          zone: deliveryMan.zone ?? "",
+          country: deliveryMan.country ?? "",
+          avatar: deliveryMan.avatarUrl ?? deliveryMan.avatar ?? "",
+          role: deliveryMan.role ?? "delivery",
+        } : null
+      };
+    }));
+
+    return res.json({
+      success: true,
+      assignments: enriched,
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+    });
+  } catch (err) {
+    console.error("Error fetching assignments by seller:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération des commandes (seller).",
+      error: err.message
+    });
+  }
+});
+
+
 // -----------------------------
 // 📌 METTRE À JOUR LE STATUT D’UNE ASSIGNATION
 // -----------------------------
