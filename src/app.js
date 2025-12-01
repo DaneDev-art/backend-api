@@ -15,13 +15,13 @@ const app = express();
 // =======================
 // 🔐 Sécurité & logs
 // =======================
-app.set("trust proxy", 1); // Utile pour Render ou nginx
-app.use(helmet({ crossOriginResourcePolicy: false })); // Permet affichage d’images externes
+app.set("trust proxy", 1);
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("dev"));
 
 // 🔒 Limiteur de requêtes
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   limit: 150,
   standardHeaders: true,
   legacyHeaders: false,
@@ -43,7 +43,7 @@ const allowedOriginsProd = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // Postman, mobile, server-side
+      if (!origin) return callback(null, true);
 
       // Dev local
       if (
@@ -64,7 +64,6 @@ app.use(
         return callback(new Error("Origine non autorisée par CORS"));
       }
 
-      // Dev générique
       console.log("🔍 [CORS DEV] Autorisé :", origin);
       callback(null, true);
     },
@@ -84,30 +83,33 @@ app.use(express.urlencoded({ extended: true }));
 // 🔹 Routes principales
 // =======================
 
-// Auth routes (login/register)
+// Auth
 app.use("/api/auth", require("./routes/authRoutes"));
 
-// Users routes (admin + public)
+// Users
 app.use("/api/users", require("./routes/users.routes"));
 
-// Seller management
+// Sellers
 app.use("/api/sellers", require("./routes/seller.routes"));
 
 // Paiement CinetPay
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 
-// Marketplace features
+// Marketplace
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/upload", require("./routes/uploadRoutes"));
 
-// Delivery routes
+// Deliveries
 app.use("/api/deliveries", require("./routes/deliveries"));
 
-// Delivery assignments
-app.use("/api/deliveryAssignments", require("./routes/deliveryAssignments"));
+// =======================
+// 🚚 DELIVERY ASSIGNMENTS (corrigé)
+// =======================
+// ⚠️ IMPORTANT : cohérent avec Flutter : /api/delivery-assignments
+app.use("/api/delivery-assignments", require("./routes/deliveryAssignments"));
 
-// Messages (Socket.IO)
+// Messages
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
@@ -152,6 +154,6 @@ app.use((err, req, res, next) => {
 });
 
 // =======================
-// 🚀 Export de l’app
+// 🚀 Export
 // =======================
 module.exports = app;
