@@ -302,4 +302,35 @@ router.put("/update-status/:id", async (req, res) => {
   }
 });
 
+// =====================================================
+// 📌 6) OBTENIR UNE ASSIGNATION PAR ID
+// =====================================================
+router.get("/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const assignment = await DeliveryAssignment.findById(id).lean();
+
+    if (!assignment) {
+      return res.status(404).json({
+        success: false,
+        message: "Assignation introuvable.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      assignment,
+    });
+  } catch (err) {
+    console.error("Error fetching single assignment:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération.",
+      error: err.message,
+    });
+  }
+});
+
+
 module.exports = router;
