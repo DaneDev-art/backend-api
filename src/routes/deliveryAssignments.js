@@ -6,15 +6,157 @@ const router = express.Router();
 
 const DeliveryAssignment = require("../models/DeliveryAssignment");
 const User = require("../models/user.model");
+const Product = require("../models/Product");
 
-// Auth (si nécessaire)
+// Auth
 const { verifyToken } = require("../middleware/auth.middleware");
 
 // Trim helper
 const s = (v) => (typeof v === "string" ? v.trim() : v);
 
 // =====================================================
-// 📌 1) ASSIGNER UN PRODUIT À UN LIVREUR
+// 📌 1) ASSIGNATION AVEC QUANTITÉ
+// =====================================================
+router.post("/assign-with-quantity", async (req, res) => {
+  try {
+    const {
+      productId,
+      quantity,
+      productName,
+      productImage,
+
+      sellerId,
+      sellerName,
+
+      deliveryManId,
+      deliveryManName,
+
+      clientId,
+      clientName,
+      clientPhone,
+      clientAddress,
+      clientCity,
+      clientZone
+    } = req.body;
+
+    // ---------- Vérifications ----------
+    if (!productId || !quantity || !sellerId || !deliveryManId || !clientId) {
+      return res.status(400).json({
+        success: false,
+        message: "Champs manquants (productId, quantity, sellerId, deliveryManId, clientId).",
+      });
+    }
+
+    if (quantity <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "La quantité doit être supérieure à zéro.",
+      });
+    }
+
+    // ---------- Vérifier le produit ----------
+    const product = await Product.findById(productId).lean();
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Produit introuvable.",
+      });
+    }
+
+    if (!product.stock || product.stock < quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Stock insuffisant. Stock actuel : ${product.stock}`,
+      });
+    }
+
+    // ---------- Vérifier double submission (même produit, même livreur) ----------
+    const alreadyAssigned = await DeliveryAssignment.findOne({
+      productId,
+      deliveryManId,
+    });
+
+    if (alreadyAssigned) {
+      return res.status(200).json({
+        success: true,
+        message: "Ce produit est déjà assigné à ce livreur.",
+        assignment: alreadyAssigned,
+      });
+    }
+
+    // ---------- Vérifier les utilisateurs ----------
+    const [seller, client, deliveryMan] = await Promise.all([
+      User.findById(sellerId).lean(),
+      User.findById(clientId).lean(),
+      User.findById(deliveryManId).lean(),
+    ]);
+
+    if (!seller) return res.status(404).json({ success: false, message: "Vendeur introuvable." });
+    if (!client) return res.status(404).json({ success: false, message: "Client introuvable." });
+    if (!deliveryMan) return res.status(404).json({ success: false, message: "Livreur introuvable." });
+
+    // ---------- Construction payload ----------
+    const payload = {
+      productId: s(productId),
+      productName: s(productName) || product.name,
+      productImage: productImage || product.image,
+
+      quantity: Number(quantity),
+
+      // Seller
+      sellerId: s(sellerId),
+      sellerName: s(sellerName) || seller.shopName || seller.fullName || "",
+      sellerPhone: seller.phone || "",
+      sellerCity: seller.city || "",
+      sellerZone: seller.zone || "",
+      sellerAddress: seller.address || "",
+
+      // Client
+      clientId: s(clientId),
+      clientName: s(clientName) || client.fullName || "",
+      clientPhone: s(clientPhone) || client.phone || "",
+      clientAddress: s(clientAddress) || client.address || "",
+      clientCity: s(clientCity) || client.city || "",
+      clientZone: s(clientZone) || client.zone || "",
+
+      // Delivery man
+      deliveryManId: s(deliveryManId),
+      deliveryManName: s(deliveryManName) || deliveryMan.fullName || "",
+      deliveryManPhone: deliveryMan.phone || "",
+      deliveryManCity: deliveryMan.city || "",
+      deliveryManZone: deliveryMan.zone || "",
+      deliveryManAvatar: deliveryMan.avatarUrl || "",
+
+      // Status
+      status: "pending",
+      assignedAt: new Date(),
+    };
+
+    // ---------- Créer l’assignation ----------
+    const newAssignment = await DeliveryAssignment.create(payload);
+
+    // ---------- Mettre à jour le stock du produit ----------
+    await Product.findByIdAndUpdate(productId, {
+      $inc: { stock: -quantity },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `Produit soumis (${quantity} unités) au livreur ${payload.deliveryManName}.`,
+      assignment: newAssignment,
+    });
+  } catch (err) {
+    console.error("Error assigning product with quantity:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de l'assignation avec quantité.",
+      error: err.message,
+    });
+  }
+});
+
+// =====================================================
+// 📌 2) ANCIEN ASSIGN (SANS QUANTITÉ) — TOUJOURS DISPONIBLE
 // =====================================================
 router.post("/assign", async (req, res) => {
   try {
@@ -37,7 +179,7 @@ router.post("/assign", async (req, res) => {
       clientZone
     } = req.body;
 
-    // --- Vérification minimale ---
+    // Vérifications
     if (!productId || !sellerId || !deliveryManId || !clientId) {
       return res.status(400).json({
         success: false,
@@ -46,7 +188,7 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // --- Empêcher la double-submission ---
+    // Empêcher double submission
     const alreadyAssigned = await DeliveryAssignment.findOne({
       productId,
       deliveryManId,
@@ -60,27 +202,23 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // --- Chercher les 3 utilisateurs ---
+    // Chercher utilisateurs
     const [seller, client, deliveryMan] = await Promise.all([
       User.findById(sellerId).lean(),
       User.findById(clientId).lean(),
       User.findById(deliveryManId).lean(),
     ]);
 
-    if (!seller)
-      return res.status(404).json({ success: false, message: "Vendeur introuvable." });
-    if (!client)
-      return res.status(404).json({ success: false, message: "Client introuvable." });
+    if (!seller) return res.status(404).json({ success: false, message: "Vendeur introuvable." });
+    if (!client) return res.status(404).json({ success: false, message: "Client introuvable." });
     if (!deliveryMan)
       return res.status(404).json({ success: false, message: "Livreur introuvable." });
 
-    // --- Construction de l'assignation (copie des infos importantes)
     const payload = {
       productId: s(productId),
       productName: s(productName),
       productImage: productImage || null,
 
-      // Seller (copie)
       sellerId: s(sellerId),
       sellerName: s(sellerName) || seller.shopName || seller.fullName || "",
       sellerPhone: seller.phone || "",
@@ -88,26 +226,21 @@ router.post("/assign", async (req, res) => {
       sellerZone: seller.zone || "",
       sellerAddress: seller.address || "",
 
-      // Client
       clientId: s(clientId),
-      clientName: s(clientName) || client.fullName || client.email || "",
+      clientName: s(clientName) || client.fullName || "",
       clientPhone: s(clientPhone) || client.phone || "",
       clientAddress: s(clientAddress) || client.address || "",
       clientCity: s(clientCity) || client.city || "",
       clientZone: s(clientZone) || client.zone || "",
 
-      // Delivery man
       deliveryManId: s(deliveryManId),
       deliveryManName:
         s(deliveryManName) || deliveryMan.fullName || deliveryMan.email || "",
       deliveryManPhone: deliveryMan.phone || "",
       deliveryManCity: deliveryMan.city || "",
       deliveryManZone: deliveryMan.zone || "",
-      deliveryManCountry: deliveryMan.country || "",
-      deliveryManAvatar:
-        deliveryMan.avatarUrl || deliveryMan.avatar || "",
+      deliveryManAvatar: deliveryMan.avatarUrl || "",
 
-      // Status
       status: "pending",
       assignedAt: new Date(),
     };
@@ -116,7 +249,7 @@ router.post("/assign", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: `Produit soumis avec succès au livreur ${payload.deliveryManName}.`,
+      message: `Produit soumis au livreur ${payload.deliveryManName}.`,
       assignment: newAssignment,
     });
   } catch (err) {
@@ -130,7 +263,7 @@ router.post("/assign", async (req, res) => {
 });
 
 // =====================================================
-// 📌 2) OBTENIR ASSIGNATIONS PAR LIVREUR
+// 📌 3) GET BY DELIVERY MAN
 // =====================================================
 router.get("/by-delivery-man/:id", async (req, res) => {
   try {
@@ -171,7 +304,7 @@ router.get("/by-delivery-man/:id", async (req, res) => {
 });
 
 // =====================================================
-// 📌 3) OBTENIR ASSIGNATIONS PAR CLIENT
+// 📌 4) GET BY CLIENT
 // =====================================================
 router.get("/by-client/:clientId", async (req, res) => {
   try {
@@ -202,7 +335,7 @@ router.get("/by-client/:clientId", async (req, res) => {
 });
 
 // =====================================================
-// 📌 4) OBTENIR ASSIGNATIONS PAR VENDEUR
+// 📌 5) GET BY SELLER
 // =====================================================
 router.get("/by-seller/:sellerId", async (req, res) => {
   try {
@@ -243,7 +376,7 @@ router.get("/by-seller/:sellerId", async (req, res) => {
 });
 
 // =====================================================
-// 📌 5) METTRE À JOUR LE STATUT
+// 📌 6) UPDATE STATUS
 // =====================================================
 router.put("/update-status/:id", async (req, res) => {
   try {
@@ -273,7 +406,6 @@ router.put("/update-status/:id", async (req, res) => {
         message: "Assignation introuvable.",
       });
 
-    // Vérifications logiques
     if (
       status === "delivery_completed" &&
       assignment.status !== "client_received"
@@ -303,7 +435,7 @@ router.put("/update-status/:id", async (req, res) => {
 });
 
 // =====================================================
-// 📌 6) OBTENIR UNE ASSIGNATION PAR ID
+// 📌 7) GET SINGLE ASSIGNMENT
 // =====================================================
 router.get("/:id", async (req, res) => {
   try {
@@ -331,6 +463,5 @@ router.get("/:id", async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;

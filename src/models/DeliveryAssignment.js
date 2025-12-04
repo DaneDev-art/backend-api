@@ -2,35 +2,57 @@ const mongoose = require("mongoose");
 
 const DeliveryAssignmentSchema = new mongoose.Schema(
   {
-    // 🔹 Produit
+    // ===================================================================
+    // 🔹 PRODUIT
+    // ===================================================================
     productId: { type: String, required: true, trim: true },
     productName: { type: String, trim: true },
     productImage: { type: String, trim: true },
 
-    // 🔹 Vendeur
+    // Quantité envoyée au livreur (NOUVEAU)
+    quantity: { type: Number, default: 1 },
+
+    // Prix total correspondant à la quantité envoyée (optionnel)
+    totalPrice: { type: Number, default: 0 },
+
+    // ===================================================================
+    // 🔹 VENDEUR
+    // ===================================================================
     sellerId: { type: String, required: true, trim: true },
     sellerName: { type: String, trim: true },
+    sellerPhone: { type: String, trim: true, default: "" },
+    sellerAddress: { type: String, trim: true, default: "" },
+    sellerCity: { type: String, trim: true, default: "" },
+    sellerZone: { type: String, trim: true, default: "" },
+    sellerCountry: { type: String, trim: true, default: "" },
 
-    // 🔹 Client
+    // ===================================================================
+    // 🔹 CLIENT
+    // ===================================================================
     clientId: { type: String, required: true, trim: true },
     clientName: { type: String, trim: true },
     clientPhone: { type: String, trim: true },
     clientAddress: { type: String, trim: true },
     clientCity: { type: String, trim: true, default: "" },
     clientZone: { type: String, trim: true, default: "" },
+    clientCountry: { type: String, trim: true, default: "" },
 
-    // 🔹 Livreur
+    // ===================================================================
+    // 🔹 LIVREUR
+    // ===================================================================
     deliveryManId: { type: String, required: true, trim: true },
     deliveryManName: { type: String, trim: true },
-    
-    // ➕ AJOUT IMPORTANT : Informations complètes du livreur
+
+    // ➕ Infos complètes (déjà présentes + normalisées)
     deliveryManPhone: { type: String, trim: true, default: "" },
     deliveryManCity: { type: String, trim: true, default: "" },
     deliveryManZone: { type: String, trim: true, default: "" },
     deliveryManCountry: { type: String, trim: true, default: "" },
     deliveryManAvatar: { type: String, trim: true, default: "" },
 
-    // 🔹 Statut
+    // ===================================================================
+    // 🔹 STATUT
+    // ===================================================================
     status: {
       type: String,
       enum: [
@@ -43,7 +65,9 @@ const DeliveryAssignmentSchema = new mongoose.Schema(
       default: "pending",
     },
 
-    // 🔹 Date d’assignation
+    // ===================================================================
+    // 🔹 DATE D'ASSIGNATION
+    // ===================================================================
     assignedAt: { type: Date, default: Date.now },
   },
 
