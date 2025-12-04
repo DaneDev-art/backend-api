@@ -15,7 +15,7 @@ const { verifyToken } = require("../middleware/auth.middleware");
 const s = (v) => (typeof v === "string" ? v.trim() : v);
 
 // =====================================================
-// 📌 1) ASSIGNATION AVEC QUANTITÉ
+// 📌 1) ASSIGNATION AVEC QUANTITÉ (⚠ STOCK SUPPRIMÉ)
 // =====================================================
 router.post("/assign-with-quantity", async (req, res) => {
   try {
@@ -63,12 +63,8 @@ router.post("/assign-with-quantity", async (req, res) => {
       });
     }
 
-    if (!product.stock || product.stock < quantity) {
-      return res.status(400).json({
-        success: false,
-        message: `Stock insuffisant. Stock actuel : ${product.stock}`,
-      });
-    }
+    // ❌ SUPPRESSION DE LA VÉRIFICATION DU STOCK
+    // On ne vérifie plus product.stock
 
     // ---------- Vérifier double submission (même produit, même livreur) ----------
     const alreadyAssigned = await DeliveryAssignment.findOne({
@@ -135,10 +131,8 @@ router.post("/assign-with-quantity", async (req, res) => {
     // ---------- Créer l’assignation ----------
     const newAssignment = await DeliveryAssignment.create(payload);
 
-    // ---------- Mettre à jour le stock du produit ----------
-    await Product.findByIdAndUpdate(productId, {
-      $inc: { stock: -quantity },
-    });
+    // ❌ NE PLUS DÉCRÉMENTER LE STOCK
+    // await Product.findByIdAndUpdate(productId, { $inc: { stock: -quantity } });
 
     return res.status(201).json({
       success: true,
@@ -156,7 +150,7 @@ router.post("/assign-with-quantity", async (req, res) => {
 });
 
 // =====================================================
-// 📌 2) ANCIEN ASSIGN (SANS QUANTITÉ) — TOUJOURS DISPONIBLE
+// 📌 2) ANCIEN ASSIGN (SANS QUANTITÉ)
 // =====================================================
 router.post("/assign", async (req, res) => {
   try {
@@ -179,7 +173,6 @@ router.post("/assign", async (req, res) => {
       clientZone
     } = req.body;
 
-    // Vérifications
     if (!productId || !sellerId || !deliveryManId || !clientId) {
       return res.status(400).json({
         success: false,
@@ -188,7 +181,6 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // Empêcher double submission
     const alreadyAssigned = await DeliveryAssignment.findOne({
       productId,
       deliveryManId,
@@ -202,7 +194,6 @@ router.post("/assign", async (req, res) => {
       });
     }
 
-    // Chercher utilisateurs
     const [seller, client, deliveryMan] = await Promise.all([
       User.findById(sellerId).lean(),
       User.findById(clientId).lean(),
