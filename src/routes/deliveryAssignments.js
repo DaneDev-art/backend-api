@@ -92,41 +92,43 @@ router.post("/assign-with-quantity", async (req, res) => {
     if (!deliveryMan) return res.status(404).json({ success: false, message: "Livreur introuvable." });
 
     // ---------- Construction payload ----------
-    const payload = {
-      productId: s(productId),
-      productName: s(productName) || product.name,
-      productImage: productImage || product.image,
+const payload = {
+  productId: s(productId),
+  productName: s(productName) || product.name,
+  productImage: productImage || product.image,
 
-      quantity: Number(quantity),
+  quantity: Number(quantity),
+  productPrice: product.price || 0,        // <--- ajout
+  totalPrice: Number(quantity) * (product.price || 0), // <--- ajout
 
-      // Seller
-      sellerId: s(sellerId),
-      sellerName: s(sellerName) || seller.shopName || seller.fullName || "",
-      sellerPhone: seller.phone || "",
-      sellerCity: seller.city || "",
-      sellerZone: seller.zone || "",
-      sellerAddress: seller.address || "",
+  // Seller
+  sellerId: s(sellerId),
+  sellerName: s(sellerName) || seller.shopName || seller.fullName || "",
+  sellerPhone: seller.phone || "",
+  sellerCity: seller.city || "",
+  sellerZone: seller.zone || "",
+  sellerAddress: seller.address || "",
 
-      // Client
-      clientId: s(clientId),
-      clientName: s(clientName) || client.fullName || "",
-      clientPhone: s(clientPhone) || client.phone || "",
-      clientAddress: s(clientAddress) || client.address || "",
-      clientCity: s(clientCity) || client.city || "",
-      clientZone: s(clientZone) || client.zone || "",
+  // Client
+  clientId: s(clientId),
+  clientName: s(clientName) || client.fullName || "",
+  clientPhone: s(clientPhone) || client.phone || "",
+  clientAddress: s(clientAddress) || client.address || "",
+  clientCity: s(clientCity) || client.city || "",
+  clientZone: s(clientZone) || client.zone || "",
 
-      // Delivery man
-      deliveryManId: s(deliveryManId),
-      deliveryManName: s(deliveryManName) || deliveryMan.fullName || "",
-      deliveryManPhone: deliveryMan.phone || "",
-      deliveryManCity: deliveryMan.city || "",
-      deliveryManZone: deliveryMan.zone || "",
-      deliveryManAvatar: deliveryMan.avatarUrl || "",
+  // Delivery man
+  deliveryManId: s(deliveryManId),
+  deliveryManName: s(deliveryManName) || deliveryMan.fullName || "",
+  deliveryManPhone: deliveryMan.phone || "",
+  deliveryManCity: deliveryMan.city || "",
+  deliveryManZone: deliveryMan.zone || "",
+  deliveryManAvatar: deliveryMan.avatarUrl || "",
 
-      // Status
-      status: "pending",
-      assignedAt: new Date(),
-    };
+  // Status
+  status: "pending",
+  assignedAt: new Date(),
+};
 
     // ---------- Créer l’assignation ----------
     const newAssignment = await DeliveryAssignment.create(payload);
