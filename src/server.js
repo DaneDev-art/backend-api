@@ -11,6 +11,13 @@ const chalk = require("chalk");
 // Import messagerie
 const { initSocket } = require("./routes/messageRoutes");
 
+// Import routes IA
+const aiRoutes = require("./routes/ai.routes");
+const aiConversationRoutes = require("./routes/aiConversation.routes");
+
+// Middleware global d'erreurs
+const errorHandler = require("./middleware/errorHandler");
+
 const PORT = process.env.PORT || 5000;
 
 // =======================
@@ -112,19 +119,16 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
 
-      // =====================================================================
-      // 📦 NOUVEAU : NOTIFICATION SOUMISSION PRODUIT AU LIVREUR
-      // =====================================================================
-      socket.on("delivery:product_submitted", ({ 
+      // 📦 Notification soumission produit
+      socket.on("delivery:product_submitted", ({
         livreurId,
         senderId,
         senderName,
         productId,
-        productName 
+        productName
       }) => {
         console.log(chalk.green("📦 Produit soumis => Notification envoyée au livreur !"));
 
-        // 🔔 Envoi de notification dans la room du livreur
         io.to(livreurId).emit("delivery:new_product", {
           type: "product_submitted",
           livreurId,
@@ -135,13 +139,11 @@ const connectDB = async (retries = 5, delay = 3000) => {
           message: `Un nouveau produit (${productName}) vous a été soumis.`,
         });
 
-        // 🔔 Confirmation côté utilisateur
         io.to(senderId).emit("delivery:confirmation", {
           ok: true,
           message: `Votre produit a été soumis avec succès au livreur.`,
         });
       });
-      // =====================================================================
 
       socket.on("disconnect", () => {
         for (let [userId, id] of onlineUsers.entries()) {
@@ -153,6 +155,17 @@ const connectDB = async (retries = 5, delay = 3000) => {
         }
       });
     });
+
+    // =======================
+    // 🔹 Routes IA + Conversations IA
+    // =======================
+    app.use("/api/ai", aiRoutes);
+    app.use("/api/ai/conversations", aiConversationRoutes);
+
+    // =======================
+    // 🔹 Middleware global d'erreurs
+    // =======================
+    app.use(errorHandler);
 
     // --- Démarrage serveur HTTP
     server.listen(PORT, () => {
