@@ -1,19 +1,12 @@
 // ===========================================
 // src/ai/ai.service.js
-// Service central pour les fonctionnalités IA côté backend (mode démo)
+// Service central pour les fonctionnalités IA côté backend (texte-only)
 // ===========================================
 
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-const ffmpeg = require('fluent-ffmpeg');
-const logger = require('../config/logger'); 
-
-// On utilisera Google TTS modifié pour voix homme "Pro"
-const googleTTS = require('google-tts-api'); 
-
-ffmpeg.setFfmpegPath(ffmpegPath);
+const logger = require('../config/logger');
 
 const STORAGE_PATH = process.env.STORAGE_PATH || path.join(__dirname, '..', '..', 'uploads');
 if (!fs.existsSync(STORAGE_PATH)) fs.mkdirSync(STORAGE_PATH, { recursive: true });
@@ -25,22 +18,6 @@ async function saveBufferToFile(buffer, filename) {
   const filepath = path.join(STORAGE_PATH, filename);
   await fs.promises.writeFile(filepath, buffer);
   return filepath;
-}
-
-function convertAudio(inputPath, { format = 'wav' } = {}) {
-  return new Promise((resolve, reject) => {
-    const outName = `${Date.now()}-${uuidv4()}.${format}`;
-    const outPath = path.join(STORAGE_PATH, outName);
-
-    ffmpeg(inputPath)
-      .toFormat(format)
-      .on('error', (err) => {
-        logger?.error('ffmpeg convert error', err);
-        reject(err);
-      })
-      .on('end', () => resolve(outPath))
-      .save(outPath);
-  });
 }
 
 async function downloadToFile(url, filename) {
@@ -138,9 +115,7 @@ async function chat({ message }) {
   ];
 
   for (let intent of intents) {
-    if (intent.key.some(k => msg.includes(k))) {
-      return intent.reply;
-    }
+    if (intent.key.some(k => msg.includes(k))) return intent.reply;
   }
 
   const suggestions = [
@@ -151,12 +126,10 @@ async function chat({ message }) {
     "👉 Vous voulez devenir livreur ?"
   ];
 
-  const suggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
-
   return (
     "Je suis Asseham, votre assistant E-Market 🤖.\n" +
     "Je n'ai pas bien compris votre question 😕\n\n" +
-    suggestion
+    suggestions[Math.floor(Math.random() * suggestions.length)]
   );
 }
 
@@ -165,31 +138,6 @@ async function chat({ message }) {
 // ===========================================
 async function vision({ buffer, mimetype }) {
   return { message: `Image reçue (${buffer.length} bytes, type ${mimetype}) — mode démo.` };
-}
-
-// ===========================================
-// speechToText (placeholder)
-// ===========================================
-async function speechToText({ filePath }) {
-  return "Ceci est une transcription de démonstration (mode démo).";
-}
-
-// ===========================================
-// textToSpeech (Google TTS — voix Homme "Pro")
-// ===========================================
-async function textToSpeech({ text, lang = 'fr', slow = false, filename = null }) {
-  if (!text) throw new Error('text required for TTS');
-
-  try {
-    // Utilisation d'une tonalité masculine en TTS (simulateur Google TTS)
-    const url = googleTTS.getAudioUrl(text, { lang, slow, host: 'https://translate.google.com' });
-    const finalName = filename || `tts-${Date.now()}-${uuidv4()}-male-pro.mp3`;
-    const filepath = path.join(STORAGE_PATH, finalName);
-    return { filepath, url: `/uploads/${finalName}` };
-  } catch (err) {
-    logger?.error('textToSpeech error', err.message);
-    throw err;
-  }
 }
 
 // ===========================================
@@ -213,26 +161,13 @@ async function summarizeConversation({ messages }) {
 }
 
 // ===========================================
-// saveUploadedAudio
-// ===========================================
-async function saveUploadedAudio({ buffer, originalName = 'audio' }) {
-  const filename = `${Date.now()}-${uuidv4()}-${originalName}`;
-  const filepath = path.join(STORAGE_PATH, filename);
-  await fs.promises.writeFile(filepath, buffer);
-  return filepath;
-}
-
-// ===========================================
 // Export
 // ===========================================
 module.exports = {
   chat,
   vision,
-  speechToText,
-  textToSpeech,
-  convertAudio,
   generateTutorial,
   summarizeConversation,
   saveBufferToFile,
-  saveUploadedAudio
+  downloadToFile
 };
