@@ -77,7 +77,7 @@ exports.tts = async (req, res) => {
       return res.status(400).json({ error: "Texte manquant." });
     }
 
-    const { filepath, url } = await aiService.textToSpeech({
+    const { filepath } = await aiService.textToSpeech({
       text,
       lang: language,
     });
@@ -91,7 +91,27 @@ exports.tts = async (req, res) => {
 };
 
 // =====================================================
-// 5️⃣ Endpoint test
+// 5️⃣ TTS Streaming (mode démo)
+// =====================================================
+exports.ttsStream = async (req, res) => {
+  try {
+    const { text = "Ceci est un flux TTS démo", language = "fr" } = req.query;
+
+    const { filepath } = await aiService.textToSpeech({
+      text,
+      lang: language,
+    });
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.sendFile(filepath);
+  } catch (error) {
+    console.error("❌ [TTS Stream Controller Error]", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// =====================================================
+// 6️⃣ Endpoint test
 // =====================================================
 exports.ping = (req, res) => {
   res.json({ message: "AI Controller OK 🔥 — mode démo" });
