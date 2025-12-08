@@ -3,7 +3,7 @@
 // Rate limiting spécial IA (Chat, TTS, STT, Vision)
 // ===============================================
 
-const rateLimit = require("express-rate-limit");
+const { rateLimit, ipKeyGenerator } = require("express-rate-limit");
 
 // =======================================================
 // 💡 Rate-limit basé sur l'utilisateur
@@ -19,15 +19,18 @@ function aiRateLimit({
     windowMs,
     max,
     keyGenerator: (req) => {
-      // 🔒 Basé sur le token utilisateur
-      return req.user?.id || req.ip;
+      // 🔒 Si utilisateur connecté → ID
+      if (req.user?.id) return `user-${req.user.id}`;
+
+      // 🔑 Sinon → IP correctement gérée IPv4/IPv6
+      return ipKeyGenerator(req);
     },
     message,
-    handler: (req, res, next, options) => {
+    handler: (req, res) => {
       return res.status(429).json({
         error: true,
-        message: options.message,
-        retryAfter: Math.ceil(options.windowMs / 1000) + "s",
+        message,
+        retryAfter: Math.ceil(windowMs / 1000) + "s",
       });
     },
     standardHeaders: true,
