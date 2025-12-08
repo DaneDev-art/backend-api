@@ -1,6 +1,6 @@
 // ================================================
 // src/ai/voice.service.js
-// Gestion audio — mode démo
+// Gestion audio — mode démo + voix masculine "Pro"
 // ================================================
 
 const fs = require("fs");
@@ -16,7 +16,9 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const STORAGE_PATH = process.env.STORAGE_PATH || path.join(__dirname, "..", "..", "uploads");
 if (!fs.existsSync(STORAGE_PATH)) fs.mkdirSync(STORAGE_PATH, { recursive: true });
 
-// 🔧 Helper : Get audio duration
+// ------------------------------------------------
+// Helper: Get audio duration
+// ------------------------------------------------
 function getAudioDuration(filePath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -26,7 +28,9 @@ function getAudioDuration(filePath) {
   });
 }
 
-// 🔧 Helper : Validate audio
+// ------------------------------------------------
+// Helper: Validate audio
+// ------------------------------------------------
 async function validateAudio(filePath, { maxDuration = 120 } = {}) {
   if (!fs.existsSync(filePath)) throw new Error("Audio file not found");
 
@@ -38,7 +42,9 @@ async function validateAudio(filePath, { maxDuration = 120 } = {}) {
   return true;
 }
 
-// 🔧 Save buffer → file
+// ------------------------------------------------
+// Save buffer → file
+// ------------------------------------------------
 async function saveAudioFromBuffer(buffer, extension = "mp3") {
   const fileName = `audio-${Date.now()}-${uuidv4()}.${extension}`;
   const filePath = path.join(STORAGE_PATH, fileName);
@@ -47,13 +53,17 @@ async function saveAudioFromBuffer(buffer, extension = "mp3") {
   return filePath;
 }
 
-// 🔧 Normalize audio → wav
+// ------------------------------------------------
+// Normalize audio → wav
+// ------------------------------------------------
 async function normalizeAudioForSTT(filePath) {
   const wavPath = await convertAudio(filePath, { format: "wav" });
   return wavPath;
 }
 
+// ------------------------------------------------
 // 🎤 → 📝 Speech-to-Text (DEMO)
+// ------------------------------------------------
 async function audioToTextWorkflow({ buffer = null, filePath = null }) {
   let savedPath = filePath;
   if (!savedPath && buffer) {
@@ -64,7 +74,7 @@ async function audioToTextWorkflow({ buffer = null, filePath = null }) {
   await validateAudio(savedPath);
   const wavFile = await normalizeAudioForSTT(savedPath);
 
-  // 🔹 Mode démo : on renvoie un texte fixe
+  // Mode démo : texte fixe
   const dummyText = "Texte démo généré depuis l'audio (mode démo)";
 
   return {
@@ -74,15 +84,26 @@ async function audioToTextWorkflow({ buffer = null, filePath = null }) {
   };
 }
 
-// 📝 → 🔊 Text-to-Speech (Google TTS)
+// ------------------------------------------------
+// 📝 → 🔊 Text-to-Speech (VOIX MASCULINE PRO)
+// ------------------------------------------------
 async function textToAudioWorkflow({ text, lang = "fr", slow = false }) {
   if (!text) throw new Error("Le texte est obligatoire");
 
-  const result = await textToSpeech({ text, lang, slow });
+  // ⚡ Utilisation de la voix Homme "Pro" naturelle
+  const result = await textToSpeech({
+    text,
+    lang,
+    slow,
+    filename: `tts-${Date.now()}-${uuidv4()}-male-pro.mp3`
+  });
+
   return result; // { filepath, url }
 }
 
-// 🗑 Delete audio files
+// ------------------------------------------------
+// Delete audio files
+// ------------------------------------------------
 async function deleteFileIfExists(filePath) {
   if (!filePath) return;
   try {
@@ -94,7 +115,9 @@ async function deleteFileIfExists(filePath) {
   }
 }
 
-// 🧹 Clean temp files
+// ------------------------------------------------
+// Clean temp files
+// ------------------------------------------------
 async function cleanTempFiles(files = []) {
   for (const f of files) {
     await deleteFileIfExists(f);
