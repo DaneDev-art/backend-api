@@ -1,24 +1,7 @@
+// ===========================================
 // src/ai/ai.service.js
-/**
- * ai.service.js
- * Service central pour les fonctionnalités IA côté backend :
- *  - chatCompletion (OpenAI)
- *  - speechToText (OpenAI Whisper | Deepgram)
- *  - textToSpeech (google-tts-api)
- *  - conversion audio (ffmpeg)
- *  - sauvegarde / lecture audio
- *
- * Dépendances attendues (voir package.json) :
- *  axios, google-tts-api, fluent-ffmpeg, @ffmpeg-installer/ffmpeg, uuid, form-data (optionnel),
- *  fs, path
- *
- * Variables d'environnement utilisées :
- *  - OPENAI_KEY
- *  - DEEPGRAM_API_KEY (optionnel)
- *  - STORAGE_PATH (ex: ./uploads)
- *
- * Adapter les endpoints / options selon ton fournisseur TTS/STT préféré.
- */
+// Service central pour les fonctionnalités IA côté backend
+// ===========================================
 
 const fs = require('fs');
 const path = require('path');
@@ -77,7 +60,6 @@ Aider les utilisateurs à naviguer sur la plateforme E-Market, résoudre leurs p
 // ===========================================
 // Helpers
 // ===========================================
-
 async function saveBufferToFile(buffer, filename) {
   const filepath = path.join(STORAGE_PATH, filename);
   await fs.promises.writeFile(filepath, buffer);
@@ -115,7 +97,7 @@ async function chatCompletion({ messages, model = 'gpt-4o-mini', temperature = 0
 
   try {
     const finalMessages = [
-      { role: 'system', content: systemPrompt },  // <- Asseham injecté ici
+      { role: 'system', content: systemPrompt },
       ...messages
     ];
 
@@ -139,6 +121,25 @@ async function chatCompletion({ messages, model = 'gpt-4o-mini', temperature = 0
 }
 
 // ===========================================
+// Fonction "chat" utilisée par le controller
+// ===========================================
+async function chat({ message, conversationId, userId }) {
+  const messages = [
+    ...(conversationId ? [{ role: 'system', content: `Conversation ID: ${conversationId}` }] : []),
+    { role: 'user', content: message }
+  ];
+  return await chatCompletion({ messages, userId });
+}
+
+// ===========================================
+// Vision (analyse image placeholder)
+// ===========================================
+async function vision({ buffer, mimetype }) {
+  // Ici placeholder, tu peux intégrer OpenAI Vision ou autre
+  return { message: `Image reçue (${buffer.length} bytes, type ${mimetype})` };
+}
+
+// ===========================================
 // speechToText
 // ===========================================
 async function speechToText({ filePath, model = 'whisper-1', provider = 'openai', language = null }) {
@@ -155,8 +156,7 @@ async function speechToText({ filePath, model = 'whisper-1', provider = 'openai'
         maxBodyLength: Infinity
       });
 
-      const transcript = resp.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
-      return transcript;
+      return resp.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
     } catch (err) {
       logger?.error('Deepgram STT error', err?.response?.data || err.message);
       throw err;
@@ -256,7 +256,9 @@ async function saveUploadedAudio({ buffer, originalName = 'audio' }) {
 // Export
 // ===========================================
 module.exports = {
+  chat,                 // ← pour controller
   chatCompletion,
+  vision,
   speechToText,
   textToSpeech,
   convertAudio,
