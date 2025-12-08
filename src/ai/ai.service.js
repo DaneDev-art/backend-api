@@ -42,26 +42,46 @@ function convertAudio(inputPath, { format = 'wav' } = {}) {
 }
 
 async function downloadToFile(url, filename) {
-  // placeholder pour TTS, on ne télécharge plus depuis OpenAI
   return path.join(STORAGE_PATH, filename);
 }
 
 // ===========================================
-// Chat completion (mode démo)
+// Chat (mode démo amélioré)
 // ===========================================
-async function chatCompletion({ messages }) {
-  // Réponse fixe pour le mode démo
-  return "Bonjour ! Ceci est un exemple de réponse automatique pour montrer l'utilisation de l'application.";
-}
-
 async function chat({ message }) {
-  // On peut adapter des réponses simples selon le message
-  const lower = message.toLowerCase();
-  let response = "Ceci est un message de démonstration pour guider l'utilisateur.";
+  if (!message) return "Je n'ai reçu aucun message.";
 
-  if (lower.includes('commande')) response = "Pour passer une commande, cliquez sur le produit puis sur 'Acheter'.";
-  else if (lower.includes('paiement')) response = "Vous pouvez payer via CinetPay ou Mobile Money.";
-  else if (lower.includes('livraison')) response = "La livraison se fait dans les 48h après confirmation de paiement.";
+  const lower = message.toLowerCase();
+  let response = "Je suis Asseham, votre assistant IA. Comment puis-je vous aider aujourd'hui ? 😊";
+
+  // Quelques réponses utiles pour ton application marketplace
+  if (lower.includes('bonjour') || lower.includes('salut')) {
+    response = "Bonjour 👋 ! Comment puis-je vous aider aujourd'hui ?";
+  }
+
+  else if (lower.includes('commande')) {
+    response = "Pour passer une commande, choisissez un produit puis cliquez sur « Acheter ». 😊";
+  }
+
+  else if (lower.includes('livraison')) {
+    response = "La livraison prend généralement 24 à 48 heures selon votre position.";
+  }
+
+  else if (lower.includes('paiement')) {
+    response = "Vous pouvez payer via CinetPay, Mobile Money ou carte bancaire.";
+  }
+
+  else if (lower.includes('produit')) {
+    response = "Vous pouvez parcourir la liste des produits dans l'onglet Boutique.";
+  }
+
+  else if (lower.includes('problème') || lower.includes('bug')) {
+    response = "Merci de nous l’avoir signalé. Pouvez-vous préciser le problème ? 🙏";
+  }
+
+  else if (lower.includes('merci')) {
+    response = "Avec plaisir 😊. N’hésitez pas si vous avez d’autres questions.";
+  }
 
   return response;
 }
@@ -81,10 +101,11 @@ async function speechToText({ filePath }) {
 }
 
 // ===========================================
-// textToSpeech (utilisation Google TTS toujours valide)
+// textToSpeech (Google TTS - fonctionne)
 // ===========================================
 async function textToSpeech({ text, lang = 'fr', slow = false, filename = null }) {
   if (!text) throw new Error('text required for TTS');
+
   try {
     const url = googleTTS.getAudioUrl(text, { lang, slow, host: 'https://translate.google.com' });
     const finalName = filename || `tts-${Date.now()}-${uuidv4()}.mp3`;
@@ -100,12 +121,11 @@ async function textToSpeech({ text, lang = 'fr', slow = false, filename = null }
 // generateTutorial (mode démo)
 // ===========================================
 async function generateTutorial({ page = 'unknown', role = 'user' }) {
-  // Réponse JSON statique pour la démo
   return {
     steps: [
       { title: "Ouvrir la page", desc: `Allez sur la page ${page}.`, target: "page_main" },
-      { title: "Cliquer sur un élément", desc: "Sélectionnez le produit que vous voulez tester.", target: "product_item" },
-      { title: "Voir les détails", desc: "Découvrez les informations du produit et les options disponibles.", target: "product_detail" },
+      { title: "Cliquer sur un élément", desc: "Sélectionnez un élément pour voir plus de détails.", target: "product_item" },
+      { title: "Voir les détails", desc: "Découvrez les informations et les options.", target: "product_detail" },
     ]
   };
 }
@@ -114,7 +134,7 @@ async function generateTutorial({ page = 'unknown', role = 'user' }) {
 // summarizeConversation (mode démo)
 // ===========================================
 async function summarizeConversation({ messages }) {
-  return "Résumé de la conversation (mode démo) : L'utilisateur a testé le chat démo.";
+  return "Résumé de la conversation (mode démo) : L'utilisateur a posé quelques questions et reçu des réponses automatiques.";
 }
 
 // ===========================================
