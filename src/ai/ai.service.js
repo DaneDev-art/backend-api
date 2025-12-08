@@ -152,7 +152,7 @@ async function saveUploadedAudio({ buffer, originalName = 'audio' }) {
 // ===========================================
 module.exports = {
   chat,
-  chatCompletion,
+  chat,
   vision,
   speechToText,
   textToSpeech,
