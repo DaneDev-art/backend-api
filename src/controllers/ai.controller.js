@@ -19,7 +19,9 @@ exports.chat = async (req, res) => {
     // Appel au service IA mode démo
     const result = await aiService.chat({ message });
 
-    res.json({ message: result });
+    // 🔥 Retour corrigé pour correspondre à Flutter
+    res.json({ response: result });
+
   } catch (error) {
     console.error("❌ [Chat IA Controller Error]", error);
     res.status(500).json({ error: error.message });

@@ -27,7 +27,7 @@ const upload = multer({
 router.post(
   "/chat",
   verifyToken,
-  aiRateLimit(), // → Anti-spam IA
+  aiRateLimit(), // Anti-spam IA
   aiController.chat
 );
 
