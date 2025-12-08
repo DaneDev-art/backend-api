@@ -48,29 +48,29 @@ async function chat({ message }) {
     // -------------------------
     // COMMANDES
     // -------------------------
-    { key: ["passer commande", "faire une commande"], reply: "Pour passer une commande, choisissez un produit puis cliquez sur « Acheter ». Simple et rapide 😊" },
-    { key: ["commande", "mes commandes"], reply: "Vous pouvez voir toutes vos commandes dans : Profil > Mes commandes." },
-    { key: ["suivi commande", "statut commande", "où est ma commande"], reply: "Pour suivre votre commande, allez dans Profil > Mes commandes. Vous y verrez : En attente, Acceptée, En cours de livraison, Livrée." },
-    { key: ["annuler commande"], reply: "Vous pouvez annuler une commande uniquement si elle n’a pas encore été acceptée par le vendeur ou le livreur." },
+    { key: ["passer commande", "faire une commande"], reply: "Pour passer une commande, Cliquez sur le produit; sur la page de détails du produit, vous avez le choix de dicuter avec le vendeur pour conclure un prix avant d'ajouter le produit au Panier soit d'ajouter directement le produit au Panier. De toutes les façons vos fonds sont sécurisés. Retournez à votre tableau de Bord et procéder au paiement" },
+    { key: ["commande", "mes commandes"], reply: "Vous pouvez accéder à toutes vos commandes (Commandes soumises pour livraison, ou commandes après achat d'un ou des produit(s)) à partir de votre tableau de bord" },
+    { key: ["suivi commande", "statut commande", "où est ma commande"], reply: "Pour suivre votre commande, allez à votre tableau de bord > Mes commandes ou mes commandes soumises. Attendez toujours de recevoir votre commande achetée ou soumise pour livraison, avant de confirmer la reception. Très important pour ne pas perdre vos fonds surtout lorsque vous avez acheté un ou plusieurs produits." },
+    { key: ["annuler commande"], reply: "Pour annuler une commande dejà payée, veuilez demander à l'Assistant E-Market de vous donner les coordonnées de l'équipe en charge. C'est cette équipe qui vas procéder à la vérification, à la suite de laquelle vos fonds vous seront retournés" },
 
     // -------------------------
     // LIVRAISON
     // -------------------------
-    { key: ["livraison"], reply: "La livraison prend généralement **24 à 48h**, selon votre position. Vous êtes notifié à chaque étape." },
-    { key: ["prix livraison", "frais livraison"], reply: "Les frais de livraison dépendent de la distance. Le montant exact apparaît avant le paiement." },
-    { key: ["modifier adresse", "changer adresse"], reply: "Vous pouvez modifier votre adresse dans Profil > Paramètres > Adresses." },
+    { key: ["livraison", "delai de livraison", "temps de livraison"], reply: "Pour un vendeur le délai maximal pour livrer les produits aux client est de 5 jours. Pour un livreur, le délai pour livrer des produits est de 48 heures maximum" },
+    { key: ["prix livraison", "frais livraison"], reply: "Les frais de livraison dépendent de la distance; et le montant à payer est conclu entre les deux utilsateurs: le livreur et son client" },
+    { key: ["modifier adresse", "changer adresse"], reply: "Vous pouvez modifier votre adresse, c'est une discussion entre les deux parties." },
 
     // -------------------------
     // PAYMENT
     // -------------------------
-    { key: ["paiement", "payer"], reply: "Vous pouvez payer via **CinetPay**, **Mobile Money** ou **carte bancaire**. Paiements 100% sécurisés 🔒" },
+    { key: ["paiement", "payer", "acheter"], reply: "Vous pouvez payer via Mobile Money uniquement pour le moment. Paiements 100% sécurisés 🔒" },
     { key: ["sécurisé", "sécurite paiement"], reply: "Oui, tous les paiements sont sécurisés. L'argent est bloqué jusqu'à confirmation de la livraison." },
     { key: ["remboursement"], reply: "Pour demander un remboursement, ouvrez la commande concernée et cliquez sur « Demander un remboursement »." },
 
     // -------------------------
     // PRODUITS
     // -------------------------
-    { key: ["produit"], reply: "Découvrez nos produits dans Boutique 🛍️ Cliquez sur un produit pour voir photos, description, prix…" },
+    { key: ["produit", "publier un produit"], reply: "Découvrez nos produits dans Boutique 🛍️ Cliquez sur un produit pour voir photos, description, prix…" },
     { key: ["publier produit", "ajouter produit"], reply: "Pour ajouter un produit, vous devez d’abord devenir vendeur, puis aller dans Vendeur > Ajouter un produit." },
     { key: ["photo produit"], reply: "Ajoutez plusieurs photos claires et réelles pour attirer plus d’acheteurs 📸" },
 
@@ -124,6 +124,7 @@ async function chat({ message }) {
     "👉 Besoin d'aide pour un paiement ?",
     "👉 Vous voulez savoir où est votre commande ?",
     "👉 Vous voulez devenir livreur ?"
+    "👉 Vous voulez savoir comment soumettre un produit au livreur ?"
   ];
 
   return (
