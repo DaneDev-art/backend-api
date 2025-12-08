@@ -124,7 +124,6 @@ async function chat({ message }) {
     "👉 Besoin d'aide pour un paiement ?",
     "👉 Vous voulez savoir où est votre commande ?",
     "👉 Vous voulez devenir livreur ?"
-    "👉 Vous voulez savoir comment soumettre un produit au livreur ?"
   ];
 
   return (
