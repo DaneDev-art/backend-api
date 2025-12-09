@@ -1,8 +1,10 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const logger = require("../utils/logger");
+const sendEmail = require("../utils/sendEmail");
 const { verifyToken, verifyAdmin } = require("../middleware/auth.middleware");
 
 const router = express.Router();
@@ -16,7 +18,7 @@ const signToken = (user) =>
   );
 
 // ======================================================
-// 🔹 REGISTER
+// 🔹 REGISTER + Email verification
 // ======================================================
 router.post("/register", async (req, res) => {
   try {
@@ -63,17 +65,33 @@ router.post("/register", async (req, res) => {
       userData.role = "buyer";
     }
 
-    // ✅ Création de l'utilisateur
+    // 🔹 Génération du token de vérification email
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    userData.verificationToken = verificationToken;
+    userData.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24h
+    userData.isVerified = false;
+
     const user = new User(userData);
     await user.save();
     console.log(`✅ Utilisateur créé : ${user.email}`);
 
-    // 🔹 Synchronisation Seller si role === "seller"
+    // 🔹 Envoi email de confirmation
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    await sendEmail({
+      to: user.email,
+      subject: "Confirmez votre adresse email",
+      html: `
+        <h2>Bienvenue sur E-Market !</h2>
+        <p>Merci de vous être inscrit. Veuillez confirmer votre email :</p>
+        <a href="${verificationUrl}" style="padding:10px 20px; background:#4CAF50; color:white;">Confirmer mon email</a>
+      `,
+    });
+
+    // 🔹 Synchronisation Seller
     if (user.role === "seller") {
       try {
         const prefix = "228";
         const fullNumber = user.phone ? prefix + user.phone : "";
-
         let seller = await Seller.findById(user._id);
         if (!seller) {
           seller = await Seller.create({
@@ -104,8 +122,10 @@ router.post("/register", async (req, res) => {
       }
     }
 
-    const token = signToken(user);
-    res.status(201).json({ token, user: user.toPublicJSON() });
+    res.status(201).json({
+      message: "Inscription réussie. Veuillez vérifier votre email.",
+      user: user.toPublicJSON(),
+    });
   } catch (err) {
     console.error("❌ Register error:", err);
     res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
@@ -113,7 +133,34 @@ router.post("/register", async (req, res) => {
 });
 
 // ======================================================
-// 🔹 LOGIN
+// 🔹 VERIFY EMAIL
+// ======================================================
+router.get("/verify-email", async (req, res) => {
+  try {
+    const { token } = req.query;
+    const user = await User.findOne({
+      verificationToken: token,
+      verificationTokenExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Token invalide ou expiré." });
+    }
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+    await user.save();
+
+    res.json({ message: "Email vérifié avec succès." });
+  } catch (err) {
+    console.error("❌ Verify-email error:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ======================================================
+// 🔹 LOGIN avec contrôle email vérifié
 // ======================================================
 router.post("/login", async (req, res) => {
   try {
@@ -121,8 +168,14 @@ router.post("/login", async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ message: "Email et mot de passe requis" });
 
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findOne({ email }).select("+password +isVerified");
     if (!user) return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        message: "Veuillez confirmer votre adresse email avant de vous connecter",
+      });
+    }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Mot de passe incorrect" });
@@ -136,8 +189,19 @@ router.post("/login", async (req, res) => {
 });
 
 // ======================================================
-// 🔹 UPDATE PROFILE
+// 🔹 PROFILE (GET et UPDATE) avec synchronisation Seller
 // ======================================================
+router.get("/profile", verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+    res.json({ user: user.toPublicJSON() });
+  } catch (err) {
+    logger.error("❌ Get profile error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la récupération du profil" });
+  }
+});
+
 router.put("/profile", verifyToken, async (req, res) => {
   try {
     const updates = { ...req.body };
@@ -157,7 +221,6 @@ router.put("/profile", verifyToken, async (req, res) => {
       try {
         const prefix = "228";
         const fullNumber = user.phone ? prefix + user.phone : "";
-
         let seller = await Seller.findById(user._id);
         if (!seller) {
           seller = await Seller.create({
@@ -194,34 +257,15 @@ router.put("/profile", verifyToken, async (req, res) => {
 });
 
 // ======================================================
-// 🔹 GET PROFILE
-// ======================================================
-router.get("/profile", verifyToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
-    res.json({ user: user.toPublicJSON() });
-  } catch (err) {
-    logger.error("❌ Get profile error:", err);
-    res.status(500).json({ message: "Erreur serveur lors de la récupération du profil" });
-  }
-});
-
-// ======================================================
 // 🔹 GET USER BY ID (users + sellers)
 // ======================================================
 router.get("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    // 1️⃣ Cherche dans users
     let user = await User.findById(id).lean();
-
-    // 2️⃣ Si pas trouvé, cherche dans sellers
     if (!user) {
       const seller = await Seller.findById(id).lean();
       if (!seller) return res.status(404).json({ message: "Utilisateur non trouvé" });
-
       return res.json({
         _id: seller._id,
         email: seller.email,
@@ -231,7 +275,6 @@ router.get("/users/:id", async (req, res) => {
       });
     }
 
-    // 3️⃣ Si trouvé dans users, enrichis si seller
     let sellerInfo = {};
     if (user.role === "seller") {
       const seller = await Seller.findById(user._id).lean();
@@ -241,10 +284,7 @@ router.get("/users/:id", async (req, res) => {
       };
     }
 
-    res.json({
-      ...user,
-      ...sellerInfo,
-    });
+    res.json({ ...user, ...sellerInfo });
   } catch (err) {
     console.error("❌ GET /users/:id error:", err.message);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
@@ -252,19 +292,14 @@ router.get("/users/:id", async (req, res) => {
 });
 
 // ======================================================
-// 🔹 GET USERS BY ROLE (buyer, seller, delivery…)
-//     - route protégée par token + verifyAdmin (comme tu avais)
-//     - supporte query ?status=pending
+// 🔹 GET USERS BY ROLE
 // ======================================================
 router.get("/users/role/:role", verifyToken, verifyAdmin, async (req, res) => {
   try {
     const { role } = req.params;
-    const { status } = req.query; // ?status=pending optional
-
+    const { status } = req.query;
     let query = { role };
-
     if (status) query.status = status;
-
     const users = await User.find(query).lean();
     res.json(users);
   } catch (err) {
@@ -274,22 +309,16 @@ router.get("/users/role/:role", verifyToken, verifyAdmin, async (req, res) => {
 });
 
 // ======================================================
-// 🔹 PUBLIC GET USERS BY ROLE (DEV / FALLBACK)
-//     - Identique à la route protégée mais *sans* middleware
-//     - UTILE si tu veux charger les delivery sans token (dev only)
-//     - Garde la route protégée pour la production
+// 🔹 PUBLIC GET USERS BY ROLE
 // ======================================================
 router.get("/users/role/:role/public", async (req, res) => {
   try {
     const { role } = req.params;
     const { status } = req.query;
-
     let query = { role };
     if (status) query.status = status;
-
     const users = await User.find(query).lean();
     if (!users) return res.status(404).json({ message: "Aucun utilisateur trouvé." });
-
     res.json(users);
   } catch (err) {
     console.error("❌ GET /users/role/:role/public error:", err.message);
@@ -298,13 +327,12 @@ router.get("/users/role/:role/public", async (req, res) => {
 });
 
 // ======================================================
-// 🔹 Route admin protégée
+// 🔹 ROUTES ADMIN
 // ======================================================
 router.get("/admin-data", verifyToken, verifyAdmin, async (req, res) => {
   res.json({ message: "✅ Accès admin autorisé", user: req.user });
 });
 
-/// 🔥 Route sécurisée pour créer les admins
 const ADMINS = [
   { role: "admin_general", email: "admin_general@gmail.com", password: "AdminGen123!", fullName: "Admin Général" },
   { role: "admin_seller", email: "admin_seller@gmail.com", password: "AdminSell123!", fullName: "Admin Vendeur" },
@@ -314,39 +342,24 @@ const ADMINS = [
 
 router.get("/create-admins", async (req, res) => {
   try {
-    // 🔐 Protection par clé secrète
     const secret = req.headers["x-admin-secret"];
     if (!secret || secret !== process.env.ADMIN_CREATION_SECRET) {
       return res.status(401).json({ message: "Unauthorized: invalid secret" });
     }
 
     const results = [];
-
     for (const adminData of ADMINS) {
       const existing = await User.findOne({ email: adminData.email });
-
       if (existing) {
-        results.push({
-          email: adminData.email,
-          status: "already_exists",
-        });
+        results.push({ email: adminData.email, status: "already_exists" });
         continue;
       }
-
-      // Crée le nouvel admin
       const newAdmin = new User(adminData);
       await newAdmin.save();
-
-      results.push({
-        email: adminData.email,
-        status: "created",
-      });
+      results.push({ email: adminData.email, status: "created" });
     }
 
-    return res.status(201).json({
-      message: "Admins processing completed",
-      admins: results,
-    });
+    return res.status(201).json({ message: "Admins processing completed", admins: results });
   } catch (err) {
     console.error("❌ /create-admins error:", err.message);
     return res.status(500).json({ message: err.message });
