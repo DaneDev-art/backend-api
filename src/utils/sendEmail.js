@@ -2,20 +2,16 @@ const nodemailer = require("nodemailer");
 
 const sendEmail = async ({ to, subject, html }) => {
   try {
-    // 📨 Configuration transporteur
     const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: process.env.EMAIL_PORT,
-      secure: false, // false = STARTTLS
+      service: "gmail",  // ⭐ Utiliser Gmail simplifie la configuration
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: process.env.EMAIL_USER,  // ton email Gmail
+        pass: process.env.EMAIL_PASS,  // mot de passe d’application Gmail
       },
     });
 
-    // 📨 Envoi du mail
     await transporter.sendMail({
-      from: `LivriTogo <${process.env.EMAIL_USER}>`,
+      from: `LivriTogo <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
