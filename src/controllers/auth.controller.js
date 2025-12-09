@@ -1,9 +1,10 @@
-// AuthController.js
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/user.model");
 const logger = require("../utils/logger");
 const authMiddleware = require("../middleware/auth.middleware");
+const sendEmail = require("../utils/sendEmail");
 
 const router = express.Router();
 
@@ -22,7 +23,7 @@ const signToken = (user) =>
   );
 
 // ======================================================
-// 🔹 REGISTER (avec synchronisation automatique des Sellers)
+// 🔹 REGISTER + Envoi Email de Vérification
 // ======================================================
 router.post("/register", async (req, res) => {
   try {
@@ -74,19 +75,34 @@ router.post("/register", async (req, res) => {
         status: "pending",
       };
     }
-    // 🔸 Par défaut : Buyer
+    // Default Buyer
     else {
       userData.role = "buyer";
     }
 
-    // ✅ Création de l'utilisateur
+    // 📌 Génération du token de vérification
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    userData.verificationToken = verificationToken;
+    userData.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+    // 🔥 Création utilisateur
     const user = new User(userData);
     await user.save();
     console.log(`✅ Utilisateur créé : ${user.email}`);
 
-    // ==========================
-    // 🔹 Synchronisation Sellers
-    // ==========================
+    // 📩 Envoi de l’email de confirmation
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    await sendEmail({
+      to: user.email,
+      subject: "Confirmez votre adresse email",
+      html: `
+        <h2>E-Market vous souhaite la bienvenue !</h2>
+        <p>Merci de vous être inscrit. Veuillez confirmer votre email :</p>
+        <a href="${verificationUrl}" style="padding:10px 20px; background:#4CAF50; color:white;">Confirmer mon email</a>
+      `,
+    });
+
+    // 🔹 Synchronisation Seller
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
 
@@ -115,13 +131,13 @@ router.post("/register", async (req, res) => {
           console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
         }
       } catch (err) {
-        console.error(`❌ Erreur lors de la synchronisation du Seller pour ${user.email}:`, err.message);
+        console.error(`❌ Erreur sync Seller :`, err.message);
       }
     }
 
-    // ✅ Génération du JWT
-    const token = signToken(user);
-    res.status(201).json({ token, user: user.toPublicJSON() });
+    res.status(201).json({
+      message: "Inscription réussie. Veuillez vérifier votre email.",
+    });
 
   } catch (err) {
     console.error("❌ Register error:", err);
@@ -130,7 +146,37 @@ router.post("/register", async (req, res) => {
 });
 
 // ======================================================
-// 🔹 LOGIN
+// 🔹 CONFIRMATION EMAIL
+// ======================================================
+router.get("/verify-email", async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    const user = await User.findOne({
+      verificationToken: token,
+      verificationTokenExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Token invalide ou expiré." });
+    }
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+
+    await user.save();
+
+    res.json({ message: "Email vérifié avec succès." });
+
+  } catch (err) {
+    console.error("❌ Verification error:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+// ======================================================
+// 🔹 LOGIN (avec vérification email)
 // ======================================================
 router.post("/login", async (req, res) => {
   try {
@@ -144,14 +190,16 @@ router.post("/login", async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Identifiants invalides" });
 
-    // 🔹 Vérification du rôle envoyé par le frontend
-    if (role && user.role !== role) {
-      return res.status(401).json({ message: "Rôle invalide pour cet utilisateur" });
+    // 🚨 Email pas encore confirmé
+    if (!user.isVerified) {
+      return res.status(403).json({
+        message: "Veuillez confirmer votre email avant de vous connecter."
+      });
     }
 
-    // 🔹 Vérification Admin approuvé
-    if (user.role.startsWith("admin") && user.status !== "approved") {
-      return res.status(403).json({ message: "Admin non autorisé à se connecter" });
+    // Vérification rôle
+    if (role && user.role !== role) {
+      return res.status(401).json({ message: "Rôle invalide pour cet utilisateur" });
     }
 
     const token = signToken(user);
@@ -179,7 +227,7 @@ router.get("/profile", authMiddleware, async (req, res) => {
 });
 
 // ======================================================
-// 🔹 UPDATE PROFILE (protégé + synchronisation Sellers)
+// 🔹 UPDATE PROFILE + sync Seller
 // ======================================================
 router.put("/profile", authMiddleware, async (req, res) => {
   try {
@@ -191,38 +239,32 @@ router.put("/profile", authMiddleware, async (req, res) => {
 
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-    // 🔹 Synchronisation Seller
+    // Sync Seller
     if (user.role === "seller") {
       const Seller = require("../models/Seller");
+
       try {
         let seller = await Seller.findById(user._id);
         if (!seller) {
           seller = await Seller.create({
             _id: user._id,
             name: user.ownerName || user.shopName || user.email.split("@")[0],
-            surname: "",
             email: user.email,
             phone: user.phone || "",
             prefix: "228",
-            balance_locked: 0,
-            balance_available: 0,
-            payout_method: "MOBILE_MONEY",
-            cinetpay_contact_added: false,
-            cinetpay_contact_meta: [],
           });
-          console.log(`✅ Seller créé automatiquement pour ${user.email}`);
         } else {
           seller.name = user.ownerName || user.shopName || seller.name;
           seller.phone = user.phone || seller.phone;
           await seller.save();
-          console.log(`🔄 Seller mis à jour automatiquement pour ${user.email}`);
         }
       } catch (err) {
-        console.error(`❌ Erreur lors de la synchronisation du Seller pour ${user.email}:`, err.message);
+        console.error("❌ Seller sync error:", err.message);
       }
     }
 
     res.json({ user: user.toPublicJSON() });
+
   } catch (err) {
     logger.error("❌ Update profile error:", err);
     res.status(500).json({ message: "Erreur serveur lors de la mise à jour du profil" });
@@ -230,17 +272,15 @@ router.put("/profile", authMiddleware, async (req, res) => {
 });
 
 // ======================================================
-// 🔹 CREATE ADMIN (Route sécurisée)
+// 🔹 CREATE ADMIN (clé secrète)
 // ======================================================
 router.post("/admin/create", async (req, res) => {
   try {
-    // 🔐 Protection par clé secrète
     if (req.headers["x-admin-secret"] !== process.env.ADMIN_CREATION_SECRET) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({ message: "Email et mot de passe requis" });
     }
@@ -254,7 +294,8 @@ router.post("/admin/create", async (req, res) => {
       email,
       password,
       role: "admin",
-      status: "approved",  // 🔥 Autorise directement la connexion
+      status: "approved",
+      isVerified: true,
     });
 
     await admin.save();

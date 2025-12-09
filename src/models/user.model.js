@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       minlength: 6,
-      select: false, // 🔐 crucial : à gérer au login
+      select: false,
     },
 
     role: {
@@ -35,6 +35,18 @@ const userSchema = new mongoose.Schema(
         "admin_delivery",
       ],
       default: "buyer",
+    },
+
+    // ⭐️ Vérification email
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+    verificationToken: {
+      type: String,
+    },
+    verificationTokenExpires: {
+      type: Date,
     },
 
     // 🔸 Informations communes
@@ -65,7 +77,7 @@ const userSchema = new mongoose.Schema(
     guarantee: { type: String, trim: true },
     transportMode: {
       type: String,
-      enum: ["Moto", "Vélo", "Voiture", "Autre"],
+      enum: ["Vélo", "Moto à 2 roues", "Moto à 3 roues", "Taxis 5 places", "Voiture 9 places", "Voiture 15 places", "Bus", "Camion", "Titan", "Autre"],
     },
 
     status: {
@@ -123,6 +135,8 @@ userSchema.methods.toPublicJSON = function () {
   const user = this.toObject();
   delete user.password;
   delete user.__v;
+  delete user.verificationToken;
+  delete user.verificationTokenExpires;
   return user;
 };
 
