@@ -1,28 +1,37 @@
-const nodemailer = require("nodemailer");
+// src/utils/sendEmail.js
+const Queue = require("bull");
+const Redis = require("ioredis");
 
-const sendEmail = async ({ to, subject, html }) => {
+const redisUrl = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+const emailQueue = new Queue("email", redisUrl);
+
+/**
+ * sendEmail: ajoute une tâche d'email dans la queue.
+ * payload: { to, subject, html, template, templateVars, from }
+ */
+const sendEmail = async (payload) => {
   try {
-    // 📩 Transporteur Gmail (recommandé)
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER, // Ton email Gmail
-        pass: process.env.EMAIL_PASS, // Mot de passe d’application : 16 caractères
+    // Validation minimale
+    if (!payload || !payload.to || (!payload.html && !payload.template)) {
+      throw new Error("Invalid email payload");
+    }
+
+    // Options: attempts/backoff gérées par Bull
+    await emailQueue.add(payload, {
+      attempts: parseInt(process.env.REDIS_MAX_RETRIES || "5", 10),
+      backoff: {
+        type: "exponential",
+        delay: 60 * 1000, // 1min initial
       },
+      removeOnComplete: true,
+      removeOnFail: false,
     });
 
-    // 📤 Envoi du mail
-    await transporter.sendMail({
-      from: `LivriTogo <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html,
-    });
-
-    console.log(`📧 Email envoyé à : ${to}`);
-  } catch (error) {
-    console.error("❌ Erreur sendEmail:", error);
-    throw new Error("Erreur lors de l'envoi du mail");
+    console.log(`📨 Email queued for ${payload.to}`);
+    return true;
+  } catch (err) {
+    console.error("❌ enqueue sendEmail error:", err);
+    throw err;
   }
 };
 

@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 
 // ==========================================
 // 🔹 Définition du schéma utilisateur
@@ -77,7 +78,18 @@ const userSchema = new mongoose.Schema(
     guarantee: { type: String, trim: true },
     transportMode: {
       type: String,
-      enum: ["Vélo", "Moto à 2 roues", "Moto à 3 roues", "Taxis 5 places", "Voiture 9 places", "Voiture 15 places", "Bus", "Camion", "Titan", "Autre"],
+      enum: [
+        "Vélo",
+        "Moto à 2 roues",
+        "Moto à 3 roues",
+        "Taxis 5 places",
+        "Voiture 9 places",
+        "Voiture 15 places",
+        "Bus",
+        "Camion",
+        "Titan",
+        "Autre",
+      ],
     },
 
     status: {
@@ -117,6 +129,23 @@ userSchema.pre("save", async function (next) {
     next(err);
   }
 });
+
+// ==========================================
+// ⚡ Génère un token de vérification email
+// ==========================================
+userSchema.methods.generateEmailVerificationToken = function () {
+  const token = crypto.randomBytes(32).toString("hex");
+
+  this.verificationToken = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+
+  // ⏳ Expire dans 24h
+  this.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+  return token; // token brut envoyé par email
+};
 
 // ==========================================
 // 🔐 Comparaison des mots de passe
