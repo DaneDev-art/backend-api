@@ -24,10 +24,11 @@ const EmailLog = require("../models/EmailLog");
 // ----------------------- TEMPLATE LOADER ------------------------
 const loadTemplate = (name) => {
   try {
-    const filePath = path.join(__dirname, "..", "email_templates", `${name}.hbs`);
+    const filePath = path.join(__dirname, "..", "..", "email_templates", `${name}.hbs`);
+    console.log("Chargement template depuis :", filePath); // Pour debug
     return handlebars.compile(fs.readFileSync(filePath, "utf8"));
   } catch (err) {
-    console.error("⚠ Template introuvable :", name);
+    console.error("⚠ Template introuvable :", name, err.message);
     return null;
   }
 };
