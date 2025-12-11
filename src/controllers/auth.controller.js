@@ -57,8 +57,11 @@ exports.register = async (req, res) => {
     const user = new User(userData);
     await user.save();
 
+    // 🔹 Construire dynamiquement l'URL du frontend
+    const frontendUrl = req.get("origin") || process.env.FRONTEND_URL || "http://localhost:5000";
+    const verificationUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
+
     // Envoi de l'email de vérification
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
     await sendEmailJob({
       to: user.email,
       subject: "Confirmez votre adresse email",
