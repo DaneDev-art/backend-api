@@ -2,7 +2,7 @@
 const emailQueue = require("../queues/emailQueue");
 
 /**
- * Ajoute un email à la file Bull (queue)
+ * Ajoute un email à la file BullMQ + Upstash
  * options = { to, subject, html, template, templateVars, from }
  */
 const sendEmailJob = async (options) => {
@@ -10,7 +10,7 @@ const sendEmailJob = async (options) => {
   // Validation minimale
   // -------------------------
   if (!options || typeof options !== "object") {
-    throw new Error("sendEmailJob: options doivent être un objet");
+    throw new Error("sendEmailJob: options doit être un objet");
   }
   if (!options.to) {
     throw new Error("sendEmailJob: 'to' est obligatoire");
@@ -23,6 +23,7 @@ const sendEmailJob = async (options) => {
   // Ajout du job dans la Queue
   // -------------------------
   return emailQueue.add(
+    "sendEmail", // <= Nom du job (obligatoire pour BullMQ)
     {
       to: options.to,
       subject: options.subject,
@@ -32,17 +33,15 @@ const sendEmailJob = async (options) => {
       from: options.from || null,
     },
     {
-      // -------------------------
-      // Options Bull
-      // -------------------------
-      attempts: 5,               // Nombre de tentatives
+      // options supplémentaires (si tu veux override celles de emailQueue.js)
+      attempts: 5,
       backoff: {
-        type: "exponential",     // Backoff exponentiel
-        delay: 5000,             // 5 sec → 10 sec → 20 sec → 40 sec → 80 sec
+        type: "exponential",
+        delay: 5000,
       },
-      removeOnComplete: true,     // Pas de pollution
-      removeOnFail: false,        // Garder les échecs pour debug
-      timeout: 20000,             // Timeout job 20 secondes
+      removeOnComplete: true,
+      removeOnFail: false,
+      timeout: 20000,
     }
   );
 };

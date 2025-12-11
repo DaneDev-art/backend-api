@@ -7,6 +7,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
+const emailRoutes = require("./routes/emailRoutes");
 
 // Charger variables d'environnement
 dotenv.config();
@@ -91,6 +92,9 @@ app.use("/api/users", require("./routes/users.routes"));
 
 // Sellers
 app.use("/api/sellers", require("./routes/seller.routes"));
+
+//Mail test
+app.use("/api/email", emailRoutes);
 
 // Paiement CinetPay
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
