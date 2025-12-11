@@ -66,6 +66,7 @@ exports.register = async (req, res) => {
       templateVars: {
         verificationUrl,
         fullName: user.fullName || user.ownerName || user.email,
+        year: new Date().getFullYear(),
       },
     });
 
