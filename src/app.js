@@ -37,7 +37,7 @@ app.use(limiter);
 // 🌐 CORS Configuration
 // =======================
 const allowedOriginsProd = [
-  "https://mon-site.com",
+  "https://emarket-web.onrender.com",
   "https://backend-api-m0tf.onrender.com",
 ];
 
