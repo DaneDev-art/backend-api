@@ -7,7 +7,9 @@ const Seller = require("../models/Seller");
 const logger = require("../utils/logger");
 const { sendEmailJob } = require("../services/emailService");
 
-// 🔹 Génération de JWT
+// ======================================================
+// 🔹 JWT
+// ======================================================
 const signToken = (user) =>
   jwt.sign(
     { id: user._id, role: user.role, email: user.email },
@@ -23,123 +25,59 @@ exports.register = async (req, res) => {
     const { role, email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({
-        message: "Email et mot de passe requis",
-      });
+      return res.status(400).json({ message: "Email et mot de passe requis" });
     }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(409).json({
-        message: "Cet utilisateur existe déjà",
-      });
+      return res.status(409).json({ message: "Cet utilisateur existe déjà" });
     }
 
     let userData = { email, password, role };
 
-    // 🔹 Gestion des rôles
+    // 🔹 Rôles
     switch (role) {
       case "buyer": {
-        const {
-          fullName,
-          phone,
-          address,
-          zone,
-          country,
-          city,
-          avatarUrl,
-        } = req.body;
-        Object.assign(userData, {
-          fullName,
-          phone,
-          address,
-          zone,
-          country,
-          city,
-          avatarUrl,
-        });
+        const { fullName, phone, address, zone, country, city, avatarUrl } = req.body;
+        Object.assign(userData, { fullName, phone, address, zone, country, city, avatarUrl });
         break;
       }
-
       case "seller": {
-        const {
-          ownerName,
-          shopName,
-          phone: sPhone,
-          address: sAddress,
-          country: sCountry,
-          shopDescription,
-          logoUrl,
-        } = req.body;
-        Object.assign(userData, {
-          ownerName,
-          shopName,
-          phone: sPhone,
-          address: sAddress,
-          country: sCountry,
-          shopDescription,
-          logoUrl,
-          status: "approved",
-        });
+        const { ownerName, shopName, phone, address, country, shopDescription, logoUrl } = req.body;
+        Object.assign(userData, { ownerName, shopName, phone, address, country, shopDescription, logoUrl, status: "approved" });
         break;
       }
-
       case "delivery": {
         const {
-          fullName: dFullName,
-          phone: dPhone,
-          address: dAddress,
-          zone: dZone,
-          country: dCountry,
-          city: dCity,
-          plate,
-          idNumber,
-          guarantee,
-          transportMode,
-          idCardFrontUrl,
-          idCardBackUrl,
-          selfieUrl,
+          fullName, phone, address, zone, country, city,
+          plate, idNumber, guarantee, transportMode,
+          idCardFrontUrl, idCardBackUrl, selfieUrl
         } = req.body;
         Object.assign(userData, {
-          fullName: dFullName,
-          phone: dPhone,
-          address: dAddress,
-          zone: dZone,
-          country: dCountry,
-          city: dCity,
-          plate,
-          idNumber,
-          guarantee,
-          transportMode,
-          idCardFrontUrl,
-          idCardBackUrl,
-          selfieUrl,
+          fullName, phone, address, zone, country, city,
+          plate, idNumber, guarantee, transportMode,
+          idCardFrontUrl, idCardBackUrl, selfieUrl,
           status: "pending",
         });
         break;
       }
-
       default:
         userData.role = "buyer";
     }
 
-    // 🔐 Email verification
+    // 🔐 Email verification (nouveaux comptes uniquement)
     const verificationToken = crypto.randomBytes(32).toString("hex");
     userData.verificationToken = verificationToken;
-    userData.verificationTokenExpires =
-      Date.now() + 24 * 60 * 60 * 1000; // 24h
+    userData.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
     userData.isVerified = false;
 
-    const user = new User(userData);
-    await user.save();
+    const user = await User.create(userData);
 
-    // 🔹 URL BACKEND pour confirmation email
-    const backendUrl =
-      process.env.BACKEND_URL || "https://backend-api-m0tf.onrender.com";
-
+    // 🔗 URL BACKEND
+    const backendUrl = process.env.BACKEND_URL || "https://backend-api-m0tf.onrender.com";
     const verificationUrl = `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;
 
-    // 📧 Envoi email de confirmation
+    // 📧 Email
     await sendEmailJob({
       to: user.email,
       subject: "Confirmez votre adresse email",
@@ -151,7 +89,6 @@ exports.register = async (req, res) => {
       },
     });
 
-    // 🔁 Synchronisation seller
     if (user.role === "seller") {
       await syncSeller(user);
     }
@@ -162,67 +99,36 @@ exports.register = async (req, res) => {
     });
   } catch (err) {
     logger.error("Register error:", err);
-    res.status(500).json({
-      message: "Erreur serveur lors de l’inscription",
-    });
+    res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
   }
 };
 
 // ======================================================
-// 🔹 LOGIN (CORRIGÉ)
+// 🔹 LOGIN
 // ======================================================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({
-        message: "Email et mot de passe requis",
-      });
-    }
+    if (!email || !password)
+      return res.status(400).json({ message: "Email et mot de passe requis" });
 
-    const user = await User.findOne({ email }).select(
-      "+password +isVerified +verificationToken +role"
-    );
+    const user = await User.findOne({ email }).select("+password +isVerified +verificationToken +role");
 
-    if (!user) {
-      return res.status(404).json({
-        message: "Utilisateur non trouvé",
-      });
-    }
+    if (!user)
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
 
-    // 🔐 Vérification mot de passe
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({
-        message: "Mot de passe incorrect",
-      });
-    }
+    if (!isMatch)
+      return res.status(401).json({ message: "Mot de passe incorrect" });
 
-    /**
-     * ✅ Vérification email requise UNIQUEMENT pour :
-     * - buyer / seller / delivery
-     * - NOUVEAUX comptes (verificationToken existe)
-     * - isVerified === false
-     *
-     * ❌ PAS requise pour :
-     * - admins
-     * - anciens utilisateurs
-     */
     const rolesRequiringVerification = ["buyer", "seller", "delivery"];
-
-    if (
-      rolesRequiringVerification.includes(user.role) &&
-      user.verificationToken &&
-      user.isVerified === false
-    ) {
+    if (rolesRequiringVerification.includes(user.role) && user.verificationToken && !user.isVerified) {
       return res.status(403).json({
-        message:
-          "Veuillez confirmer votre adresse email avant de vous connecter",
+        message: "Veuillez confirmer votre adresse email avant de vous connecter",
       });
     }
 
-    // 🔑 Génération du token
     const token = signToken(user);
 
     res.json({
@@ -231,9 +137,7 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     logger.error("Login error:", err);
-    res.status(500).json({
-      message: "Erreur serveur lors de la connexion",
-    });
+    res.status(500).json({ message: "Erreur serveur lors de la connexion" });
   }
 };
 
@@ -250,25 +154,20 @@ exports.verifyEmail = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(400).json({
-        message: "Token invalide ou expiré.",
-      });
+      return res.status(400).json({ message: "Lien invalide ou expiré" });
     }
 
     user.isVerified = true;
     user.verificationToken = undefined;
     user.verificationTokenExpires = undefined;
-
     await user.save();
 
-    res.json({
-      message: "Email vérifié avec succès.",
-    });
+    // 👉 Redirection frontend
+    const frontendUrl = process.env.FRONTEND_URL || "https://emarket-web.onrender.com";
+    return res.redirect(`${frontendUrl}/email-verified?success=true`);
   } catch (err) {
     logger.error("Verify-email error:", err);
-    res.status(500).json({
-      message: "Erreur serveur",
-    });
+    res.status(500).json({ message: "Erreur serveur" });
   }
 };
 
@@ -276,56 +175,35 @@ exports.verifyEmail = async (req, res) => {
 // 🔹 PROFILE
 // ======================================================
 exports.getProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({
-        message: "Utilisateur introuvable",
-      });
-    }
-    res.json({ user: user.toPublicJSON() });
-  } catch (err) {
-    logger.error("Get profile error:", err);
-    res.status(500).json({
-      message: "Erreur serveur lors de la récupération du profil",
-    });
-  }
+  const user = await User.findById(req.user._id);
+  if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+  res.json({ user: user.toPublicJSON() });
 };
 
 exports.updateProfile = async (req, res) => {
-  try {
-    const updates = { ...req.body };
-    const user = await User.findById(req.user._id).select("+password");
+  const updates = { ...req.body };
+  const user = await User.findById(req.user._id).select("+password");
 
-    if (!user) {
-      return res.status(404).json({
-        message: "Utilisateur introuvable",
-      });
-    }
+  if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-    if (updates.password) {
-      user.password = updates.password;
-      delete updates.password;
-    }
-
-    Object.assign(user, updates);
-    await user.save();
-
-    if (user.role === "seller") {
-      await syncSeller(user);
-    }
-
-    res.json({ user: user.toPublicJSON() });
-  } catch (err) {
-    logger.error("Update profile error:", err);
-    res.status(500).json({
-      message: "Erreur serveur lors de la mise à jour du profil",
-    });
+  if (updates.password) {
+    user.password = updates.password;
+    delete updates.password;
   }
+
+  Object.assign(user, updates);
+  await user.save();
+
+  if (user.role === "seller") {
+    await syncSeller(user);
+  }
+
+  res.json({ user: user.toPublicJSON() });
 };
 
 // ======================================================
-// 🔹 UTILITAIRE — Sync Seller
+// 🔹 SYNC SELLER
 // ======================================================
 const syncSeller = async (user) => {
   try {
@@ -338,7 +216,6 @@ const syncSeller = async (user) => {
       seller = await Seller.create({
         _id: user._id,
         name: user.ownerName || user.shopName || user.email.split("@")[0],
-        surname: "",
         email: user.email,
         phone: user.phone || "",
         prefix,
@@ -346,20 +223,122 @@ const syncSeller = async (user) => {
         balance_locked: 0,
         balance_available: 0,
         payout_method: "MOBILE_MONEY",
-        cinetpay_contact_added: false,
-        cinetpay_contact_meta: {},
       });
-    } else {
-      seller.name = user.ownerName || user.shopName || seller.name;
-      seller.phone = user.phone || seller.phone;
-      seller.prefix = prefix;
-      seller.fullNumber = fullNumber;
-      await seller.save();
     }
   } catch (err) {
-    console.error(
-      `Erreur synchronisation Seller pour ${user.email}:`,
-      err.message
-    );
+    console.error("Seller sync error:", err.message);
+  }
+};
+
+// ======================================================
+// 🔹 GET USER BY ID
+// ======================================================
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let user = await User.findById(id).lean();
+    if (!user) {
+      const seller = await Seller.findById(id).lean();
+      if (!seller) return res.status(404).json({ message: "Utilisateur non trouvé" });
+
+      return res.json({
+        _id: seller._id,
+        email: seller.email,
+        role: "seller",
+        shopName: seller.name || "",
+        country: seller.country || "",
+      });
+    }
+
+    let sellerInfo = {};
+    if (user.role === "seller") {
+      const seller = await Seller.findById(user._id).lean();
+      sellerInfo = {
+        shopName: seller?.name || user.shopName || "",
+        country: seller?.country || user.country || "",
+      };
+    }
+
+    res.json({ ...user, ...sellerInfo });
+  } catch (err) {
+    logger.error("GET /users/:id error:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// ======================================================
+// 🔹 GET USERS BY ROLE
+// ======================================================
+exports.getUsersByRole = async (req, res) => {
+  try {
+    const { role } = req.params;
+    const { status } = req.query;
+
+    let query = { role };
+    if (status) query.status = status;
+
+    const users = await User.find(query).lean();
+    res.json(users);
+  } catch (err) {
+    logger.error("GET /users/role/:role error:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// ======================================================
+// 🔹 PUBLIC GET USERS BY ROLE
+// ======================================================
+exports.getUsersByRolePublic = async (req, res) => {
+  try {
+    const { role } = req.params;
+    const { status } = req.query;
+
+    let query = { role };
+    if (status) query.status = status;
+
+    const users = await User.find(query).lean();
+    if (!users || users.length === 0) return res.status(404).json({ message: "Aucun utilisateur trouvé." });
+
+    res.json(users);
+  } catch (err) {
+    logger.error("GET /users/role/:role/public error:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// ======================================================
+// 🔹 CREATE ADMINS
+// ======================================================
+const ADMINS = [
+  { role: "admin_general", email: "admin_general@gmail.com", password: "AdminGen123!", fullName: "Admin Général" },
+  { role: "admin_seller", email: "admin_seller@gmail.com", password: "AdminSell123!", fullName: "Admin Vendeur" },
+  { role: "admin_buyer", email: "admin_buyer@gmail.com", password: "AdminBuy123!", fullName: "Admin Acheteur" },
+  { role: "admin_delivery", email: "admin_delivery@gmail.com", password: "AdminDel123!", fullName: "Admin Livreur" },
+];
+
+exports.createAdmins = async (req, res) => {
+  try {
+    const secret = req.headers["x-admin-secret"];
+    if (!secret || secret !== process.env.ADMIN_CREATION_SECRET) {
+      return res.status(401).json({ message: "Unauthorized: invalid secret" });
+    }
+
+    const results = [];
+    for (const adminData of ADMINS) {
+      const existing = await User.findOne({ email: adminData.email });
+      if (existing) {
+        results.push({ email: adminData.email, status: "already_exists" });
+        continue;
+      }
+
+      const newAdmin = await User.create(adminData);
+      results.push({ email: adminData.email, status: "created" });
+    }
+
+    res.status(201).json({ message: "Admins processing completed", admins: results });
+  } catch (err) {
+    logger.error("/create-admins error:", err);
+    res.status(500).json({ message: err.message });
   }
 };
