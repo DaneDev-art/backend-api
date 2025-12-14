@@ -172,6 +172,61 @@ exports.verifyEmail = async (req, res) => {
 };
 
 // ======================================================
+// 🔹 RESEND VERIFICATION EMAIL
+// ======================================================
+exports.resendVerificationEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email)
+      return res.status(400).json({ message: "Email requis" });
+
+    const user = await User.findOne({ email });
+
+    if (!user)
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        message: "Ce compte est déjà vérifié",
+      });
+    }
+
+    // 🔐 Nouveau token
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+    user.verificationToken = verificationToken;
+    user.verificationTokenExpires =
+      Date.now() + 24 * 60 * 60 * 1000;
+
+    await user.save();
+
+    const backendUrl =
+      process.env.BACKEND_URL || "https://backend-api-m0tf.onrender.com";
+
+    const verificationUrl =
+      `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;
+
+    await sendEmailJob({
+      to: user.email,
+      subject: "Confirmez votre adresse email",
+      template: "verify_email",
+      templateVars: {
+        verificationUrl,
+        fullName: user.fullName || user.ownerName || user.email,
+        year: new Date().getFullYear(),
+      },
+    });
+
+    res.json({
+      message: "Email de confirmation renvoyé avec succès",
+    });
+  } catch (err) {
+    logger.error("Resend email error:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+};
+
+// ======================================================
 // 🔹 PROFILE
 // ======================================================
 exports.getProfile = async (req, res) => {
