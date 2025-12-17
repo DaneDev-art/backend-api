@@ -1,17 +1,24 @@
+# =====================
 # Node.js
+# =====================
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
+# =====================
 # Environnement
+# =====================
 .env
 .env.local
 .env.*.local
 
+# =====================
 # Logs
+# =====================
 logs/
 *.log
 npm-debug.log*
@@ -19,32 +26,53 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# =====================
 # OS
+# =====================
 .DS_Store
 Thumbs.db
 
+# =====================
 # IDE / Editor
+# =====================
 .vscode/
 .idea/
 *.sublime-workspace
 *.sublime-project
 
+# =====================
 # Build / Output
+# =====================
 dist/
 build/
 out/
 
+# =====================
 # Binary / Jar files
+# =====================
 *.jar
 *.war
 *.zip
 
+# =====================
 # MongoDB local database
+# =====================
 *.db
 *.bson
 *.dump
 
-# Others
+# =====================
+# Temp / swap / others
+# =====================
 *.tgz
 *.tmp
 *.swp
+
+# =====================
+# Local Socket.IO test scripts
+# =====================
+testSocket.js
+testSocketClient.js
+
+# Dossier temporaire git à ignorer
+git/
