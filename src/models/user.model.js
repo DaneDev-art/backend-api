@@ -63,7 +63,11 @@ const userSchema = new mongoose.Schema(
     shopName: { type: String, trim: true, index: true },
     shopDescription: { type: String, trim: true },
     logoUrl: { type: String },
-    profileImageUrl: { type: String },
+
+    // 🔸 Images de profil (Cloudinary)
+    profileImageUrl: { type: String }, // legacy
+    avatarUrl: { type: String, default: "" }, // legacy
+    photoURL: { type: String, trim: true }, // ✅ champ standard (Flutter / API)
 
     // 🔸 CINETPAY / Soldes
     cinetpayId: { type: String },
@@ -105,15 +109,23 @@ const userSchema = new mongoose.Schema(
     idCardBackUrl: { type: String },
     selfieUrl: { type: String },
 
-    // 🔸 Avatar
-    avatarUrl: { type: String, default: "" },
-
     // 🔸 Champs supplémentaires pour sellers
     prefix: { type: String, default: "228" },
     fullNumber: { type: String, default: "" },
   },
   { timestamps: true }
 );
+
+// ==========================================
+// 🔄 Synchronisation images (compatibilité)
+// ==========================================
+userSchema.pre("save", function (next) {
+  if (this.photoURL) {
+    this.avatarUrl = this.photoURL;
+    this.profileImageUrl = this.photoURL;
+  }
+  next();
+});
 
 // ==========================================
 // 🔐 Hash du mot de passe avant sauvegarde
@@ -141,10 +153,9 @@ userSchema.methods.generateEmailVerificationToken = function () {
     .update(token)
     .digest("hex");
 
-  // ⏳ Expire dans 24h
   this.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
 
-  return token; // token brut envoyé par email
+  return token;
 };
 
 // ==========================================

@@ -4,7 +4,7 @@ const User = require("../models/user.model"); // Assure-toi que le chemin est co
 const { verifyToken, verifyAdmin } = require("../middleware/auth.middleware");
 
 // =======================
-// 🔹 GET USERS BY ROLE (ADMIN ONLY)
+// 🔹 GET USERS BY ROLE (ADMIN ONLY, PAGINATED & SEARCHABLE)
 // =======================
 router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
   try {
@@ -14,7 +14,6 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
     const query = { role };
     if (status && status !== "all") query.status = status;
 
-    // Recherche texte sur fullName et email
     if (search) {
       query.$or = [
         { fullName: { $regex: search, $options: "i" } },
@@ -34,15 +33,19 @@ router.get("/role/:role", verifyToken, verifyAdmin, async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean(); // <-- enlevant select() pour récupérer tous les champs
+      .lean();
 
     const total = await User.countDocuments(query);
 
     res.json({
-      users,
+      users: users.map(u => ({
+        ...u,
+        photoURL: u.photoURL || u.avatarUrl || u.profileImageUrl || ""
+      })),
       total,
       page: parseInt(page),
       limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
     });
   } catch (err) {
     console.error("❌ GET /users/role/:role error:", err.message);
@@ -62,7 +65,6 @@ router.get("/delivery/approved", async (req, res) => {
       status: "approved",
     };
 
-    // Recherche optionnelle sur plusieurs champs
     if (search) {
       query.$or = [
         { fullName: { $regex: search, $options: "i" } },
@@ -84,15 +86,19 @@ router.get("/delivery/approved", async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean(); // <-- récupère tous les champs pour le front
+      .lean();
 
     const total = await User.countDocuments(query);
 
     res.json({
-      livreurs,
+      livreurs: livreurs.map(u => ({
+        ...u,
+        photoURL: u.photoURL || u.avatarUrl || u.profileImageUrl || ""
+      })),
       total,
       page: parseInt(page),
       limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
     });
   } catch (err) {
     console.error("❌ GET /users/delivery/approved error:", err.message);
@@ -101,7 +107,7 @@ router.get("/delivery/approved", async (req, res) => {
 });
 
 // =======================
-// 🔹 GET USERS BY ROLE PUBLIC
+// 🔹 GET USERS BY ROLE PUBLIC (PAGINATED & SEARCHABLE)
 // =======================
 router.get("/role/:role/public", async (req, res) => {
   try {
@@ -130,17 +136,21 @@ router.get("/role/:role/public", async (req, res) => {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean(); // <-- récupère tous les champs
+      .lean();
 
     if (!users.length) return res.status(404).json({ message: "Aucun utilisateur trouvé" });
 
     const total = await User.countDocuments(query);
 
     res.json({
-      users,
+      users: users.map(u => ({
+        ...u,
+        photoURL: u.photoURL || u.avatarUrl || u.profileImageUrl || ""
+      })),
       total,
       page: parseInt(page),
       limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
     });
   } catch (err) {
     console.error("❌ GET /users/role/:role/public error:", err.message);
@@ -169,9 +179,38 @@ router.put("/update-status/:id", verifyToken, verifyAdmin, async (req, res) => {
       return res.status(404).json({ message: "Utilisateur non trouvé" });
     }
 
-    res.json({ message: `Utilisateur ${status} avec succès`, user });
+    res.json({
+      message: `Utilisateur ${status} avec succès`,
+      user: { ...user.toObject(), photoURL: user.photoURL || user.avatarUrl || user.profileImageUrl || "" },
+    });
   } catch (err) {
     console.error("❌ PUT /users/update-status/:id error:", err.message);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+});
+
+// =======================
+// 🔹 UPDATE PROFILE PHOTO (USER ONLY, via URL)
+// =======================
+router.put("/me/photo", verifyToken, async (req, res) => {
+  try {
+    const { photoURL } = req.body;
+    if (!photoURL) return res.status(400).json({ message: "photoURL requis" });
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    user.photoURL = photoURL;
+    user.avatarUrl = photoURL;
+    user.profileImageUrl = photoURL;
+    await user.save();
+
+    res.json({
+      message: "Photo de profil mise à jour avec succès",
+      user: { ...user.toObject(), photoURL: user.photoURL },
+    });
+  } catch (err) {
+    console.error("❌ PUT /users/me/photo error:", err.message);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });

@@ -258,6 +258,39 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ======================================================
+// 🔹 UPDATE PROFILE PHOTO (USER ONLY)
+// ======================================================
+exports.updateProfilePhoto = async (req, res) => {
+  try {
+    const { photoURL } = req.body;
+
+    if (!photoURL) {
+      return res.status(400).json({ message: "photoURL requis" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    // Mise à jour des différents champs pour compatibilité frontend/backend
+    user.photoURL = photoURL;
+    user.avatarUrl = photoURL;
+    user.profileImageUrl = photoURL;
+
+    await user.save();
+
+    res.json({
+      message: "Photo de profil mise à jour avec succès",
+      user: { ...user.toPublicJSON(), photoURL: user.photoURL },
+    });
+  } catch (err) {
+    console.error("❌ PUT /users/me/photo error:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// ======================================================
 // 🔹 SYNC SELLER
 // ======================================================
 const syncSeller = async (user) => {

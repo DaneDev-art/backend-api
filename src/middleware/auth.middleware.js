@@ -15,6 +15,7 @@ const verifyToken = (req, res, next) => {
 
   try {
     if (!process.env.JWT_SECRET) {
+      console.error("⚠️ JWT_SECRET manquant dans l'environnement !");
       return res.status(500).json({ message: "Erreur serveur: JWT_SECRET manquant" });
     }
 
@@ -30,6 +31,7 @@ const verifyToken = (req, res, next) => {
 
     next();
   } catch (err) {
+    console.error("❌ Token invalide:", err.message);
     return res.status(401).json({ message: "Token invalide" });
   }
 };
@@ -45,7 +47,7 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
-// 🔹 Middleware pour vérifier un rôle spécifique
+// 🔹 Middleware pour vérifier un rôle spécifique (ex: buyer, seller, delivery)
 const verifyRole = (roles = []) => (req, res, next) => {
   if (!req.role || !roles.includes(req.role)) {
     return res.status(403).json({ message: "Accès refusé pour ce rôle" });
