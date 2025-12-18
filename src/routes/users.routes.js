@@ -241,4 +241,41 @@ router.get("/me", verifyToken, async (req, res) => {
   }
 });
 
+// =======================
+// 🔹 UPDATE CURRENT USER PROFILE (USER ONLY)
+// =======================
+router.put("/me", verifyToken, async (req, res) => {
+  try {
+    const { displayName, phone, address, city } = req.body;
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    // Mise à jour contrôlée
+    if (displayName !== undefined) user.fullName = displayName;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
+    if (city !== undefined) user.city = city;
+
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.json({
+      message: "Profil mis à jour avec succès",
+      user: {
+        ...user.toObject(),
+        photoURL: user.photoURL || user.avatarUrl || user.profileImageUrl || "",
+      },
+    });
+  } catch (err) {
+    console.error("❌ PUT /users/me error:", err.message);
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;
