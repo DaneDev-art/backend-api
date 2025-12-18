@@ -200,20 +200,34 @@ router.put("/me/photo", verifyToken, async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
-    user.photoURL = photoURL;
-    user.avatarUrl = photoURL;
-    user.profileImageUrl = photoURL;
-    await user.save();
+    // ✅ Mise à jour ciblée pour éviter les validations sur d'autres champs
+    await User.updateOne(
+      { _id: req.user._id },
+      {
+        $set: {
+          photoURL: photoURL,
+          avatarUrl: photoURL,
+          profileImageUrl: photoURL,
+        },
+      }
+    );
+
+    // 🔄 Re-fetch pour retour API
+    const updatedUser = await User.findById(req.user._id).lean();
 
     res.json({
       message: "Photo de profil mise à jour avec succès",
-      user: { ...user.toObject(), photoURL: user.photoURL },
+      user: {
+        ...updatedUser,
+        photoURL: updatedUser.photoURL || updatedUser.avatarUrl || updatedUser.profileImageUrl || "",
+      },
     });
   } catch (err) {
     console.error("❌ PUT /users/me/photo error:", err.message);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 });
+
 
 // =======================
 // 🔹 GET CURRENT USER PROFILE (USER ONLY)
