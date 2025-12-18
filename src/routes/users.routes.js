@@ -215,4 +215,30 @@ router.put("/me/photo", verifyToken, async (req, res) => {
   }
 });
 
+// =======================
+// 🔹 GET CURRENT USER PROFILE (USER ONLY)
+// =======================
+router.get("/me", verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).lean();
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json({
+      user: {
+        ...user,
+        photoURL: user.photoURL || user.avatarUrl || user.profileImageUrl || "",
+      },
+    });
+  } catch (err) {
+    console.error("❌ GET /users/me error:", err.message);
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;

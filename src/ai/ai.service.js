@@ -36,24 +36,22 @@ async function chat({ message }) {
   const intents = [
     { key: ["bonjour", "salut", "hey", "coucou"], reply: "Bonjour 👋 ! Comment puis-je vous aider aujourd’hui ?" },
     { key: ["bonsoir"], reply: "Bonsoir 🌙 ! Comment puis-je vous aider ?" },
-    { key: ["ça va", "tu vas bien"], reply: "Je vais très bien 😊 Merci ! Et vous ?" },
+    { key: ["ça va", "comment vas-tu", "comment ça va", "tu vas bien"], reply: "Je vais très bien 😊 Merci ! Et vous ?" },
     { key: ["merci"], reply: "Avec plaisir 😊 N’hésitez pas si vous avez d’autres questions." },
     { key: ["passer commande", "faire une commande"], reply: "Pour passer une commande, cliquez sur le produit; sur la page de détails du produit, vous avez le choix de discuter avec le vendeur pour conclure un prix avant d'ajouter le produit au Panier soit d'ajouter directement le produit au Panier. De toutes les façons vos fonds sont sécurisés. Retournez à votre tableau de bord et procédez au paiement" },
     { key: ["commande", "mes commandes"], reply: "Vous pouvez accéder à toutes vos commandes (Commandes soumises pour livraison, ou commandes après achat d'un ou des produit(s)) à partir de votre tableau de bord" },
     { key: ["suivi commande", "statut commande", "où est ma commande"], reply: "Pour suivre votre commande, allez à votre tableau de bord > Mes commandes ou mes commandes soumises. Attendez toujours de recevoir votre commande achetée ou soumise pour livraison, avant de confirmer la réception. Très important pour ne pas perdre vos fonds surtout lorsque vous avez acheté un ou plusieurs produits." },
     { key: ["annuler commande"], reply: "Pour annuler une commande déjà payée, veuillez demander à l'Assistant E-Market de vous donner les coordonnées de l'équipe en charge. C'est cette équipe qui va procéder à la vérification, à la suite de laquelle vos fonds vous seront retournés" },
     { key: ["livraison", "delai de livraison", "temps de livraison"], reply: "Pour un vendeur le délai maximal pour livrer les produits aux clients est de 5 jours. Pour un livreur, le délai pour livrer des produits est de 48 heures maximum" },
-    { key: ["prix livraison", "frais livraison"], reply: "Les frais de livraison dépendent de la distance; et le montant à payer est conclu entre les deux utilisateurs: le livreur et son client" },
+    { key: ["prix livraison", "frais livraison"], reply: "Les frais de livraison dépendent de la distance; et le montant à payer est discuté et conclu entre les deux utilisateurs: le livreur et son client" },
     { key: ["modifier adresse", "changer adresse"], reply: "Vous pouvez modifier votre adresse, c'est une discussion entre les deux parties." },
-    { key: ["paiement", "payer", "acheter"], reply: "Vous pouvez payer via Mobile Money uniquement pour le moment. Paiements 100% sécurisés 🔒" },
+    { key: ["paiement", "payer"], reply: "Vous pouvez payer via Mobile Money uniquement pour le moment. Paiements 100% sécurisés 🔒" },
     { key: ["sécurisé", "sécurite paiement"], reply: "Oui, tous les paiements sont sécurisés. L'argent est bloqué jusqu'à confirmation de la livraison." },
-    { key: ["remboursement"], reply: "Pour demander un remboursement, ouvrez la commande concernée et cliquez sur « Demander un remboursement »." },
-    { key: ["produit", "publier un produit"], reply: "Découvrez nos produits dans Boutique 🛍️ Cliquez sur un produit pour voir photos, description, prix…" },
-    { key: ["publier produit", "ajouter produit"], reply: "Pour ajouter un produit, vous devez d’abord devenir vendeur, puis aller dans Vendeur > Ajouter un produit." },
+    { key: ["publier produit", "produit", "publier", "ajouter produit"], reply: "Pour ajouter un produit, vous devez d’abord devenir vendeur, puis aller à votre tableau de bord Vendeur > Remplissez le formulaire d'ajout de produit." },
     { key: ["photo produit"], reply: "Ajoutez plusieurs photos claires et réelles pour attirer plus d’acheteurs 📸" },
     { key: ["devenir vendeur", "comment vendre", "vendeur"], reply: "Pour devenir vendeur, allez dans Profil > Devenir Vendeur et remplissez le formulaire. Une fois validé, vous pourrez publier vos produits." },
-    { key: ["commission", "frais vendeur"], reply: "Les vendeurs paient une commission de **2.5%** sur chaque vente. Vous recevez **97.5%** du montant." },
-    { key: ["devenir livreur", "comment livrer", "livreur"], reply: "Pour devenir livreur, allez dans Profil > Devenir Livreur. Une fois validé, vous recevrez des missions de livraison." },
+    { key: ["commission", "commission sur chaque vente", "frais", "frais vendeur"], reply: "Vous êtes vendeur? Tout ce qui est lié aux frais, pour avoir accès, allez-y dans votre tableau de bord vendeur." },
+    { key: ["devenir livreur", "comment livrer", "livreur"], reply: "Pour devenir livreur, allez dans Profile> Devenir livreur>et suivez les étapes" },
     { key: ["gagner livreur", "paiement livreur"], reply: "Les livreurs sont payés pour chaque livraison. Le montant dépend de la distance." },
     { key: ["connexion", "connecter"], reply: "Si vous avez un problème de connexion, vérifiez votre réseau et assurez-vous que vos identifiants sont corrects." },
     { key: ["mot de passe", "mdp"], reply: "Vous pouvez réinitialiser votre mot de passe depuis l'écran de connexion via « Mot de passe oublié »." },
@@ -62,6 +60,7 @@ async function chat({ message }) {
     { key: ["help", "aide", "support", "assistance"], reply: "Notre équipe est disponible pour vous aider. Contactez-nous dans l’onglet Support 📩" },
     { key: ["avis", "notation"], reply: "Vous pouvez noter un produit après l’avoir reçu. Cela aide toute la communauté 👍" },
     { key: ["bug", "problème", "erreur"], reply: "Oups 😅 ! Pouvez-vous expliquer le problème ? Je vais vous aider." },
+    { key: ["contacts", "coordonnés", "contacter", "appeler"], reply: "Vous pouvez écrire au support par mail uniquement: asdanepro@gmail.com" },
   ];
 
   // ────────── NOUVELLES INTENTIONS ──────────
@@ -100,7 +99,7 @@ async function chat({ message }) {
     },
     {
       key: ["comment acheter un produit", "comment faire un achat"],
-      reply: "Pour acheter un produit ou faire un achat : 1️⃣ Cliquez sur le produit désiré. 2️⃣ Sur la page des détails, cliquez sur <<Ajouter ce produit au panier>>, choisissez la quantité et confirmez. 3️⃣ Discutez le prix avec le vendeur si nécessaire via <<Discuter avec le vendeur>>. 4️⃣ Connectez-vous à votre tableau de bord et utilisez le bouton panier orange pour effectuer le paiement."
+      reply: "Pour acheter un produit ou faire un achat :Cliquez sur le produit désiré >Sur la page des détails, cliquez sur <<Ajouter ce produit au panier>>, choisissez la quantité et confirmez >Discutez le prix avec le vendeur si nécessaire via <<Discuter avec le vendeur>>. Connectez-vous à votre tableau de bord et cliquez sur le bouton panier orange flottant pour effectuer le paiement."
     },
     {
       key: ["comment accéder à mon tableau de bord", "retrouver mon tableau de bord", "comment aller sur mon tableau de bord"],
