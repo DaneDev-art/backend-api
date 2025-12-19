@@ -15,18 +15,19 @@ const PayinTransaction = require("../models/PayinTransaction");
 // ======================================================
 router.get("/me", verifyToken, async (req, res) => {
   try {
-    const clientId = req.user._id;
-
-    const orders = await Order.find({ client: clientId })
+    const orders = await Order.find({ client: req.user._id })
       .sort({ createdAt: -1 });
 
-    return res.status(200).json({
+    // 🔥 évite le 304
+    res.set("Cache-Control", "no-store");
+
+    res.status(200).json({
       success: true,
       orders,
     });
   } catch (err) {
     console.error("❌ GET /orders/me:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Erreur récupération commandes client",
     });
@@ -39,18 +40,18 @@ router.get("/me", verifyToken, async (req, res) => {
 // ======================================================
 router.get("/seller", verifyToken, async (req, res) => {
   try {
-    const sellerId = req.user._id;
-
-    const orders = await Order.find({ seller: sellerId })
+    const orders = await Order.find({ seller: req.user._id })
       .sort({ createdAt: -1 });
 
-    return res.status(200).json({
+    res.set("Cache-Control", "no-store");
+
+    res.status(200).json({
       success: true,
       orders,
     });
   } catch (err) {
     console.error("❌ GET /orders/seller:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Erreur récupération commandes vendeur",
     });
@@ -72,13 +73,13 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       order,
     });
   } catch (err) {
     console.error("❌ GET /orders/:orderId:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Erreur récupération commande",
     });
@@ -94,13 +95,10 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
   session.startTransaction();
 
   try {
-    const clientId = req.user._id;
-    const { orderId } = req.params;
-
-    const order = await Order.findById(orderId).session(session);
+    const order = await Order.findById(req.params.orderId).session(session);
     if (!order) throw new Error("Commande introuvable");
 
-    if (order.client.toString() !== clientId.toString()) {
+    if (order.client.toString() !== req.user._id.toString()) {
       throw new Error("Accès non autorisé");
     }
 
@@ -128,7 +126,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       throw new Error("Solde bloqué insuffisant");
     }
 
-    // 💰 Libération fonds
+    // 💰 Libération des fonds
     seller.balance_locked -= amount;
     seller.balance_available = (seller.balance_available || 0) + amount;
     await seller.save({ session });
@@ -140,7 +138,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
     await session.commitTransaction();
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: "Commande confirmée et fonds libérés",
       releasedAmount: amount,
@@ -149,7 +147,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     await session.abortTransaction();
     console.error("❌ POST /orders/:orderId/confirm:", err.message);
 
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: err.message,
     });
