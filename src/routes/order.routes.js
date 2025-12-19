@@ -12,13 +12,13 @@ const PayinTransaction = require("../models/PayinTransaction");
 // ======================================================
 // 📦 1. Récupérer les commandes du client connecté
 // ======================================================
-router.get("/orders/me", verifyToken, async (req, res) => {
+router.get("/api/orders/me", verifyToken, async (req, res) => {
   try {
     const clientId = req.user._id;
     const orders = await Order.find({ client: clientId }).sort({ createdAt: -1 });
     return res.status(200).json({ success: true, orders });
   } catch (err) {
-    console.error("❌ GET /orders/me:", err);
+    console.error("❌ GET /api/orders/me:", err);
     return res.status(500).json({ error: "Erreur récupération commandes client" });
   }
 });
@@ -26,13 +26,13 @@ router.get("/orders/me", verifyToken, async (req, res) => {
 // ======================================================
 // 📦 2. Récupérer les commandes d’un vendeur
 // ======================================================
-router.get("/orders/seller", verifyToken, async (req, res) => {
+router.get("/api/orders/seller", verifyToken, async (req, res) => {
   try {
     const sellerId = req.user._id;
     const orders = await Order.find({ seller: sellerId }).sort({ createdAt: -1 });
     return res.status(200).json({ success: true, orders });
   } catch (err) {
-    console.error("❌ GET /orders/seller:", err);
+    console.error("❌ GET /api/orders/seller:", err);
     return res.status(500).json({ error: "Erreur récupération commandes vendeur" });
   }
 });
@@ -40,14 +40,14 @@ router.get("/orders/seller", verifyToken, async (req, res) => {
 // ======================================================
 // 📦 3. Récupérer une commande par ID
 // ======================================================
-router.get("/orders/:orderId", verifyToken, async (req, res) => {
+router.get("/api/orders/:orderId", verifyToken, async (req, res) => {
   try {
     const orderId = req.params.orderId;
     const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ error: "Commande introuvable" });
     return res.status(200).json({ success: true, order });
   } catch (err) {
-    console.error("❌ GET /orders/:orderId:", err);
+    console.error("❌ GET /api/orders/:orderId:", err);
     return res.status(500).json({ error: "Erreur récupération commande" });
   }
 });
@@ -55,7 +55,7 @@ router.get("/orders/:orderId", verifyToken, async (req, res) => {
 // ======================================================
 // ✅ 4. Confirmation client — libération des fonds
 // ======================================================
-router.post("/orders/:orderId/confirm", verifyToken, async (req, res) => {
+router.post("/api/orders/:orderId/confirm", verifyToken, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -125,7 +125,7 @@ router.post("/orders/:orderId/confirm", verifyToken, async (req, res) => {
     });
   } catch (err) {
     await session.abortTransaction();
-    console.error("❌ POST /orders/:orderId/confirm:", err);
+    console.error("❌ POST /api/orders/:orderId/confirm:", err);
     return res.status(500).json({ error: "Erreur confirmation commande" });
   } finally {
     session.endSession();
