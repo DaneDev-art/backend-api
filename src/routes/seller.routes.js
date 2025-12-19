@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const Seller = require("../models/Seller");
+const PayinTransaction = require("../models/PayinTransaction");
 const jwt = require("jsonwebtoken");
 
 // -------------------------
@@ -29,55 +30,50 @@ const authMiddleware = (req, res, next) => {
 // 🧾 Routes Seller
 // -------------------------
 
-// Créer un nouveau vendeur (protégé)
-router.post("/", authMiddleware, async (req, res) => {
-  try {
-    const { email, phone } = req.body;
-
-    // Éviter doublons
-    const existing = await Seller.findOne({ $or: [{ email }, { phone }] });
-    if (existing) {
-      return res.status(400).json({ success: false, error: "Ce vendeur existe déjà" });
-    }
-
-    const seller = await Seller.create(req.body);
-    res.status(201).json({ success: true, seller });
-  } catch (err) {
-    console.error("❌ Erreur création vendeur:", err.message);
-    res.status(400).json({ success: false, error: err.message });
-  }
-});
-
-// Récupérer tous les vendeurs
-router.get("/", authMiddleware, async (req, res) => {
-  try {
-    const sellers = await Seller.find();
-    res.json({ success: true, sellers });
-  } catch (err) {
-    console.error("❌ Erreur récupération vendeurs:", err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Récupérer un vendeur par ID
+// Récupérer un vendeur par ID avec fonds bloqués et historique
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const seller = await Seller.findById(req.params.id);
     if (!seller) return res.status(404).json({ success: false, error: "Vendeur introuvable" });
-    res.json({ success: true, seller });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
-// Mettre à jour un vendeur
-router.put("/:id", authMiddleware, async (req, res) => {
-  try {
-    const seller = await Seller.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!seller) return res.status(404).json({ success: false, error: "Vendeur introuvable" });
-    res.json({ success: true, seller });
+    // 🔹 Historique des fonds bloqués/libérés
+    const transactions = await PayinTransaction.find({ sellerId: seller._id }).sort({ createdAt: -1 });
+
+    const fundsHistory = transactions.map(tx => ({
+      transactionId: tx.transaction_id,
+      orderId: tx.orderId || null, // si vous liez transaction → commande
+      amount: tx.netAmount,
+      currency: tx.currency,
+      status: tx.status,
+      type: tx.status === "SUCCESS" ? "RELEASED" : "LOCKED",
+      date: tx.createdAt,
+    }));
+
+    // 🔹 Calcul solde disponible / bloqué
+    const balanceAvailable = fundsHistory
+      .filter(f => f.type === "RELEASED")
+      .reduce((sum, f) => sum + f.amount, 0);
+
+    const balanceLocked = fundsHistory
+      .filter(f => f.type === "LOCKED")
+      .reduce((sum, f) => sum + f.amount, 0);
+
+    res.json({
+      success: true,
+      seller: {
+        _id: seller._id,
+        name: seller.name,
+        email: seller.email,
+        phone: seller.phone,
+        role: seller.role,
+        balanceAvailable,
+        balanceLocked,
+        fundsHistory,
+      },
+    });
   } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
+    console.error("❌ Erreur récupération vendeur:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
