@@ -5,7 +5,7 @@ const router = express.Router();
 
 const { verifyToken } = require("../middleware/auth.middleware");
 
-const Order = require("../models/Order");
+const Order = require("../models/order.model");
 const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 
