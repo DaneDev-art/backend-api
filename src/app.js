@@ -1,6 +1,7 @@
 // =======================
 // src/app.js
 // =======================
+
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
@@ -20,7 +21,9 @@ app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("dev"));
 
+// =======================
 // 🔒 Limiteur de requêtes
+// =======================
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 150,
@@ -93,7 +96,10 @@ app.use("/api/users", require("./routes/users.routes"));
 // Sellers
 app.use("/api/sellers", require("./routes/seller.routes"));
 
-//Mail test
+// Orders ✅ (CORRIGÉ)
+app.use("/api/orders", require("./routes/order.routes"));
+
+// Email (test)
 app.use("/api/email", emailRoutes);
 
 // Paiement CinetPay
@@ -108,10 +114,12 @@ app.use("/api/upload", require("./routes/uploadRoutes"));
 app.use("/api/deliveries", require("./routes/deliveries"));
 
 // =======================
-// 🚚 DELIVERY ASSIGNMENTS (corrigé)
+// 🚚 DELIVERY ASSIGNMENTS
 // =======================
-// ⚠️ IMPORTANT : cohérent avec Flutter : /api/delivery-assignments
-app.use("/api/delivery-assignments", require("./routes/deliveryAssignments"));
+app.use(
+  "/api/delivery-assignments",
+  require("./routes/deliveryAssignments")
+);
 
 // Messages
 const { router: messageRoutes } = require("./routes/messageRoutes");
@@ -147,7 +155,10 @@ app.get("/health", (req, res) => {
 app.use((err, req, res, next) => {
   if (err.message && err.message.includes("CORS")) {
     console.error("❌ [CORS ERROR]", err.message);
-    return res.status(403).json({ success: false, error: err.message });
+    return res.status(403).json({
+      success: false,
+      error: err.message,
+    });
   }
 
   console.error("❌ [SERVER ERROR]", err);
