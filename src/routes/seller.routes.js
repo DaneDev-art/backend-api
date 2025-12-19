@@ -6,7 +6,7 @@ const PayinTransaction = require("../models/PayinTransaction");
 const jwt = require("jsonwebtoken");
 
 // -------------------------
-// Middleware d'authentification
+// 🔐 Middleware d'authentification
 // -------------------------
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -21,7 +21,8 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // { id, email, role }
+    // decoded = { id, email, role }
+    req.user = decoded;
     next();
   } catch (err) {
     return res
@@ -36,8 +37,10 @@ const authMiddleware = (req, res, next) => {
 // ======================================================
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const seller = await Seller.findOne({ user: req.user.id });
+    // 🔑 IMPORTANT : Seller._id === User._id
+    const sellerId = req.user.id;
 
+    const seller = await Seller.findById(sellerId);
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -45,29 +48,25 @@ router.get("/me", authMiddleware, async (req, res) => {
       });
     }
 
-    // 🔹 Historique des transactions
+    // 🔹 Historique des transactions (fonds)
     const transactions = await PayinTransaction.find({
       sellerId: seller._id,
     }).sort({ createdAt: -1 });
 
     const fundsHistory = transactions.map(tx => ({
-      transactionId: tx.transaction_id,
+      transactionId: tx.transaction_id || null,
       orderId: tx.orderId || null,
-      amount: tx.netAmount,
-      currency: tx.currency,
+      amount: tx.netAmount || 0,
+      currency: tx.currency || "XOF",
       type: tx.status === "SUCCESS" ? "RELEASED" : "LOCKED",
       date: tx.createdAt,
     }));
 
-    const balanceAvailable = fundsHistory
-      .filter(f => f.type === "RELEASED")
-      .reduce((sum, f) => sum + f.amount, 0);
+    // 🔹 SOLDES : on prend la vérité depuis le document Seller
+    const balanceAvailable = seller.balance_available || 0;
+    const balanceLocked = seller.balance_locked || 0;
 
-    const balanceLocked = fundsHistory
-      .filter(f => f.type === "LOCKED")
-      .reduce((sum, f) => sum + f.amount, 0);
-
-    res.json({
+    return res.json({
       success: true,
       seller: {
         _id: seller._id,
@@ -81,10 +80,10 @@ router.get("/me", authMiddleware, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ Erreur récupération vendeur:", err.message);
+    console.error("❌ GET /api/sellers/me:", err);
     res.status(500).json({
       success: false,
-      error: "Erreur serveur",
+      error: "Erreur récupération vendeur",
     });
   }
 });
@@ -97,9 +96,10 @@ router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const seller = await Seller.findById(req.params.id);
     if (!seller) {
-      return res
-        .status(404)
-        .json({ success: false, error: "Vendeur introuvable" });
+      return res.status(404).json({
+        success: false,
+        error: "Vendeur introuvable",
+      });
     }
 
     const transactions = await PayinTransaction.find({
@@ -107,21 +107,16 @@ router.get("/:id", authMiddleware, async (req, res) => {
     }).sort({ createdAt: -1 });
 
     const fundsHistory = transactions.map(tx => ({
-      transactionId: tx.transaction_id,
+      transactionId: tx.transaction_id || null,
       orderId: tx.orderId || null,
-      amount: tx.netAmount,
-      currency: tx.currency,
+      amount: tx.netAmount || 0,
+      currency: tx.currency || "XOF",
       type: tx.status === "SUCCESS" ? "RELEASED" : "LOCKED",
       date: tx.createdAt,
     }));
 
-    const balanceAvailable = fundsHistory
-      .filter(f => f.type === "RELEASED")
-      .reduce((sum, f) => sum + f.amount, 0);
-
-    const balanceLocked = fundsHistory
-      .filter(f => f.type === "LOCKED")
-      .reduce((sum, f) => sum + f.amount, 0);
+    const balanceAvailable = seller.balance_available || 0;
+    const balanceLocked = seller.balance_locked || 0;
 
     res.json({
       success: true,
@@ -137,8 +132,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ Erreur récupération vendeur:", err.message);
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ GET /api/sellers/:id:", err);
+    res.status(500).json({
+      success: false,
+      error: "Erreur récupération vendeur",
+    });
   }
 });
 
