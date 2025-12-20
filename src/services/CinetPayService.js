@@ -105,12 +105,17 @@ class CinetPayService {
 
   static async resolveClientObjectId(clientIdCandidate, fallbackEmailOrPhone) {
     if (!clientIdCandidate && !fallbackEmailOrPhone) {
-      throw new Error("clientId (ou email/phone) requis pour associer la transaction au client");
+      throw new Error(
+        "clientId (ou email/phone) requis pour associer la transaction au client"
+      );
     }
 
     if (clientIdCandidate instanceof mongoose.Types.ObjectId) return clientIdCandidate;
 
-    if (typeof clientIdCandidate === "string" && /^[0-9a-fA-F]{24}$/.test(clientIdCandidate)) {
+    if (
+      typeof clientIdCandidate === "string" &&
+      /^[0-9a-fA-F]{24}$/.test(clientIdCandidate)
+    ) {
       return new mongoose.Types.ObjectId(clientIdCandidate);
     }
 
@@ -119,91 +124,101 @@ class CinetPayService {
     if (/@/.test(candidate)) {
       const u = await User.findOne({ email: candidate }).select("_id").lean();
       if (u && u._id) return u._id;
-      throw new Error(`Impossible de trouver un utilisateur avec l'email ${candidate}. Passe l'_id ou crée l'utilisateur.`);
+      throw new Error(
+        `Impossible de trouver un utilisateur avec l'email ${candidate}. Passe l'_id ou crée l'utilisateur.`
+      );
     }
 
     if (/^\+?\d{6,15}$/.test(candidate)) {
       const u = await User.findOne({ phone: candidate }).select("_id").lean();
       if (u && u._id) return u._id;
-      throw new Error(`Impossible de trouver un utilisateur avec le numéro ${candidate}. Passe l'_id ou crée l'utilisateur.`);
+      throw new Error(
+        `Impossible de trouver un utilisateur avec le numéro ${candidate}. Passe l'_id ou crée l'utilisateur.`
+      );
     }
 
-    throw new Error("clientId non résoluble en ObjectId. Passe l'_id mongoose du user ou son email/phone existant.");
+    throw new Error(
+      "clientId non résoluble en ObjectId. Passe l'_id mongoose du user ou son email/phone existant."
+    );
   }
+}
 
   // ============================ AUTH (PAYOUT API) ============================
-  static async getAuthToken() {
-    // cached
-    if (this.authToken && Date.now() + 5000 < this.authTokenExpiresAt) return this.authToken;
+CinetPayService.getAuthToken = async function() {
+  const axios = require("axios");
 
-    if (!CINETPAY_PAYOUT_URL || !CINETPAY_API_KEY || !CINETPAY_API_PASSWORD) {
-      throw new Error("Missing CinetPay payout auth config (CINETPAY_PAYOUT_URL / API KEY / API PASSWORD).");
-    }
+  // cached
+  if (this.authToken && Date.now() + 5000 < this.authTokenExpiresAt) return this.authToken;
 
-    const params = new URLSearchParams();
-    params.append("apikey", CINETPAY_API_KEY);
-    params.append("password", CINETPAY_API_PASSWORD);
+  const CINETPAY_PAYOUT_URL = this.CINETPAY_PAYOUT_URL || process.env.CINETPAY_PAYOUT_URL;
+  const CINETPAY_API_KEY = this.CINETPAY_API_KEY || process.env.CINETPAY_API_KEY;
+  const CINETPAY_API_PASSWORD = this.CINETPAY_API_PASSWORD || process.env.CINETPAY_API_PASSWORD;
 
-    let resp;
-    try {
-      resp = await axios.post(`${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/auth/login`, params.toString(), {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        timeout: 15000,
-      });
-    } catch (err) {
-      const body = err.response?.data || err.message;
+  if (!CINETPAY_PAYOUT_URL || !CINETPAY_API_KEY || !CINETPAY_API_PASSWORD) {
+    throw new Error("Missing CinetPay payout auth config (CINETPAY_PAYOUT_URL / API KEY / API PASSWORD).");
+  }
 
-      // special handling for NOT_ALLOWED (708)
-      if (body && (body.code === "708" || body.code === 708 || body.message === "NOT_ALLOWED")) {
-        console.error("[CinetPay][Auth] NOT_ALLOWED (708):", body);
-        const e = new Error("CinetPay auth refused (NOT_ALLOWED) — vérifie tes credentials et l'état du compte CinetPay (activation Payout).");
-        e.cinetpay = body;
-        throw e;
-      }
+  const params = new URLSearchParams();
+  params.append("apikey", CINETPAY_API_KEY);
+  params.append("password", CINETPAY_API_PASSWORD);
 
-      console.error("[CinetPay][Auth] request failed:", body);
-      const e = new Error("CinetPay auth request failed: " + (body?.message || body));
+  let resp;
+  try {
+    resp = await axios.post(`${CINETPAY_PAYOUT_URL.replace(/\/+$/, "")}/auth/login`, params.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 15000,
+    });
+  } catch (err) {
+    const body = err.response?.data || err.message;
+    if (body && (body.code === "708" || body.code === 708 || body.message === "NOT_ALLOWED")) {
+      console.error("[CinetPay][Auth] NOT_ALLOWED (708):", body);
+      const e = new Error("CinetPay auth refused (NOT_ALLOWED) — vérifie tes credentials et l'état du compte CinetPay (activation Payout).");
       e.cinetpay = body;
       throw e;
     }
-
-    const data = resp.data;
-    const ok =
-      data &&
-      (data.code === 0 ||
-        data.code === "0" ||
-        data.code === "00" ||
-        data.message === "OPERATION_SUCCES" ||
-        data.status === "success");
-
-    if (!ok) {
-      console.error("[CinetPay][Auth] invalid response:", data);
-      const e = new Error("CinetPay auth échouée: " + JSON.stringify(data));
-      e.cinetpay = data;
-      throw e;
-    }
-
-    const token = data.data?.token || data.token || data?.access_token;
-    if (!token) throw new Error("Token absent dans réponse auth CinetPay");
-
-    // expiry
-    let expiresAt = Date.now() + 5 * 60 * 1000;
-    if (data.data?.expire_at) {
-      const t = Date.parse(data.data.expire_at);
-      if (!Number.isNaN(t)) expiresAt = t;
-    } else if (data.data?.expires_in) {
-      const s = Number(data.data.expires_in);
-      if (!Number.isNaN(s)) expiresAt = Date.now() + s * 1000;
-    }
-
-    this.authToken = token;
-    this.authTokenExpiresAt = expiresAt;
-    return token;
+    console.error("[CinetPay][Auth] request failed:", body);
+    const e = new Error("CinetPay auth request failed: " + (body?.message || body));
+    e.cinetpay = body;
+    throw e;
   }
 
-  static async getTransferAuthToken() {
-    return this.getAuthToken();
+  const data = resp.data;
+  const ok =
+    data &&
+    (data.code === 0 ||
+      data.code === "0" ||
+      data.code === "00" ||
+      data.message === "OPERATION_SUCCES" ||
+      data.status === "success");
+
+  if (!ok) {
+    console.error("[CinetPay][Auth] invalid response:", data);
+    const e = new Error("CinetPay auth échouée: " + JSON.stringify(data));
+    e.cinetpay = data;
+    throw e;
   }
+
+  const token = data.data?.token || data.token || data?.access_token;
+  if (!token) throw new Error("Token absent dans réponse auth CinetPay");
+
+  // expiry
+  let expiresAt = Date.now() + 5 * 60 * 1000;
+  if (data.data?.expire_at) {
+    const t = Date.parse(data.data.expire_at);
+    if (!Number.isNaN(t)) expiresAt = t;
+  } else if (data.data?.expires_in) {
+    const s = Number(data.data.expires_in);
+    if (!Number.isNaN(s)) expiresAt = Date.now() + s * 1000;
+  }
+
+  this.authToken = token;
+  this.authTokenExpiresAt = expiresAt;
+  return token;
+};
+
+CinetPayService.getTransferAuthToken = async function() {
+  return this.getAuthToken();
+};
 
   // ============================ ENSURE / CREATE SELLER CONTACT ============================
 /**
@@ -213,12 +228,12 @@ class CinetPayService {
  * @param {string|ObjectId} mongoSellerId - _id du seller ou user
  * @returns {Promise<string>} contact_id CinetPay
  */
-static async ensureSellerContact(mongoSellerId) {
+CinetPayService.ensureSellerContact = async function (mongoSellerId) {
   if (!mongoSellerId) throw new Error("sellerId requis pour créer contact CinetPay");
 
   // Cherche d'abord dans Seller
   let seller = await Seller.findById(mongoSellerId);
-  
+
   // Sinon cherche dans User (compatibilité)
   if (!seller) {
     const userSeller = await User.findById(mongoSellerId);
@@ -233,9 +248,7 @@ static async ensureSellerContact(mongoSellerId) {
         prefix: userSeller.prefix || userSeller.countryPrefix || "+228",
         balance_available: userSeller.balance_available || 0,
         balance_locked: userSeller.balance_locked || 0,
-        // sauvegarde shim si besoin
         save: async () => await userSeller.save(),
-        // champs CinetPay
         cinetpay_contact_added: userSeller.cinetpayContactAdded || userSeller.cinetpay_contact_added || false,
         cinetpay_contact_id: userSeller.cinetpay_contact_id || null,
         cinetpay_contact_meta: userSeller.cinetpayContactMeta || userSeller.cinetpay_contact_meta || null,
@@ -251,33 +264,45 @@ static async ensureSellerContact(mongoSellerId) {
   }
 
   // ------------------ LOCK simple pour éviter les appels concurrents ------------------
-  if (!this.contactLocks) this.contactLocks = new Map();
+  if (!CinetPayService.contactLocks) CinetPayService.contactLocks = new Map();
   const lockKey = `${seller.prefix}:${seller.phone}`;
-  if (this.contactLocks.get(lockKey)) {
+
+  // Fonction interne async pour attendre un contact existant
+  async function waitForExistingContact() {
     for (let i = 0; i < 10; i++) {
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 200)); // pause 200ms
       const s = await Seller.findById(mongoSellerId).lean();
-      if (s && s.cinetpay_contact_added && s.cinetpay_contact_meta?.id) return s.cinetpay_contact_meta.id;
+      if (s && s.cinetpay_contact_added && s.cinetpay_contact_meta?.id) {
+        return s.cinetpay_contact_meta.id; // contact déjà créé
+      }
     }
+    return null;
   }
-  this.contactLocks.set(lockKey, true);
+
+  if (CinetPayService.contactLocks.get(lockKey)) {
+    const existingId = await waitForExistingContact();
+    if (existingId) return existingId;
+  }
+
+  CinetPayService.contactLocks.set(lockKey, true);
 
   try {
-    // Appel à la méthode interne de création de contact
-    const contactId = await this.createSellerContact(seller);
+    const contactId = await CinetPayService.createSellerContact(seller);
     return contactId;
   } finally {
-    this.contactLocks.delete(lockKey);
+    CinetPayService.contactLocks.delete(lockKey);
   }
-}
+};
 
 /**
  * Crée le contact vendeur sur CinetPay
  * @param {Object} seller - objet vendeur (Seller ou User converti)
  * @returns {Promise<string>} contact_id CinetPay
  */
-static async createSellerContact(seller) {
+CinetPayService.createSellerContact = async function(seller) {
   if (!seller) throw new Error("Seller manquant pour création de contact");
+
+  const axios = require("axios");
 
   // Nettoyage et validation des champs requis
   const prefix = (seller.prefix || "228").replace("+", "").trim();
@@ -329,42 +354,41 @@ static async createSellerContact(seller) {
     console.error("[CinetPay][createSellerContact] request failed:", err.response?.data || err.message);
     throw new Error("Echec création contact CinetPay");
   }
-}
+};
 
-  // ============================ CHECKOUT AUTH TEST ============================
-  static async authCheckoutCredentials() {
-    if (!CINETPAY_BASE_URL || !CINETPAY_API_KEY || !CINETPAY_SITE_ID) {
-      throw new Error("CINETPAY_BASE_URL / CINETPAY_API_KEY / CINETPAY_SITE_ID non configurés");
-    }
-
-    const url = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
-    const payload = {
-      apikey: CINETPAY_API_KEY,
-      site_id: CINETPAY_SITE_ID,
-      transaction_id: this.generateTransactionId("CHK"),
-      amount: 1,
-      currency: "XOF",
-      description: "credentials-check",
-      customer_email: "check@example.com",
-      customer_phone_number: "90000000",
-      notify_url: NGROK_URL ? `${NGROK_URL}/api/cinetpay/webhook` : (BASE_URL ? `${BASE_URL}/api/cinetpay/webhook` : undefined),
-      return_url: FRONTEND_URL ? `${FRONTEND_URL}/success` : undefined,
-    };
-
-    try {
-      const res = await axios.post(url, payload, { headers: { "Content-Type": "application/json" }, timeout: 10000 });
-      return res.data;
-    } catch (err) {
-      const body = err.response?.data || err.message;
-      console.error("[CinetPay][authCheckoutCredentials] error:", body);
-      const e = new Error("Checkout credential check failed");
-      e.cinetpay = body;
-      throw e;
-    }
+  CinetPayService.authCheckoutCredentials = async function() {
+  if (!CINETPAY_BASE_URL || !CINETPAY_API_KEY || !CINETPAY_SITE_ID) {
+    throw new Error("CINETPAY_BASE_URL / CINETPAY_API_KEY / CINETPAY_SITE_ID non configurés");
   }
 
-  // ============================ PAYIN (FINAL & MONGOOSE-SAFE) ============================
-static async createPayIn({
+  const url = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+  const payload = {
+    apikey: CINETPAY_API_KEY,
+    site_id: CINETPAY_SITE_ID,
+    transaction_id: this.generateTransactionId("CHK"),
+    amount: 1,
+    currency: "XOF",
+    description: "credentials-check",
+    customer_email: "check@example.com",
+    customer_phone_number: "90000000",
+    notify_url: NGROK_URL ? `${NGROK_URL}/api/cinetpay/webhook` : (BASE_URL ? `${BASE_URL}/api/cinetpay/webhook` : undefined),
+    return_url: FRONTEND_URL ? `${FRONTEND_URL}/success` : undefined,
+  };
+
+  try {
+    const axios = require("axios");
+    const res = await axios.post(url, payload, { headers: { "Content-Type": "application/json" }, timeout: 10000 });
+    return res.data;
+  } catch (err) {
+    const body = err.response?.data || err.message;
+    console.error("[CinetPay][authCheckoutCredentials] error:", body);
+    const e = new Error("Checkout credential check failed");
+    e.cinetpay = body;
+    throw e;
+  }
+};
+
+  CinetPayService.createPayIn = async function({
   productPrice,      // prix du produit uniquement
   shippingFee = 0,   // frais d’envoi du vendeur
   currency = "XOF",
@@ -378,15 +402,19 @@ static async createPayIn({
 }) {
   if (!productPrice || !sellerId) throw new Error("Champs manquants: productPrice ou sellerId");
 
+  const mongoose = require("mongoose");
+  const axios = require("axios");
+  const Seller = require("../models/Seller");
+  const PayinTransaction = require("../models/PayinTransaction");
+
   // 🔹 Vérifie le vendeur
   const seller = await Seller.findById(sellerId);
   if (!seller) throw new Error("Vendeur introuvable");
 
-  // 🔹 Calcul des frais sur le prix du produit uniquement
+  // 🔹 Calcul des frais
   const payinFee = roundCFA(productPrice * FEES.payinCinetPay);
   const payoutFee = roundCFA(productPrice * FEES.payoutCinetPay);
   const flutterFee = roundCFA(productPrice * FEES.appFlutter);
-
   const totalFees = roundCFA(payinFee + payoutFee + flutterFee);
 
   // 🔹 Montant net que le vendeur reçoit = produit - totalFees + shipping
@@ -502,10 +530,16 @@ static async createPayIn({
     await tx.save();
     throw new Error(`Erreur interne createPayIn: ${tx.message}`);
   }
-}
-// ============================ VERIFY PAYIN (FINAL & SAFE) ============================
-static async verifyPayIn(transaction_id) {
+};
+
+CinetPayService.verifyPayIn = async function(transaction_id) {
   if (!transaction_id) throw new Error("transaction_id est requis");
+
+  const axios = require("axios");
+  const mongoose = require("mongoose");
+  const PayinTransaction = require("../models/PayinTransaction");
+  const Seller = require("../models/Seller");
+  const PlatformRevenue = require("../models/PlatformRevenue");
 
   // 🔹 URL sécurisée pour la vérification
   let verifyUrl = CINETPAY_BASE_URL?.replace(/\/+$/, "") || "https://api-checkout.cinetpay.com/v2";
@@ -640,10 +674,14 @@ static async verifyPayIn(transaction_id) {
     transaction_id,
     status,
   };
-}
+};
 
-  // ============================ PAYOUT (FINAL PRODUCTION VERSION) ============================
-static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
+  CinetPayService.createPayOutForSeller = async function({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
+  const Seller = require("../models/Seller");
+  const PayoutTransaction = require("../models/PayoutTransaction");
+  const PlatformRevenue = require("../models/PlatformRevenue");
+  const axios = require("axios");
+
   if (!sellerId || typeof amount !== "number" || isNaN(amount)) {
     throw new Error("sellerId et amount (numérique) sont requis");
   }
@@ -673,7 +711,7 @@ static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyU
   // 🆔 5. Création de l'ID de transaction
   const client_transaction_id = this.generateTransactionId("PAYOUT");
 
-  // ✅ 6. Enregistrement initial en base (toujours complet)
+  // ✅ 6. Enregistrement initial en base
   const payoutTx = await PayoutTransaction.create({
     seller: seller._id,
     sellerId: seller._id,
@@ -684,7 +722,7 @@ static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyU
     fees: payoutFeeAmount,
     status: "PENDING",
     createdAt: new Date(),
-    prefix: seller.prefix.toString().replace(/^\+/, ""), // nettoyage du prefix
+    prefix: seller.prefix.toString().replace(/^\+/, ""),
     phone: String(seller.phone),
   });
 
@@ -814,10 +852,15 @@ static async createPayOutForSeller({ sellerId, amount, currency = "XOF", notifyU
     }
     throw err;
   }
-}
+};
 
   // ============================ WEBHOOK ============================
-static async handleWebhook(webhookPayload, headers = {}) {
+CinetPayService.handleWebhook = async function(webhookPayload, headers = {}) {
+  const crypto = require("crypto");
+  const PayoutTransaction = require("../models/PayoutTransaction");
+  const PayinTransaction = require("../models/PayinTransaction");
+  const Seller = require("../models/Seller");
+
   // 🔐 Vérification signature
   if (WEBHOOK_SECRET) {
     const signature = headers["x-cinetpay-signature"] || headers["signature"];
@@ -863,9 +906,7 @@ static async handleWebhook(webhookPayload, headers = {}) {
     if (statusFromWebhook.includes("SUCCESS")) {
       payoutTx.status = "SUCCESS";
       payoutTx.completedAt = new Date();
-    }
-
-    else if (
+    } else if (
       (statusFromWebhook.includes("FAILED") || statusFromWebhook.includes("CANCEL")) &&
       payoutTx.status !== "FAILED"
     ) {
@@ -912,9 +953,7 @@ static async handleWebhook(webhookPayload, headers = {}) {
     ) {
       payinTx.status = "SUCCESS";
       payinTx.verifiedAt = new Date();
-    }
-
-    else if (
+    } else if (
       (statusFromWebhook.includes("FAILED") || statusFromWebhook.includes("CANCEL")) &&
       payinTx.status !== "FAILED"
     ) {
@@ -928,6 +967,6 @@ static async handleWebhook(webhookPayload, headers = {}) {
   }
 
   return { ok: false, message: "Transaction inconnue" };
-}
+};
 
 module.exports = CinetPayService;
