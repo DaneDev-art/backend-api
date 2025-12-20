@@ -401,8 +401,12 @@ CinetPayService.createSellerContact = async function(seller) {
   sellerId,
   clientId,
 }) {
-  // ✅ VALIDATION CORRECTE
-  if (typeof productPrice !== "number" || Number.isNaN(productPrice) || productPrice < 0) {
+  // 🔹 CONVERSION EN NOMBRE
+  productPrice = Number(productPrice);
+  shippingFee = Number(shippingFee || 0);
+
+  // ✅ VALIDATION
+  if (Number.isNaN(productPrice) || productPrice < 0) {
     throw new Error("productPrice invalide");
   }
 
@@ -413,7 +417,7 @@ CinetPayService.createSellerContact = async function(seller) {
   const seller = await Seller.findById(sellerId);
   if (!seller) throw new Error("Vendeur introuvable");
 
-  // ✅ CALCUL CENTRALISÉ DES FRAIS
+  // ✅ CALCUL DES FRAIS
   const {
     totalFees,
     netToSeller: netAmount,
@@ -526,6 +530,10 @@ CinetPayService.createSellerContact = async function(seller) {
     throw new Error(`Erreur interne createPayIn: ${tx.message}`);
   }
 };
+
+   //=====================================================
+  // 			VERFYPAYIN
+  // =====================================================
 
 CinetPayService.verifyPayIn = async function(transaction_id) {
   if (!transaction_id) throw new Error("transaction_id est requis");
@@ -671,6 +679,9 @@ CinetPayService.verifyPayIn = async function(transaction_id) {
   };
 };
 
+  //=====================================================
+  // 			PAYOUT
+  // =====================================================
   CinetPayService.createPayOutForSeller = async function({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
   const Seller = require("../models/Seller");
   const PayoutTransaction = require("../models/PayoutTransaction");
