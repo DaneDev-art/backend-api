@@ -388,9 +388,10 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 };
 
-  CinetPayService.createPayIn = async function({
-  productPrice,      // prix du produit uniquement
-  shippingFee = 0,   // frais d’envoi du vendeur
+// ============================ PAYIN (FINAL & MONGOOSE-SAFE) ============================
+  CinetPayService.createPayIn = async function ({
+  productPrice,
+  shippingFee = 0,
   currency = "XOF",
   buyerEmail,
   buyerPhone,
@@ -400,47 +401,41 @@ CinetPayService.createSellerContact = async function(seller) {
   sellerId,
   clientId,
 }) {
-  if (!productPrice || !sellerId) throw new Error("Champs manquants: productPrice ou sellerId");
+  // ✅ VALIDATION CORRECTE
+  if (typeof productPrice !== "number" || Number.isNaN(productPrice) || productPrice < 0) {
+    throw new Error("productPrice invalide");
+  }
 
-  const mongoose = require("mongoose");
-  const axios = require("axios");
-  const Seller = require("../models/Seller");
-  const PayinTransaction = require("../models/PayinTransaction");
+  if (!sellerId) {
+    throw new Error("sellerId manquant");
+  }
 
-  // 🔹 Vérifie le vendeur
   const seller = await Seller.findById(sellerId);
   if (!seller) throw new Error("Vendeur introuvable");
 
-  // 🔹 Calcul des frais
-  const payinFee = roundCFA(productPrice * FEES.payinCinetPay);
-  const payoutFee = roundCFA(productPrice * FEES.payoutCinetPay);
-  const flutterFee = roundCFA(productPrice * FEES.appFlutter);
-  const totalFees = roundCFA(payinFee + payoutFee + flutterFee);
+  // ✅ CALCUL CENTRALISÉ DES FRAIS
+  const {
+    totalFees,
+    netToSeller: netAmount,
+    breakdown: { payinFee, payoutFee, flutterFee },
+  } = calculateFees(productPrice, shippingFee);
 
-  // 🔹 Montant net que le vendeur reçoit = produit - totalFees + shipping
-  const netAmount = roundCFA(productPrice - totalFees + (shippingFee || 0));
-
-  // 🔹 Génère un ID unique
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  // 🔹 Définit des URLs fallback sûres
   returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
   notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-  // 🔹 Nettoyage infos client
-  buyerEmail = (buyerEmail || "").trim() || null;
-  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null;
+  buyerEmail = buyerEmail?.trim() || null;
+  buyerPhone = buyerPhone?.replace(/\D/g, "") || null;
   const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
 
-  // 🔹 Associer clientId si email/phone fourni
   let resolvedClientId = clientId || null;
   if (!resolvedClientId && (buyerEmail || buyerPhone)) {
     resolvedClientId = await this.resolveClientObjectId(null, buyerEmail || buyerPhone);
   }
   if (!resolvedClientId) resolvedClientId = new mongoose.Types.ObjectId();
 
-  // 🔹 Crée la transaction MongoDB
-  const tx = new PayinTransaction({
+  const tx = await PayinTransaction.create({
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
@@ -451,7 +446,7 @@ CinetPayService.createSellerContact = async function(seller) {
     currency,
     transaction_id,
     description: description || `Paiement vendeur ${seller.name || seller._id}`,
-    shippingFee: shippingFee || 0,
+    shippingFee: shippingFee ?? 0,
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
