@@ -37,6 +37,7 @@ const PayinTransactionSchema = new mongoose.Schema({
     email: { type: String },
     phone_number: { type: String },
     name: { type: String },
+    address: { type: String, default: "Adresse inconnue" }, // <-- ajout adresse client
   },
 
   // 🧾 Métadonnées et logs
