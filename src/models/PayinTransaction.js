@@ -8,17 +8,17 @@ const PayinTransactionSchema = new mongoose.Schema({
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
   // 💰 Montants
-  amount: { type: Number, required: true }, // Montant total payé
-  netAmount: { type: Number, required: true }, // Montant net reversé au vendeur
+  amount: { type: Number, required: true },       // Montant total payé
+  netAmount: { type: Number, required: true },    // Montant net reversé au vendeur
   fees: { type: Number, default: 0 },
   fees_breakdown: { type: Object, default: {} },
   currency: { type: String, default: "XOF" },
 
   // 🔗 Identifiants de transaction
-  transaction_id: { type: String, required: true }, // ID généré côté CinetPay
-  payment_token: { type: String }, // Token unique renvoyé par CinetPay
-  payment_method: { type: String }, // Mobile Money, Carte, etc.
-  api_response_id: { type: String }, // ID de réponse CinetPay (facultatif)
+  transaction_id: { type: String, required: true },  // ID généré côté CinetPay
+  payment_token: { type: String },                   // Token unique renvoyé par CinetPay
+  payment_method: { type: String },                 // Mobile Money, Carte, etc.
+  api_response_id: { type: String },                // ID de réponse CinetPay (facultatif)
 
   // 📦 Statut
   status: {
@@ -29,6 +29,9 @@ const PayinTransactionSchema = new mongoose.Schema({
   cinetpay_status: { type: String, default: null }, // statut brut côté CinetPay
   verifiedAt: { type: Date, default: null },
 
+  // 🔐 Sécurité crédit vendeur (idempotence)
+  sellerCredited: { type: Boolean, default: false },
+
   // 👤 Informations client
   customer: { 
     email: { type: String },
@@ -37,8 +40,8 @@ const PayinTransactionSchema = new mongoose.Schema({
   },
 
   // 🧾 Métadonnées et logs
-  raw_response: { type: Object, default: null }, // réponse brute de CinetPay
-  message: { type: String }, // message de confirmation ou erreur CinetPay
+  raw_response: { type: Object, default: null },   // réponse brute de CinetPay
+  message: { type: String },                       // message de confirmation ou erreur CinetPay
 }, { timestamps: true });
 
 module.exports = mongoose.model("PayinTransaction", PayinTransactionSchema);
