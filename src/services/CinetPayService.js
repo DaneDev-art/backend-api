@@ -395,7 +395,7 @@ CinetPayService.createSellerContact = async function(seller) {
   currency = "XOF",
   buyerEmail,
   buyerPhone,
-  buyerAddress, // <-- nouvelle variable
+  buyerAddress, // nouvelle variable
   description,
   returnUrl,
   notifyUrl,
@@ -413,8 +413,10 @@ CinetPayService.createSellerContact = async function(seller) {
   productPrice = Number(productPrice);
   shippingFee = Number(shippingFee ?? 0);
 
-  if (!Number.isFinite(productPrice) || productPrice <= 0) throw new Error("productPrice invalide");
-  if (!Number.isFinite(shippingFee) || shippingFee < 0) throw new Error("shippingFee invalide");
+  if (!Number.isFinite(productPrice) || productPrice <= 0)
+    throw new Error("productPrice invalide");
+  if (!Number.isFinite(shippingFee) || shippingFee < 0)
+    throw new Error("shippingFee invalide");
   if (!sellerId) throw new Error("sellerId manquant");
 
   // =============================
@@ -426,10 +428,17 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 CALCUL DES FRAIS
   // =============================
-  const { totalFees, netToSeller: netAmount, breakdown } = calculateFees(productPrice, shippingFee);
+  // ⚠️ Les frais ne s'appliquent que sur le productPrice
+  const { totalFees, netToSeller: netAmountFromProduct, breakdown } =
+    calculateFees(productPrice, 0);
+
+  // Net vendeur = net après frais + shippingFee
+  const netAmount = netAmountFromProduct + shippingFee;
+
   const { payinFee, payoutFee, flutterFee } = breakdown;
 
-  if (!Number.isFinite(netAmount) || netAmount < 0) throw new Error("Montant net vendeur invalide");
+  if (!Number.isFinite(netAmount) || netAmount < 0)
+    throw new Error("Montant net vendeur invalide");
 
   // =============================
   // 🔹 IDS & URLS
@@ -447,7 +456,10 @@ CinetPayService.createSellerContact = async function(seller) {
 
   let resolvedClientId = clientId || null;
   if (!resolvedClientId && (buyerEmail || buyerPhone)) {
-    resolvedClientId = await this.resolveClientObjectId(null, buyerEmail || buyerPhone);
+    resolvedClientId = await this.resolveClientObjectId(
+      null,
+      buyerEmail || buyerPhone
+    );
   }
   if (!resolvedClientId) resolvedClientId = new mongoose.Types.ObjectId();
 
@@ -459,23 +471,29 @@ CinetPayService.createSellerContact = async function(seller) {
     sellerId: seller._id,
     clientId: resolvedClientId,
     transaction_id,
-    amount: productPrice,
-    netAmount,
+    amount: productPrice + shippingFee, // montant total payé par le client
+    netAmount, // net vendeur = (productPrice - fees) + shippingFee
     shippingFee,
     fees: totalFees,
     fees_breakdown: { payinFee, payoutFee, flutterFee },
     currency,
-    description: description || `Paiement vendeur ${seller.name || seller._id}`,
+    description:
+      description || `Paiement vendeur ${seller.name || seller._id}`,
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
       name: customerName,
-      address: buyerAddress || "Adresse inconnue", // <-- ici on stocke l'adresse réelle
+      address: buyerAddress || "Adresse inconnue",
     },
     status: "PENDING",
   });
 
-  console.log("🟡 [PayIn] Transaction créée:", { transaction_id, amount: productPrice, netAmount, seller: seller._id });
+  console.log("🟡 [PayIn] Transaction créée:", {
+    transaction_id,
+    amount: productPrice,
+    netAmount,
+    seller: seller._id,
+  });
 
   // =============================
   // 🔹 PAYLOAD CINETPAY
@@ -485,7 +503,7 @@ CinetPayService.createSellerContact = async function(seller) {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
     transaction_id,
-    amount: productPrice,
+    amount: productPrice + shippingFee, // ✅ client paie produit + frais
     currency,
     description: description || "Paiement eMarket",
     return_url: returnUrl,
@@ -513,7 +531,12 @@ CinetPayService.createSellerContact = async function(seller) {
     const respData = resp.data;
     tx.raw_response = respData;
 
-    const isSuccess = respData?.code === 0 || respData?.code === "0" || respData?.code === 201 || respData?.code === "201" || !!respData.data?.payment_url;
+    const isSuccess =
+      respData?.code === 0 ||
+      respData?.code === "0" ||
+      respData?.code === 201 ||
+      respData?.code === "201" ||
+      !!respData.data?.payment_url;
 
     if (!isSuccess) {
       tx.status = "FAILED";
@@ -530,7 +553,10 @@ CinetPayService.createSellerContact = async function(seller) {
     tx.message = respData.message || "Transaction créée";
     await tx.save();
 
-    console.log("✅ [CinetPay] PAYIN OK:", { transaction_id, payment_url: tx.paymentUrl });
+    console.log("✅ [CinetPay] PAYIN OK:", {
+      transaction_id,
+      payment_url: tx.paymentUrl,
+    });
 
     return {
       success: true,
