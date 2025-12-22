@@ -32,48 +32,31 @@ module.exports = {
 
       // 🔒 Auth
       const clientId = req.user?.id || req.user?._id;
-      if (!clientId) {
-        return res.status(401).json({ error: "Utilisateur non authentifié" });
-      }
+      if (!clientId) return res.status(401).json({ error: "Utilisateur non authentifié" });
+      if (!sellerId) return res.status(400).json({ error: "sellerId requis" });
 
-      if (!sellerId) {
-        return res.status(400).json({ error: "sellerId requis" });
-      }
-
-      // 🔥 FIX CRITIQUE : mapping amount → productPrice
-      const resolvedProductPrice =
-        productPrice !== undefined ? productPrice : amount;
-
-      if (resolvedProductPrice === undefined) {
-        return res
-          .status(400)
-          .json({ error: "amount ou productPrice requis" });
-      }
+      // 🔥 Mapping amount → productPrice
+      const resolvedProductPrice = productPrice !== undefined ? productPrice : amount;
+      if (resolvedProductPrice === undefined)
+        return res.status(400).json({ error: "amount ou productPrice requis" });
 
       // 🔍 Vérification vendeur
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
-      }
-      if (seller.role && seller.role.toLowerCase() !== "seller") {
-        return res.status(400).json({ error: "Compte non vendeur" });
-      }
+      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
+      if (seller.role && seller.role.toLowerCase() !== "seller") return res.status(400).json({ error: "Compte non vendeur" });
 
-      const safeReturnUrl =
-        returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
-      const safeNotifyUrl =
-        notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      const safeReturnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      const safeNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-      // 🔹 Délégation AU SERVICE (source de vérité)
+      // 🔹 Délégation au service
       const result = await CinetPayService.createPayIn({
         productPrice: resolvedProductPrice,
         shippingFee,
         currency,
         buyerEmail: req.user?.email || null,
         buyerPhone: req.user?.phone || null,
-        description:
-          description || `Paiement vers ${seller.name || "vendeur"}`,
+        description: description || `Paiement vers ${seller.name || "vendeur"}`,
         sellerId,
         clientId,
         returnUrl: safeReturnUrl,
@@ -83,20 +66,9 @@ module.exports = {
       return res.status(201).json(result);
     } catch (err) {
       console.error("❌ Erreur createPayIn:", err.message);
-
-      // Erreurs métier → 400
-      if (
-        err.message.includes("invalide") ||
-        err.message.includes("manquant") ||
-        err.message.includes("introuvable") ||
-        err.message.includes("incohérent")
-      ) {
+      if (/invalide|manquant|introuvable|incohérent/i.test(err.message))
         return res.status(400).json({ error: err.message });
-      }
-
-      return res.status(500).json({
-        error: "Erreur interne serveur createPayIn",
-      });
+      return res.status(500).json({ error: "Erreur interne serveur createPayIn" });
     }
   },
 
@@ -134,36 +106,17 @@ module.exports = {
   createPayOut: async (req, res) => {
     try {
       const { sellerId, amount, currency = "XOF", notifyUrl } = req.body;
-
-      if (!sellerId || !amount) {
-        return res
-          .status(400)
-          .json({ error: "sellerId et amount requis" });
-      }
+      if (!sellerId || !amount) return res.status(400).json({ error: "sellerId et amount requis" });
 
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
-      }
+      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
+      if (seller.role && seller.role.toLowerCase() !== "seller") return res.status(400).json({ error: "Compte non vendeur" });
 
-      if (seller.role && seller.role.toLowerCase() !== "seller") {
-        return res.status(400).json({ error: "Compte non vendeur" });
-      }
+      if ((seller.balance_available || 0) < amount)
+        return res.status(400).json({ error: "Solde insuffisant", balance: seller.balance_available || 0 });
 
-      if ((seller.balance_available || 0) < amount) {
-        return res.status(400).json({
-          error: "Solde insuffisant",
-          balance: seller.balance_available || 0,
-        });
-      }
-
-      const result = await CinetPayService.createPayOutForSeller({
-        sellerId,
-        amount,
-        currency,
-        notifyUrl,
-      });
+      const result = await CinetPayService.createPayOutForSeller({ sellerId, amount, currency, notifyUrl });
 
       return res.status(201).json({
         success: true,
@@ -183,9 +136,7 @@ module.exports = {
   verifyPayOut: async (req, res) => {
     try {
       const { transaction_id } = req.body;
-      if (!transaction_id) {
-        return res.status(400).json({ error: "transaction_id requis" });
-      }
+      if (!transaction_id) return res.status(400).json({ error: "transaction_id requis" });
 
       const data = await CinetPayService.verifyPayOut(transaction_id);
       return res.json({ success: true, data });
@@ -201,28 +152,16 @@ module.exports = {
   registerSeller: async (req, res) => {
     try {
       const { name, surname, email, phone, prefix } = req.body;
-
-      if (!name || !email || !phone || !prefix) {
-        return res.status(400).json({ error: "Champs requis manquants" });
-      }
+      if (!name || !email || !phone || !prefix) return res.status(400).json({ error: "Champs requis manquants" });
 
       const existingUser = await User.findOne({ email });
       const existingSeller = await Seller.findOne({ email });
 
-      if (
-        (existingUser && existingUser.role === "seller") ||
-        existingSeller
-      ) {
+      if ((existingUser && existingUser.role === "seller") || existingSeller)
         return res.status(409).json({ error: "Vendeur existe déjà" });
-      }
 
       const seller = await User.create({
-        name,
-        surname,
-        email,
-        phone,
-        prefix,
-        role: "seller",
+        name, surname, email, phone, prefix, role: "seller",
         balance_available: 0,
         balance_locked: 0,
       });
@@ -239,10 +178,7 @@ module.exports = {
   // ======================================================
   handleWebhook: async (req, res) => {
     try {
-      const result = await CinetPayService.handleWebhook(
-        req.body,
-        req.headers
-      );
+      const result = await CinetPayService.handleWebhook(req.body, req.headers);
       return res.status(200).json({ success: true, result });
     } catch (err) {
       console.error("❌ webhook error:", err.message);

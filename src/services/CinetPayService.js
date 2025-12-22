@@ -565,33 +565,18 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   const Seller = require("../models/Seller");
   const PlatformRevenue = require("../models/PlatformRevenue");
 
-  // ======================================================
-  // 🔹 URL CinetPay
-  // ======================================================
   let verifyUrl = (CINETPAY_BASE_URL || "https://api-checkout.cinetpay.com/v2")
     .replace(/\/+$/, "");
-  if (!verifyUrl.endsWith("/payment/check")) {
-    verifyUrl += "/payment/check";
-  }
+  if (!verifyUrl.endsWith("/payment/check")) verifyUrl += "/payment/check";
 
   console.log("🔍 [VerifyPayIn] TX:", transaction_id);
 
-  // ======================================================
-  // 🔹 APPEL API CINETPAY
-  // ======================================================
   let response;
   try {
     response = await axios.post(
       verifyUrl,
-      {
-        apikey: CINETPAY_API_KEY,
-        site_id: CINETPAY_SITE_ID,
-        transaction_id,
-      },
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: 15000,
-      }
+      { apikey: CINETPAY_API_KEY, site_id: CINETPAY_SITE_ID, transaction_id },
+      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
     );
   } catch (err) {
     console.error("❌ [VerifyPayIn] API error:", err.response?.data || err.message);
@@ -604,62 +589,37 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
   console.log("🧾 [VerifyPayIn] Statut:", status, "Montant:", paidAmount);
 
-  // ======================================================
-  // 🔹 TRANSACTION LOCALE
-  // ======================================================
   const tx = await PayinTransaction.findOne({ transaction_id });
-  if (!tx) {
-    return {
-      success: false,
-      message: "Transaction introuvable",
-      raw: respData,
-    };
-  }
+  if (!tx) return { success: false, message: "Transaction introuvable", raw: respData };
 
-  // 🔐 IDÉMPOTENCE STRICTE
+  // Idempotence stricte
   if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
-    return {
-      success: true,
-      message: "Transaction déjà traitée",
-      transaction_id,
-      status,
-    };
+    return { success: true, message: "Transaction déjà traitée", transaction_id, status };
   }
 
   tx.cinetpay_status = status;
   tx.raw_response = respData;
 
-  // ======================================================
-  // ✅ SUCCÈS → FONDS BLOQUÉS
-  // ======================================================
+  // SUCCESS → fonds bloqués
   if (["ACCEPTED", "SUCCESS", "PAID"].includes(status)) {
-    // 🔍 Vérification montant
     if (paidAmount !== Number(tx.amount)) {
-      console.error(
-        "❌ [VerifyPayIn] Montant incohérent:",
-        paidAmount,
-        tx.amount
-      );
+      console.error("❌ [VerifyPayIn] Montant incohérent:", paidAmount, tx.amount);
       tx.status = "FAILED";
       await tx.save();
       throw new Error("Montant payé incohérent");
     }
 
-    // 🔐 Crédit vendeur → SOLDE BLOQUÉ UNIQUEMENT
     if (!tx.sellerCredited) {
-      const seller = await Seller.findById(tx.sellerId || tx.seller);
+      const seller = await Seller.findById(tx.sellerId);
       if (!seller) throw new Error("Vendeur introuvable");
 
       const net = Number(tx.netAmount || 0);
-
       seller.balance_locked = (seller.balance_locked || 0) + net;
       await seller.save();
 
-      // 🏦 Commission plateforme (anti-doublon)
+      // Commission plateforme
       if (tx.fees > 0) {
-        const exists = await PlatformRevenue.findOne({
-          transaction: tx._id,
-        });
+        const exists = await PlatformRevenue.findOne({ transaction: tx._id });
         if (!exists) {
           await PlatformRevenue.create({
             transaction: tx._id,
@@ -677,41 +637,21 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     tx.verifiedAt = new Date();
     await tx.save();
 
-    return {
-      success: true,
-      message: "Paiement validé – fonds bloqués",
-      transaction_id,
-      status,
-    };
+    return { success: true, message: "Paiement validé – fonds bloqués", transaction_id, status };
   }
 
-  // ======================================================
-  // ❌ ÉCHEC / ANNULATION
-  // ======================================================
+  // Échec / Annulation
   if (["FAILED", "CANCELLED", "CANCELED", "REFUSED"].includes(status)) {
     tx.status = "FAILED";
     tx.verifiedAt = new Date();
     await tx.save();
 
-    return {
-      success: false,
-      message: `Paiement ${status.toLowerCase()}`,
-      transaction_id,
-      status,
-    };
+    return { success: false, message: `Paiement ${status.toLowerCase()}`, transaction_id, status };
   }
 
-  // ======================================================
-  // ⏳ EN ATTENTE
-  // ======================================================
+  // En attente
   await tx.save();
-
-  return {
-    success: false,
-    message: "Paiement en attente",
-    transaction_id,
-    status,
-  };
+  return { success: false, message: "Paiement en attente", transaction_id, status };
 };
 
   //=====================================================
