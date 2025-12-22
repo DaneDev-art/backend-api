@@ -15,15 +15,25 @@ const PayinTransaction = require("../models/PayinTransaction");
 // ======================================================
 router.get("/me", verifyToken, async (req, res) => {
   try {
-    const orders = await Order.find({
-      client: req.user._id,
-    }).sort({ createdAt: -1 });
+    const orders = await Order.find({ client: req.user._id })
+      .populate("seller", "name") // récupère le nom du vendeur
+      .populate("payinTransaction", "netAmount") // récupère netAmount
+      .sort({ createdAt: -1 });
 
     res.set("Cache-Control", "no-store");
 
+    const ordersForFlutter = orders.map((o) => ({
+      _id: o._id,
+      sellerName: o.seller?.name || "Vendeur inconnu",
+      amount: o.totalAmount || 0,
+      netAmount: o.payinTransaction?.netAmount || 0,
+      status: o.status,
+      isConfirmedByClient: o.isConfirmedByClient || false,
+    }));
+
     res.status(200).json({
       success: true,
-      orders,
+      orders: ordersForFlutter,
     });
   } catch (err) {
     console.error("❌ GET /orders/me:", err);
@@ -40,7 +50,6 @@ router.get("/me", verifyToken, async (req, res) => {
 // ======================================================
 router.get("/seller", verifyToken, async (req, res) => {
   try {
-    // 🔐 L'utilisateur doit être un vendeur
     const seller = await Seller.findOne({ user: req.user._id });
     if (!seller) {
       return res.status(403).json({
@@ -49,15 +58,24 @@ router.get("/seller", verifyToken, async (req, res) => {
       });
     }
 
-    const orders = await Order.find({
-      seller: seller._id,
-    }).sort({ createdAt: -1 });
+    const orders = await Order.find({ seller: seller._id })
+      .populate("payinTransaction", "netAmount")
+      .sort({ createdAt: -1 });
+
+    const ordersForFlutter = orders.map((o) => ({
+      _id: o._id,
+      sellerName: seller.name,
+      amount: o.totalAmount || 0,
+      netAmount: o.payinTransaction?.netAmount || 0,
+      status: o.status,
+      isConfirmedByClient: o.isConfirmedByClient || false,
+    }));
 
     res.set("Cache-Control", "no-store");
 
     res.status(200).json({
       success: true,
-      orders,
+      orders: ordersForFlutter,
     });
   } catch (err) {
     console.error("❌ GET /orders/seller:", err);
@@ -74,7 +92,9 @@ router.get("/seller", verifyToken, async (req, res) => {
 // ======================================================
 router.get("/:orderId", verifyToken, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.orderId);
+    const order = await Order.findById(req.params.orderId)
+      .populate("seller", "name")
+      .populate("payinTransaction", "netAmount");
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -82,12 +102,9 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    const isClient =
-      order.client.toString() === req.user._id.toString();
-
+    const isClient = order.client.toString() === req.user._id.toString();
     const seller = await Seller.findOne({ user: req.user._id });
-    const isSeller =
-      seller && order.seller.toString() === seller._id.toString();
+    const isSeller = seller && order.seller._id.toString() === seller._id.toString();
 
     if (!isClient && !isSeller) {
       return res.status(403).json({
@@ -96,9 +113,18 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
+    const orderForFlutter = {
+      _id: order._id,
+      sellerName: order.seller?.name || "Vendeur inconnu",
+      amount: order.totalAmount || 0,
+      netAmount: order.payinTransaction?.netAmount || 0,
+      status: order.status,
+      isConfirmedByClient: order.isConfirmedByClient || false,
+    };
+
     res.status(200).json({
       success: true,
-      order,
+      order: orderForFlutter,
     });
   } catch (err) {
     console.error("❌ GET /orders/:orderId:", err);
@@ -121,7 +147,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     const order = await Order.findById(req.params.orderId).session(session);
     if (!order) throw new Error("Commande introuvable");
 
-    // 🔐 Seul le client peut confirmer
     if (order.client.toString() !== req.user._id.toString()) {
       throw new Error("Accès non autorisé");
     }
@@ -134,7 +159,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       throw new Error("Commande non livrée");
     }
 
-    // 🔍 Transaction PayIn validée
     const transaction = await PayinTransaction.findOne({
       _id: order.payinTransaction,
       status: "SUCCESS",
@@ -154,11 +178,8 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       throw new Error("Solde bloqué insuffisant");
     }
 
-    // 💰 Libération des fonds (ESCROW)
     seller.balance_locked -= amount;
-    seller.balance_available =
-      (seller.balance_available || 0) + amount;
-
+    seller.balance_available = (seller.balance_available || 0) + amount;
     await seller.save({ session });
 
     order.isConfirmedByClient = true;

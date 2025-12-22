@@ -40,6 +40,7 @@ const OrderSchema = new mongoose.Schema(
     totalAmount: {
       type: Number,
       required: true,
+      default: 0,
     },
 
     // 💳 Transaction CinetPay
@@ -81,7 +82,20 @@ const OrderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+// 🔹 Virtual pour sellerName (utile pour Flutter)
+OrderSchema.virtual("sellerName").get(function () {
+  // si la référence est peuplée
+  return this.seller?.name || "Vendeur inconnu";
+});
+
+// 🔹 Virtual pour netAmount (depuis PayinTransaction)
+OrderSchema.virtual("netAmount").get(function () {
+  return this.payinTransaction?.netAmount || 0;
+});
 
 module.exports = mongoose.model("Order", OrderSchema);
