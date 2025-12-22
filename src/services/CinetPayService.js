@@ -623,6 +623,8 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
         if (!exists) {
           await PlatformRevenue.create({
             transaction: tx._id,
+            payinTransactionId: tx._id,      // 🔹 Obligatoire
+            currency: tx.currency || "XOF",   // 🔹 Obligatoire
             amount: tx.fees,
             breakdown: tx.fees_breakdown,
             createdAt: new Date(),
