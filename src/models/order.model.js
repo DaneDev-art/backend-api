@@ -7,13 +7,15 @@ const OrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
 
     // 🏪 Vendeur
     seller: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Seller",
+      ref: "User", // ⚠️ IMPORTANT : cohérent avec Flutter et auth
       required: true,
+      index: true,
     },
 
     // 📦 Produits commandés
@@ -40,10 +42,23 @@ const OrderSchema = new mongoose.Schema(
     totalAmount: {
       type: Number,
       required: true,
-      default: 0,
     },
 
-    // 💳 Transaction CinetPay
+    // 💰 Montant net vendeur (UTILISÉ PAR FLUTTER)
+    netAmount: {
+      type: Number,
+      required: true,
+    },
+
+    // 💳 Identifiant transaction CinetPay
+    cinetpayTransactionId: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+
+    // 💳 Transaction CinetPay (optionnel, pour historique)
     payinTransaction: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PayinTransaction",
@@ -59,15 +74,16 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "PENDING",
-        "PAID",
-        "ASSIGNED",
-        "SHIPPED",
-        "DELIVERED",
-        "COMPLETED",
+        "PENDING",     // créée
+        "PAID",        // paiement validé
+        "ASSIGNED",    // livreur assigné
+        "SHIPPED",     // en livraison
+        "DELIVERED",   // livré
+        "COMPLETED",   // confirmé par client
         "CANCELLED",
       ],
-      default: "PENDING",
+      default: "PAID", // ⚠️ logique après PayIn ACCEPTED
+      index: true,
     },
 
     // ✅ Confirmation client
@@ -82,20 +98,25 @@ const OrderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
   }
 );
 
-// 🔹 Virtual pour sellerName (utile pour Flutter)
+/* ======================================================
+   🔹 VIRTUALS
+====================================================== */
+
+// Nom vendeur (sécurité si non peuplé)
 OrderSchema.virtual("sellerName").get(function () {
-  // si la référence est peuplée
-  return this.seller?.name || "Vendeur inconnu";
+  if (this.seller && typeof this.seller === "object") {
+    return this.seller.name || "Vendeur inconnu";
+  }
+  return "Vendeur inconnu";
 });
 
-// 🔹 Virtual pour netAmount (depuis PayinTransaction)
-OrderSchema.virtual("netAmount").get(function () {
-  return this.payinTransaction?.netAmount || 0;
-});
+/* ======================================================
+   🔹 INDEXES (performance prod)
+====================================================== */
+OrderSchema.index({ client: 1, createdAt: -1 });
+OrderSchema.index({ seller: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", OrderSchema);
