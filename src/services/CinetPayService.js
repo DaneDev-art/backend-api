@@ -560,10 +560,19 @@ CinetPayService.createSellerContact = async function(seller) {
 CinetPayService.verifyPayIn = async function (transaction_id) {
   if (!transaction_id) throw new Error("transaction_id est requis");
 
+  const axios = require("axios");
+  const PayinTransaction = require("../models/PayinTransaction");
+  const Seller = require("../models/Seller");
+  const PlatformRevenue = require("../models/PlatformRevenue");
+
+  // ======================================================
   // 🔹 URL CinetPay
+  // ======================================================
   let verifyUrl = (CINETPAY_BASE_URL || "https://api-checkout.cinetpay.com/v2")
     .replace(/\/+$/, "");
-  if (!verifyUrl.endsWith("/payment/check")) verifyUrl += "/payment/check";
+  if (!verifyUrl.endsWith("/payment/check")) {
+    verifyUrl += "/payment/check";
+  }
 
   console.log("🔍 [VerifyPayIn] TX:", transaction_id);
 
@@ -579,10 +588,13 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
         site_id: CINETPAY_SITE_ID,
         transaction_id,
       },
-      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 15000,
+      }
     );
   } catch (err) {
-    console.error("[VerifyPayIn] API error:", err.response?.data || err.message);
+    console.error("❌ [VerifyPayIn] API error:", err.response?.data || err.message);
     throw new Error("Erreur lors de la vérification PayIn");
   }
 
@@ -597,10 +609,14 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   // ======================================================
   const tx = await PayinTransaction.findOne({ transaction_id });
   if (!tx) {
-    return { success: false, message: "Transaction introuvable", raw: respData };
+    return {
+      success: false,
+      message: "Transaction introuvable",
+      raw: respData,
+    };
   }
 
-  // 🔐 IDÉMPOTENCE RÉELLE (ne bloque QUE si déjà crédité)
+  // 🔐 IDÉMPOTENCE STRICTE
   if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
     return {
       success: true,
@@ -614,32 +630,29 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   tx.raw_response = respData;
 
   // ======================================================
-  // ✅ SUCCÈS
+  // ✅ SUCCÈS → FONDS BLOQUÉS
   // ======================================================
   if (["ACCEPTED", "SUCCESS", "PAID"].includes(status)) {
     // 🔍 Vérification montant
     if (paidAmount !== Number(tx.amount)) {
-      console.error("[VerifyPayIn] Montant incohérent:", paidAmount, tx.amount);
+      console.error(
+        "❌ [VerifyPayIn] Montant incohérent:",
+        paidAmount,
+        tx.amount
+      );
       tx.status = "FAILED";
       await tx.save();
       throw new Error("Montant payé incohérent");
     }
 
-    // 💰 Crédit vendeur (UNE SEULE FOIS)
+    // 🔐 Crédit vendeur → SOLDE BLOQUÉ UNIQUEMENT
     if (!tx.sellerCredited) {
       const seller = await Seller.findById(tx.sellerId || tx.seller);
       if (!seller) throw new Error("Vendeur introuvable");
 
       const net = Number(tx.netAmount || 0);
 
-      seller.balance_locked = Math.max(
-        0,
-        (seller.balance_locked || 0) - net
-      );
-      seller.balance_available = roundCFA(
-        (seller.balance_available || 0) + net
-      );
-
+      seller.balance_locked = (seller.balance_locked || 0) + net;
       await seller.save();
 
       // 🏦 Commission plateforme (anti-doublon)
@@ -666,7 +679,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
     return {
       success: true,
-      message: "Paiement validé",
+      message: "Paiement validé – fonds bloqués",
       transaction_id,
       status,
     };
@@ -680,19 +693,6 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     tx.verifiedAt = new Date();
     await tx.save();
 
-    // 🔓 Déverrouillage si nécessaire
-    if (!tx.sellerCredited) {
-      const seller = await Seller.findById(tx.sellerId || tx.seller);
-      if (seller) {
-        const net = Number(tx.netAmount || 0);
-        seller.balance_locked = Math.max(
-          0,
-          (seller.balance_locked || 0) - net
-        );
-        await seller.save();
-      }
-    }
-
     return {
       success: false,
       message: `Paiement ${status.toLowerCase()}`,
@@ -702,7 +702,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   }
 
   // ======================================================
-  // ⏳ PENDING
+  // ⏳ EN ATTENTE
   // ======================================================
   await tx.save();
 

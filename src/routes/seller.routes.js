@@ -4,9 +4,9 @@ const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 const jwt = require("jsonwebtoken");
 
-// -------------------------
+// ======================================================
 // 🔐 Middleware d'authentification
-// -------------------------
+// ======================================================
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -38,9 +38,14 @@ const authMiddleware = (req, res, next) => {
 // ======================================================
 router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const sellerId = req.user.id;
+    if (req.user.role !== "seller") {
+      return res.status(403).json({
+        success: false,
+        error: "Accès réservé aux vendeurs",
+      });
+    }
 
-    const seller = await Seller.findById(sellerId);
+    const seller = await Seller.findById(req.user.id);
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -56,8 +61,9 @@ router.get("/me", authMiddleware, async (req, res) => {
         email: seller.email,
         phone: seller.phone,
         role: seller.role,
-        balanceAvailable: seller.balance_available || 0,
-        balanceLocked: seller.balance_locked || 0,
+        balance_available: seller.balance_available || 0,
+        balance_locked: seller.balance_locked || 0,
+        currency: "XOF",
       },
     });
   } catch (err) {
@@ -70,7 +76,7 @@ router.get("/me", authMiddleware, async (req, res) => {
 });
 
 // ======================================================
-// 💰 FONDS DU VENDEUR (POUR FUNDS PAGE)
+// 💰 FONDS DU VENDEUR (FUNDS PAGE)
 // GET /api/sellers/me/funds
 // ======================================================
 router.get("/me/funds", authMiddleware, async (req, res) => {
@@ -92,19 +98,21 @@ router.get("/me/funds", authMiddleware, async (req, res) => {
       });
     }
 
-    // 🔹 Transactions PayIn du vendeur uniquement
+    // 🔹 Transactions PayIn STRICTEMENT du vendeur connecté
     const transactions = await PayinTransaction.find({
-      sellerId,
+      sellerId: seller._id,
       status: { $in: ["SUCCESS", "PENDING"] },
     }).sort({ createdAt: -1 });
 
-    const fundsHistory = transactions.map(tx => ({
+    const history = transactions.map(tx => ({
+      orderId: tx._id,
       transactionId: tx.transaction_id,
+      type: tx.status === "SUCCESS" ? "LOCKED" : "PENDING",
+      amount: tx.netAmount,
       grossAmount: tx.amount,
-      netAmount: tx.netAmount,
       fees: tx.fees,
       currency: tx.currency || "XOF",
-      status: tx.status, // SUCCESS / PENDING
+      status: tx.status,
       date: tx.createdAt,
     }));
 
@@ -115,7 +123,7 @@ router.get("/me/funds", authMiddleware, async (req, res) => {
         locked: seller.balance_locked || 0,
         currency: "XOF",
       },
-      history: fundsHistory,
+      history,
     });
   } catch (err) {
     console.error("❌ GET /api/sellers/me/funds:", err);
@@ -127,24 +135,23 @@ router.get("/me/funds", authMiddleware, async (req, res) => {
 });
 
 // ======================================================
-// 🔍 VENDEUR PAR ID (ADMIN / USAGE INTERNE)
+// 🔍 VENDEUR PAR ID (ADMIN UNIQUEMENT)
 // GET /api/sellers/:id
 // ======================================================
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        error: "Accès administrateur requis",
+      });
+    }
+
     const seller = await Seller.findById(req.params.id);
     if (!seller) {
       return res.status(404).json({
         success: false,
         error: "Vendeur introuvable",
-      });
-    }
-
-    // 🔒 Sécurité : seul le vendeur concerné ou un admin
-    if (req.user.role !== "admin" && req.user.id !== seller._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: "Accès non autorisé",
       });
     }
 
@@ -155,7 +162,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const fundsHistory = transactions.map(tx => ({
       transactionId: tx.transaction_id,
       netAmount: tx.netAmount,
-      currency: tx.currency || "XOF",
+      grossAmount: tx.amount,
+      fees: tx.fees,
       status: tx.status,
       date: tx.createdAt,
     }));
@@ -167,9 +175,8 @@ router.get("/:id", authMiddleware, async (req, res) => {
         name: seller.name,
         email: seller.email,
         phone: seller.phone,
-        role: seller.role,
-        balanceAvailable: seller.balance_available || 0,
-        balanceLocked: seller.balance_locked || 0,
+        balance_available: seller.balance_available || 0,
+        balance_locked: seller.balance_locked || 0,
         fundsHistory,
       },
     });

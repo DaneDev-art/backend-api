@@ -15,10 +15,10 @@ const PayinTransaction = require("../models/PayinTransaction");
 // ======================================================
 router.get("/me", verifyToken, async (req, res) => {
   try {
-    const orders = await Order.find({ client: req.user._id })
-      .sort({ createdAt: -1 });
+    const orders = await Order.find({
+      client: req.user._id,
+    }).sort({ createdAt: -1 });
 
-    // 🔥 évite le 304
     res.set("Cache-Control", "no-store");
 
     res.status(200).json({
@@ -35,13 +35,23 @@ router.get("/me", verifyToken, async (req, res) => {
 });
 
 // ======================================================
-// 📦 2. Commandes du vendeur
+// 📦 2. Commandes du vendeur connecté
 // GET /api/orders/seller
 // ======================================================
 router.get("/seller", verifyToken, async (req, res) => {
   try {
-    const orders = await Order.find({ seller: req.user._id })
-      .sort({ createdAt: -1 });
+    // 🔐 L'utilisateur doit être un vendeur
+    const seller = await Seller.findOne({ user: req.user._id });
+    if (!seller) {
+      return res.status(403).json({
+        success: false,
+        error: "Accès vendeur requis",
+      });
+    }
+
+    const orders = await Order.find({
+      seller: seller._id,
+    }).sort({ createdAt: -1 });
 
     res.set("Cache-Control", "no-store");
 
@@ -59,17 +69,30 @@ router.get("/seller", verifyToken, async (req, res) => {
 });
 
 // ======================================================
-// 📦 3. Détail commande
+// 📦 3. Détail commande (client OU vendeur)
 // GET /api/orders/:orderId
 // ======================================================
 router.get("/:orderId", verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId);
-
     if (!order) {
       return res.status(404).json({
         success: false,
         error: "Commande introuvable",
+      });
+    }
+
+    const isClient =
+      order.client.toString() === req.user._id.toString();
+
+    const seller = await Seller.findOne({ user: req.user._id });
+    const isSeller =
+      seller && order.seller.toString() === seller._id.toString();
+
+    if (!isClient && !isSeller) {
+      return res.status(403).json({
+        success: false,
+        error: "Accès non autorisé",
       });
     }
 
@@ -87,7 +110,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 });
 
 // ======================================================
-// ✅ 4. Confirmation client
+// ✅ 4. Confirmation client (libération des fonds)
 // POST /api/orders/:orderId/confirm
 // ======================================================
 router.post("/:orderId/confirm", verifyToken, async (req, res) => {
@@ -98,6 +121,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     const order = await Order.findById(req.params.orderId).session(session);
     if (!order) throw new Error("Commande introuvable");
 
+    // 🔐 Seul le client peut confirmer
     if (order.client.toString() !== req.user._id.toString()) {
       throw new Error("Accès non autorisé");
     }
@@ -110,25 +134,31 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       throw new Error("Commande non livrée");
     }
 
+    // 🔍 Transaction PayIn validée
     const transaction = await PayinTransaction.findOne({
       _id: order.payinTransaction,
       status: "SUCCESS",
+      sellerCredited: true,
     }).session(session);
 
-    if (!transaction) throw new Error("Transaction invalide");
+    if (!transaction) {
+      throw new Error("Transaction invalide ou non finalisée");
+    }
 
     const seller = await Seller.findById(order.seller).session(session);
     if (!seller) throw new Error("Vendeur introuvable");
 
-    const amount = transaction.netAmount;
+    const amount = Number(transaction.netAmount || 0);
 
     if ((seller.balance_locked || 0) < amount) {
       throw new Error("Solde bloqué insuffisant");
     }
 
-    // 💰 Libération des fonds
+    // 💰 Libération des fonds (ESCROW)
     seller.balance_locked -= amount;
-    seller.balance_available = (seller.balance_available || 0) + amount;
+    seller.balance_available =
+      (seller.balance_available || 0) + amount;
+
     await seller.save({ session });
 
     order.isConfirmedByClient = true;
