@@ -291,30 +291,44 @@ exports.updateProfilePhoto = async (req, res) => {
 };
 
 // ======================================================
-// 🔹 SYNC SELLER
+// 🔹 SYNC SELLER (FIXED & SAFE)
 // ======================================================
 const syncSeller = async (user) => {
   try {
-    const prefix = "228";
-    const fullNumber = user.phone ? prefix + user.phone : "";
+    if (!user || user.role !== "seller") return;
 
-    let seller = await Seller.findById(user._id);
+    const prefix = user.prefix || "228";
+    const phone = user.phone ? String(user.phone).trim() : "";
+    const fullNumber = phone ? `${prefix}${phone}` : "";
 
-    if (!seller) {
-      seller = await Seller.create({
-        _id: user._id,
-        name: user.ownerName || user.shopName || user.email.split("@")[0],
-        email: user.email,
-        phone: user.phone || "",
-        prefix,
-        fullNumber,
-        balance_locked: 0,
-        balance_available: 0,
-        payout_method: "MOBILE_MONEY",
-      });
-    }
+    const sellerData = {
+      _id: user._id, // 🔥 CRITIQUE : même ID que users
+      name: user.ownerName || user.shopName || user.email.split("@")[0],
+      email: user.email,
+      phone,
+      prefix,
+      fullNumber,
+      role: "seller",
+      payout_method: "MOBILE_MONEY",
+    };
+
+    // ✅ UPSERT : crée ou met à jour sans casser les soldes
+    await Seller.findByIdAndUpdate(
+      user._id,
+      {
+        $set: sellerData,
+        $setOnInsert: {
+          balance_locked: 0,
+          balance_available: 0,
+          cinetpay_contact_added: false,
+          cinetpay_contact_id: null,
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true, new: true }
+    );
   } catch (err) {
-    console.error("Seller sync error:", err.message);
+    console.error("❌ Seller sync error:", err.message);
   }
 };
 
