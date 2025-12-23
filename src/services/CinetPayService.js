@@ -411,6 +411,10 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 VALIDATION PANIER (🔥 CRITIQUE)
   // =============================
+
+  // 🔧 FIX — normalisation réelle du panier
+  items = items || arguments[0]?.items;
+
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Le panier (items) est requis");
   }
