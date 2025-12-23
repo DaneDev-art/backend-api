@@ -3,14 +3,22 @@ const mongoose = require("mongoose");
 
 const SellerSchema = new mongoose.Schema(
   {
+    // 🔹 Référence vers l'utilisateur
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true, // chaque User ne peut avoir qu'un Seller
+    },
+
     // 🔹 Informations de base
     name: { type: String, required: true, trim: true },
     surname: { type: String, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
 
     // 🔹 Téléphone et identifiants
-    phone: { type: String, required: true, trim: true },     // Numéro sans préfixe
-    prefix: { type: String, required: true, trim: true },    // Exemple : "228"
+    phone: { type: String, required: true, trim: true },
+    prefix: { type: String, required: true, trim: true },
     fullNumber: {
       type: String,
       unique: true,
@@ -49,7 +57,7 @@ SellerSchema.pre("save", function (next) {
   next();
 });
 
-// 🔹 Index pour recherche rapide sur email ou fullNumber
+// 🔹 Index pour recherche rapide
 SellerSchema.index({ email: 1, fullNumber: 1 });
 
 module.exports = mongoose.model("Seller", SellerSchema);

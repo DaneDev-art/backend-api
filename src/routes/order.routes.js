@@ -1,4 +1,3 @@
-// routes/order.routes.js
 const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
@@ -16,8 +15,8 @@ const PayinTransaction = require("../models/PayinTransaction");
 router.get("/me", verifyToken, async (req, res) => {
   try {
     const orders = await Order.find({ client: req.user._id })
-      .populate("seller", "name") // récupère le nom du vendeur
-      .populate("payinTransaction", "netAmount") // récupère netAmount
+      .populate("seller", "name")
+      .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
 
     res.set("Cache-Control", "no-store");
@@ -27,6 +26,7 @@ router.get("/me", verifyToken, async (req, res) => {
       sellerName: o.seller?.name || "Vendeur inconnu",
       amount: o.totalAmount || 0,
       netAmount: o.payinTransaction?.netAmount || 0,
+      shippingFee: o.shippingFee || 0, // ajouté
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
     }));
@@ -67,6 +67,7 @@ router.get("/seller", verifyToken, async (req, res) => {
       sellerName: seller.name,
       amount: o.totalAmount || 0,
       netAmount: o.payinTransaction?.netAmount || 0,
+      shippingFee: o.shippingFee || 0, // ajouté
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
     }));
@@ -94,7 +95,12 @@ router.get("/:orderId", verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
       .populate("seller", "name")
-      .populate("payinTransaction", "netAmount");
+      .populate({
+        path: "items.product",
+        select: "name image price",
+      })
+      .populate("payinTransaction", "netAmount"); // ajouté pour netAmount
+
     if (!order) {
       return res.status(404).json({
         success: false,
@@ -104,7 +110,8 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 
     const isClient = order.client.toString() === req.user._id.toString();
     const seller = await Seller.findOne({ user: req.user._id });
-    const isSeller = seller && order.seller._id.toString() === seller._id.toString();
+    const isSeller =
+      seller && order.seller._id.toString() === seller._id.toString();
 
     if (!isClient && !isSeller) {
       return res.status(403).json({
@@ -118,8 +125,18 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       sellerName: order.seller?.name || "Vendeur inconnu",
       amount: order.totalAmount || 0,
       netAmount: order.payinTransaction?.netAmount || 0,
+      shippingFee: order.shippingFee || 0, // ajouté
       status: order.status,
       isConfirmedByClient: order.isConfirmedByClient || false,
+      items: order.items.map((i) => ({
+        productId: i.product?._id,
+        productName: i.product?.name || "Produit inconnu",
+        productImage: i.product?.image || null,
+        quantity: i.quantity,
+        price: i.price,
+        total: i.quantity * i.price,
+      })),
+      createdAt: order.createdAt,
     };
 
     res.status(200).json({
@@ -166,11 +183,13 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     }).session(session);
 
     if (!transaction) {
-      throw new Error("Transaction invalide ou non finalisée");
+      throw new Error(
+        `Transaction invalide ou non finalisée (Order: ${order._id})`
+      );
     }
 
     const seller = await Seller.findById(order.seller).session(session);
-    if (!seller) throw new Error("Vendeur introuvable");
+    if (!seller) throw new Error(`Vendeur introuvable (Order: ${order._id})`);
 
     const amount = Number(transaction.netAmount || 0);
 

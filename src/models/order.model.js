@@ -13,7 +13,7 @@ const OrderSchema = new mongoose.Schema(
     // 🏪 Vendeur
     seller: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User", // ⚠️ IMPORTANT : cohérent avec Flutter et auth
+      ref: "Seller", // ✅ référence correcte
       required: true,
       index: true,
     },
@@ -44,10 +44,16 @@ const OrderSchema = new mongoose.Schema(
       required: true,
     },
 
-    // 💰 Montant net vendeur (UTILISÉ PAR FLUTTER)
+    // 💰 Montant net vendeur
     netAmount: {
       type: Number,
       required: true,
+    },
+
+    // 💰 Frais de livraison
+    shippingFee: {
+      type: Number,
+      default: 0,
     },
 
     // 💳 Identifiant transaction CinetPay
@@ -58,7 +64,7 @@ const OrderSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 💳 Transaction CinetPay (optionnel, pour historique)
+    // 💳 Transaction CinetPay
     payinTransaction: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PayinTransaction",
@@ -74,15 +80,15 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "PENDING",     // créée
-        "PAID",        // paiement validé
-        "ASSIGNED",    // livreur assigné
-        "SHIPPED",     // en livraison
-        "DELIVERED",   // livré
-        "COMPLETED",   // confirmé par client
+        "PENDING",
+        "PAID",
+        "ASSIGNED",
+        "SHIPPED",
+        "DELIVERED",
+        "COMPLETED",
         "CANCELLED",
       ],
-      default: "PAID", // ⚠️ logique après PayIn ACCEPTED
+      default: "PAID",
       index: true,
     },
 
