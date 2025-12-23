@@ -679,7 +679,8 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
           ];
 
       const totalAmount =
-        items.reduce((sum, i) => sum + i.price * i.quantity, 0) + (tx.shippingFee || 0);
+        items.reduce((sum, i) => sum + i.price * i.quantity, 0) +
+        (tx.shippingFee || 0);
 
       order = await Order.create({
         client: tx.clientId,
@@ -688,6 +689,11 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
         totalAmount,
         shippingFee: tx.shippingFee || 0,
         payinTransaction: tx._id,
+
+        // ✅ FIX CRITIQUE (schema Order)
+        cinetpayTransactionId: tx.transaction_id,
+        netAmount: tx.netAmount,
+
         status: "PAID",
         deliveryAddress: tx.customer?.address || "Adresse inconnue",
       });
