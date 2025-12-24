@@ -9,13 +9,17 @@ const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 
 // ======================================================
-// 📦 1. Commandes du client connecté
+// 📦 1. Commandes du client connecté (COMPLÈTES)
 // GET /api/orders/me
 // ======================================================
 router.get("/me", verifyToken, async (req, res) => {
   try {
     const orders = await Order.find({ client: req.user._id })
       .populate("seller", "name")
+      .populate({
+        path: "items.product",
+        select: "name image",
+      })
       .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
 
@@ -26,9 +30,21 @@ router.get("/me", verifyToken, async (req, res) => {
       sellerName: o.seller?.name || "Vendeur inconnu",
       amount: o.totalAmount || 0,
       netAmount: o.payinTransaction?.netAmount || 0,
-      shippingFee: o.shippingFee || 0, // ajouté
+      shippingFee: o.shippingFee || 0,
+      deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
+      payinTransactionId: o.payinTransaction?._id || null,
+      items: o.items.map((i) => ({
+        product: {
+          _id: i.product?._id,
+          name: i.product?.name || "Produit inconnu",
+          image: i.product?.image || null,
+        },
+        quantity: i.quantity,
+        price: i.price,
+      })),
+      createdAt: o.createdAt,
     }));
 
     res.status(200).json({
@@ -59,6 +75,10 @@ router.get("/seller", verifyToken, async (req, res) => {
     }
 
     const orders = await Order.find({ seller: seller._id })
+      .populate({
+        path: "items.product",
+        select: "name image",
+      })
       .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
 
@@ -67,9 +87,20 @@ router.get("/seller", verifyToken, async (req, res) => {
       sellerName: seller.name,
       amount: o.totalAmount || 0,
       netAmount: o.payinTransaction?.netAmount || 0,
-      shippingFee: o.shippingFee || 0, // ajouté
+      shippingFee: o.shippingFee || 0,
+      deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
+      items: o.items.map((i) => ({
+        product: {
+          _id: i.product?._id,
+          name: i.product?.name || "Produit inconnu",
+          image: i.product?.image || null,
+        },
+        quantity: i.quantity,
+        price: i.price,
+      })),
+      createdAt: o.createdAt,
     }));
 
     res.set("Cache-Control", "no-store");
@@ -99,7 +130,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
         path: "items.product",
         select: "name image price",
       })
-      .populate("payinTransaction", "netAmount"); // ajouté pour netAmount
+      .populate("payinTransaction", "netAmount");
 
     if (!order) {
       return res.status(404).json({
@@ -120,28 +151,29 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    const orderForFlutter = {
-      _id: order._id,
-      sellerName: order.seller?.name || "Vendeur inconnu",
-      amount: order.totalAmount || 0,
-      netAmount: order.payinTransaction?.netAmount || 0,
-      shippingFee: order.shippingFee || 0, // ajouté
-      status: order.status,
-      isConfirmedByClient: order.isConfirmedByClient || false,
-      items: order.items.map((i) => ({
-        productId: i.product?._id,
-        productName: i.product?.name || "Produit inconnu",
-        productImage: i.product?.image || null,
-        quantity: i.quantity,
-        price: i.price,
-        total: i.quantity * i.price,
-      })),
-      createdAt: order.createdAt,
-    };
-
     res.status(200).json({
       success: true,
-      order: orderForFlutter,
+      order: {
+        _id: order._id,
+        sellerName: order.seller?.name || "Vendeur inconnu",
+        amount: order.totalAmount || 0,
+        netAmount: order.payinTransaction?.netAmount || 0,
+        shippingFee: order.shippingFee || 0,
+        deliveryAddress: order.deliveryAddress || "Adresse inconnue",
+        status: order.status,
+        isConfirmedByClient: order.isConfirmedByClient || false,
+        payinTransactionId: order.payinTransaction?._id || null,
+        items: order.items.map((i) => ({
+          product: {
+            _id: i.product?._id,
+            name: i.product?.name || "Produit inconnu",
+            image: i.product?.image || null,
+          },
+          quantity: i.quantity,
+          price: i.price,
+        })),
+        createdAt: order.createdAt,
+      },
     });
   } catch (err) {
     console.error("❌ GET /orders/:orderId:", err);
@@ -153,7 +185,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 });
 
 // ======================================================
-// ✅ 4. Confirmation client (libération des fonds)
+// ✅ 4. Confirmation client — ESCROW OK
 // POST /api/orders/:orderId/confirm
 // ======================================================
 router.post("/:orderId/confirm", verifyToken, async (req, res) => {
@@ -183,22 +215,16 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     }).session(session);
 
     if (!transaction) {
-      throw new Error(
-        `Transaction invalide ou non finalisée (Order: ${order._id})`
-      );
+      throw new Error("Transaction invalide");
     }
 
     const seller = await Seller.findById(order.seller).session(session);
-    if (!seller) throw new Error(`Vendeur introuvable (Order: ${order._id})`);
+    if (!seller) throw new Error("Vendeur introuvable");
 
     const amount = Number(transaction.netAmount || 0);
 
-    if ((seller.balance_locked || 0) < amount) {
-      throw new Error("Solde bloqué insuffisant");
-    }
-
     seller.balance_locked -= amount;
-    seller.balance_available = (seller.balance_available || 0) + amount;
+    seller.balance_available += amount;
     await seller.save({ session });
 
     order.isConfirmedByClient = true;
@@ -215,8 +241,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     });
   } catch (err) {
     await session.abortTransaction();
-    console.error("❌ POST /orders/:orderId/confirm:", err.message);
-
     res.status(400).json({
       success: false,
       error: err.message,
