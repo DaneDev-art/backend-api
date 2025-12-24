@@ -18,7 +18,7 @@ router.get("/me", verifyToken, async (req, res) => {
       .populate("seller", "name")
       .populate({
         path: "items.product",
-        select: "name image",
+        select: "name images price", // images au lieu de image
       })
       .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
@@ -37,9 +37,9 @@ router.get("/me", verifyToken, async (req, res) => {
       payinTransactionId: o.payinTransaction?._id || null,
       items: o.items.map((i) => ({
         product: {
-          _id: i.product?._id,
-          name: i.product?.name || "Produit inconnu",
-          image: i.product?.image || null,
+          _id: i.product?._id || i.productId,
+          name: i.product?.name || i.productName || "Produit inconnu",
+          image: i.product?.images?.[0] || i.productImage || null,
         },
         quantity: i.quantity,
         price: i.price,
@@ -77,7 +77,7 @@ router.get("/seller", verifyToken, async (req, res) => {
     const orders = await Order.find({ seller: seller._id })
       .populate({
         path: "items.product",
-        select: "name image",
+        select: "name images price",
       })
       .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
@@ -93,9 +93,9 @@ router.get("/seller", verifyToken, async (req, res) => {
       isConfirmedByClient: o.isConfirmedByClient || false,
       items: o.items.map((i) => ({
         product: {
-          _id: i.product?._id,
-          name: i.product?.name || "Produit inconnu",
-          image: i.product?.image || null,
+          _id: i.product?._id || i.productId,
+          name: i.product?.name || i.productName || "Produit inconnu",
+          image: i.product?.images?.[0] || i.productImage || null,
         },
         quantity: i.quantity,
         price: i.price,
@@ -128,7 +128,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       .populate("seller", "name")
       .populate({
         path: "items.product",
-        select: "name image price",
+        select: "name images price",
       })
       .populate("payinTransaction", "netAmount");
 
@@ -165,9 +165,9 @@ router.get("/:orderId", verifyToken, async (req, res) => {
         payinTransactionId: order.payinTransaction?._id || null,
         items: order.items.map((i) => ({
           product: {
-            _id: i.product?._id,
-            name: i.product?.name || "Produit inconnu",
-            image: i.product?.image || null,
+            _id: i.product?._id || i.productId,
+            name: i.product?.name || i.productName || "Produit inconnu",
+            image: i.product?.images?.[0] || i.productImage || null,
           },
           quantity: i.quantity,
           price: i.price,
