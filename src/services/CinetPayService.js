@@ -390,7 +390,7 @@ CinetPayService.createSellerContact = async function(seller) {
 
 // ============================ PAYIN (FINAL & MONGOOSE-SAFE) ============================
  CinetPayService.createPayIn = async function ({
-  items, // 🔥 panier [{ product, quantity, price }]
+  items,
   productPrice,
   shippingFee = 0,
   currency = "XOF",
@@ -414,7 +414,6 @@ CinetPayService.createSellerContact = async function(seller) {
   // 🔹 NORMALISATION PANIER
   // =============================
   items = items || arguments[0]?.items;
-
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Le panier (items) est requis");
   }
@@ -427,26 +426,40 @@ CinetPayService.createSellerContact = async function(seller) {
 
   if (!Number.isFinite(productPrice) || productPrice <= 0)
     throw new Error("productPrice invalide");
-
   if (!Number.isFinite(shippingFee) || shippingFee < 0)
     throw new Error("shippingFee invalide");
-
   if (!sellerId) throw new Error("sellerId manquant");
 
   // =============================
   // 🔹 VENDEUR
   // =============================
-  const seller = await Seller.findById(sellerId).lean();
+  const seller = await Seller.findById(sellerId);
   if (!seller) throw new Error("Vendeur introuvable");
 
   // =============================
-  // 🔹 SNAPSHOT PRODUITS (CRITIQUE)
+  // 🔥 SNAPSHOT PRODUITS (FIX FINAL)
   // =============================
-  const productIds = items.map(i => i.product);
+  const productObjectIds = items.map(i => {
+    if (!mongoose.Types.ObjectId.isValid(i.product)) {
+      throw new Error(`ID produit invalide: ${i.product}`);
+    }
+    return new mongoose.Types.ObjectId(i.product);
+  });
 
-  const products = await Product.find({ _id: { $in: productIds } })
-    .select("name images")
+  const products = await Product.find({
+    _id: { $in: productObjectIds }
+  })
+    .select("_id name images")
     .lean();
+
+  if (products.length !== items.length) {
+    const foundIds = products.map(p => p._id.toString());
+    const missing = items
+      .map(i => i.product)
+      .filter(id => !foundIds.includes(id));
+
+    throw new Error(`Produit introuvable: ${missing.join(", ")}`);
+  }
 
   const productMap = {};
   for (const p of products) {
@@ -454,52 +467,23 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 
   const frozenItems = items.map(item => {
-    if (!item.product || !item.quantity || !item.price) {
-      throw new Error("Item panier invalide");
-    }
-
-    if (item.quantity <= 0 || item.price <= 0) {
-      throw new Error("Quantité ou prix invalide dans le panier");
-    }
-
     const product = productMap[item.product.toString()];
-    if (!product) {
-      throw new Error(`Produit introuvable: ${item.product}`);
-    }
-
     return {
-      productId: item.product,                    // ✅ ID figé
-      productName: product.name,                  // 🔒 SNAPSHOT
-      productImage: product.images?.[0] || null,  // 🔒 SNAPSHOT
-      quantity: item.quantity,
-      price: item.price,
+      productId: product._id,
+      productName: product.name,
+      productImage: product.images?.[0] || null,
+      quantity: Number(item.quantity),
+      price: Number(item.price),
     };
   });
 
   // =============================
-  // 🔐 SÉCURITÉ : TOTAL PANIER
-  // =============================
-  const computedTotal = frozenItems.reduce(
-    (sum, i) => sum + i.price * i.quantity,
-    0
-  );
-
-  if (computedTotal !== productPrice) {
-    throw new Error("Incohérence du montant du panier");
-  }
-
-  // =============================
   // 🔹 CALCUL DES FRAIS
   // =============================
-  const { totalFees, netToSeller: netFromProduct, breakdown } =
+  const { totalFees, netToSeller, breakdown } =
     calculateFees(productPrice, 0);
 
-  const netAmount = netFromProduct + shippingFee;
-  const { payinFee, payoutFee, flutterFee } = breakdown;
-
-  if (!Number.isFinite(netAmount) || netAmount < 0) {
-    throw new Error("Montant net vendeur invalide");
-  }
+  const netAmount = netToSeller + shippingFee;
 
   // =============================
   // 🔹 IDS & URLS
@@ -515,61 +499,40 @@ CinetPayService.createSellerContact = async function(seller) {
   buyerEmail = buyerEmail?.trim() || null;
   buyerPhone = buyerPhone?.replace(/\D/g, "") || null;
 
-  const customerName = buyerEmail
-    ? buyerEmail.split("@")[0]
-    : "client";
-
-  let resolvedClientId = clientId || null;
-
-  if (!resolvedClientId && (buyerEmail || buyerPhone)) {
-    resolvedClientId = await this.resolveClientObjectId(
-      null,
-      buyerEmail || buyerPhone
-    );
-  }
-
+  let resolvedClientId = clientId;
   if (!resolvedClientId) {
     resolvedClientId = new mongoose.Types.ObjectId();
   }
 
   // =============================
-  // 🔹 CRÉATION TRANSACTION (PENDING)
+  // 🔹 CRÉATION TRANSACTION
   // =============================
   const tx = await PayinTransaction.create({
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
 
-    // 🔒 PANIER FIGÉ
     items: frozenItems,
 
     transaction_id,
     amount: productPrice + shippingFee,
     netAmount,
     fees: totalFees,
-    fees_breakdown: { payinFee, payoutFee, flutterFee },
+    fees_breakdown: breakdown,
     currency,
 
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
-      name: customerName,
+      name: buyerEmail?.split("@")[0] || "client",
       address: buyerAddress || "Adresse inconnue",
     },
 
     status: "PENDING",
   });
 
-  console.log("🟡 [PayIn] Transaction créée:", {
-    transaction_id,
-    amount: tx.amount,
-    netAmount,
-    itemsCount: frozenItems.length,
-    seller: seller._id,
-  });
-
   // =============================
-  // 🔹 PAYLOAD CINETPAY
+  // 🔹 APPEL CINETPAY
   // =============================
   const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
 
@@ -582,65 +545,30 @@ CinetPayService.createSellerContact = async function(seller) {
     description: description || "Paiement eMarket",
     return_url: returnUrl,
     notify_url: notifyUrl,
-    customer_name: customerName,
-    customer_surname: "achat",
+    customer_name: tx.customer.name,
     customer_email: buyerEmail || "client@emarket.tg",
     customer_phone_number: buyerPhone || "",
-    customer_address: buyerAddress || "Adresse inconnue",
+    customer_address: tx.customer.address,
     channels: "MOBILE_MONEY",
-    metadata: JSON.stringify({
-      sellerId: seller._id.toString(),
-      shippingFee,
-    }),
   };
 
-  // =============================
-  // 🔹 APPEL API CINETPAY
-  // =============================
-  try {
-    const resp = await axios.post(payinUrl, payload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 20000,
-    });
+  const resp = await axios.post(payinUrl, payload, {
+    headers: { "Content-Type": "application/json" },
+    timeout: 20000,
+  });
 
-    const respData = resp.data;
-    tx.raw_response = respData;
+  tx.paymentUrl = resp.data?.data?.payment_url;
+  await tx.save();
 
-    const isSuccess =
-      respData?.code == 0 ||
-      respData?.code == 201 ||
-      !!respData.data?.payment_url;
-
-    if (!isSuccess) {
-      tx.status = "FAILED";
-      tx.message = respData?.message || "Erreur CinetPay";
-      await tx.save();
-      throw new Error(tx.message);
-    }
-
-    tx.payment_token = respData.data?.payment_token || null;
-    tx.paymentUrl = respData.data?.payment_url || null;
-    tx.message = respData.message || "Transaction créée";
-    await tx.save();
-
-    return {
-      success: true,
-      transaction_id,
-      payment_url: tx.paymentUrl,
-      netAmount,
-      totalFees,
-      fees_breakdown: { payinFee, payoutFee, flutterFee },
-    };
-  } catch (err) {
-    tx.status = "FAILED";
-    tx.message =
-      err.response?.data?.message ||
-      err.message ||
-      "Erreur CinetPay";
-    await tx.save();
-    throw new Error(tx.message);
-  }
+  return {
+    success: true,
+    transaction_id,
+    payment_url: tx.paymentUrl,
+    netAmount,
+    totalFees,
+  };
 };
+
 
 
    //=====================================================
