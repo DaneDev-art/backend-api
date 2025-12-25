@@ -407,7 +407,7 @@ CinetPayService.createSellerContact = async function(seller) {
   const axios = require("axios");
 
   const Seller = require("../models/Seller");
-  const Product = require("../models/Product"); // 🆕
+  const Product = require("../models/Product");
   const PayinTransaction = require("../models/PayinTransaction");
 
   // =============================
@@ -436,11 +436,11 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 VENDEUR
   // =============================
-  const seller = await Seller.findById(sellerId);
+  const seller = await Seller.findById(sellerId).lean();
   if (!seller) throw new Error("Vendeur introuvable");
 
   // =============================
-  // 🔹 SNAPSHOT PRODUITS (🔥 CRITIQUE)
+  // 🔹 SNAPSHOT PRODUITS (CRITIQUE)
   // =============================
   const productIds = items.map(i => i.product);
 
@@ -468,13 +468,25 @@ CinetPayService.createSellerContact = async function(seller) {
     }
 
     return {
-      product: item.product,                  // ref optionnelle
-      productName: product.name,               // 🔒 SNAPSHOT
-      productImage: product.images?.[0] || null, // 🔒 SNAPSHOT
+      productId: item.product,                    // ✅ ID figé
+      productName: product.name,                  // 🔒 SNAPSHOT
+      productImage: product.images?.[0] || null,  // 🔒 SNAPSHOT
       quantity: item.quantity,
       price: item.price,
     };
   });
+
+  // =============================
+  // 🔐 SÉCURITÉ : TOTAL PANIER
+  // =============================
+  const computedTotal = frozenItems.reduce(
+    (sum, i) => sum + i.price * i.quantity,
+    0
+  );
+
+  if (computedTotal !== productPrice) {
+    throw new Error("Incohérence du montant du panier");
+  }
 
   // =============================
   // 🔹 CALCUL DES FRAIS
@@ -644,12 +656,18 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   const PlatformRevenue = require("../models/PlatformRevenue");
   const Order = require("../models/order.model");
 
+  // =============================
+  // 🔹 URL CINETPAY
+  // =============================
   let verifyUrl = (CINETPAY_BASE_URL || "https://api-checkout.cinetpay.com/v2")
     .replace(/\/+$/, "");
   if (!verifyUrl.endsWith("/payment/check")) verifyUrl += "/payment/check";
 
   console.log("🔍 [VerifyPayIn] Transaction:", transaction_id);
 
+  // =============================
+  // 🔹 APPEL API CINETPAY
+  // =============================
   let response;
   try {
     response = await axios.post(
@@ -668,6 +686,9 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
   console.log("🧾 [VerifyPayIn] Statut:", status, "Montant:", paidAmount);
 
+  // =============================
+  // 🔹 TRANSACTION LOCALE
+  // =============================
   const tx = await PayinTransaction.findOne({ transaction_id });
   if (!tx) {
     return { success: false, message: "Transaction introuvable", raw: respData };
@@ -698,7 +719,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     }
 
     // ==================================================
-    // 🆕 1. CRÉATION COMMANDE (SNAPSHOT PRODUIT FIGÉ)
+    // 🆕 1. CRÉATION COMMANDE (SNAPSHOT FIGÉ)
     // ==================================================
     let order = await Order.findOne({ payinTransaction: tx._id });
 
@@ -707,18 +728,20 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
         throw new Error("Panier figé introuvable dans la transaction");
       }
 
-      const itemsSnapshot = tx.items.map((i) => ({
-        product: i.product || null, // référence facultative
+      const itemsSnapshot = tx.items.map(i => ({
+        productId: i.productId || null,          // ✅ cohérent createPayIn
         productName: i.productName || "Produit inconnu",
         productImage: i.productImage || null,
         quantity: Number(i.quantity || 1),
         price: Number(i.price || 0),
       }));
 
-      const totalAmount = itemsSnapshot.reduce(
+      const productsTotal = itemsSnapshot.reduce(
         (sum, i) => sum + i.price * i.quantity,
         0
       );
+
+      const totalAmount = productsTotal + Number(tx.shippingFee || 0);
 
       order = await Order.create({
         client: tx.clientId,
@@ -742,7 +765,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     }
 
     // ==================================================
-    // 🔒 2. CRÉDIT VENDEUR (LOCK)
+    // 🔒 2. CRÉDIT VENDEUR (ESCROW LOCK)
     // ==================================================
     if (!tx.sellerCredited) {
       const seller = await Seller.findById(tx.sellerId);
