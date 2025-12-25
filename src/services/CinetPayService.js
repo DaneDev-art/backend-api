@@ -437,27 +437,28 @@ CinetPayService.createSellerContact = async function(seller) {
   if (!seller) throw new Error("Vendeur introuvable");
 
   // =============================
-  // 🔥 SNAPSHOT PRODUITS (FIX FINAL)
+  // 🔥 SNAPSHOT PRODUITS
   // =============================
-  const productObjectIds = items.map(i => {
+  const productObjectIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
       throw new Error(`ID produit invalide: ${i.productId}`);
     }
     return new mongoose.Types.ObjectId(i.productId);
   });
 
+  // 🔹 Recherche sans filtrer sur le stock
   const products = await Product.find({
-    _id: { $in: productObjectIds }
+    _id: { $in: productObjectIds },
+    status: "actif",
   })
     .select("_id name images")
     .lean();
 
   if (products.length !== items.length) {
-    const foundIds = products.map(p => p._id.toString());
+    const foundIds = products.map((p) => p._id.toString());
     const missing = items
-      .map(i => i.productId)
-      .filter(id => !foundIds.includes(id));
-
+      .map((i) => i.productId)
+      .filter((id) => !foundIds.includes(id));
     throw new Error(`Produit introuvable: ${missing.join(", ")}`);
   }
 
@@ -466,7 +467,7 @@ CinetPayService.createSellerContact = async function(seller) {
     productMap[p._id.toString()] = p;
   }
 
-  const frozenItems = items.map(item => {
+  const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
     return {
       productId: product._id,
