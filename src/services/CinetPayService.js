@@ -440,10 +440,10 @@ CinetPayService.createSellerContact = async function(seller) {
   // 🔥 SNAPSHOT PRODUITS (FIX FINAL)
   // =============================
   const productObjectIds = items.map(i => {
-    if (!mongoose.Types.ObjectId.isValid(i.product)) {
-      throw new Error(`ID produit invalide: ${i.product}`);
+    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
+      throw new Error(`ID produit invalide: ${i.productId}`);
     }
-    return new mongoose.Types.ObjectId(i.product);
+    return new mongoose.Types.ObjectId(i.productId);
   });
 
   const products = await Product.find({
@@ -455,7 +455,7 @@ CinetPayService.createSellerContact = async function(seller) {
   if (products.length !== items.length) {
     const foundIds = products.map(p => p._id.toString());
     const missing = items
-      .map(i => i.product)
+      .map(i => i.productId)
       .filter(id => !foundIds.includes(id));
 
     throw new Error(`Produit introuvable: ${missing.join(", ")}`);
@@ -467,7 +467,7 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 
   const frozenItems = items.map(item => {
-    const product = productMap[item.product.toString()];
+    const product = productMap[item.productId.toString()];
     return {
       productId: product._id,
       productName: product.name,
@@ -480,16 +480,13 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 CALCUL DES FRAIS
   // =============================
-  const { totalFees, netToSeller, breakdown } =
-    calculateFees(productPrice, 0);
-
+  const { totalFees, netToSeller, breakdown } = calculateFees(productPrice, 0);
   const netAmount = netToSeller + shippingFee;
 
   // =============================
   // 🔹 IDS & URLS
   // =============================
   const transaction_id = this.generateTransactionId("PAYIN");
-
   returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
   notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
@@ -511,23 +508,19 @@ CinetPayService.createSellerContact = async function(seller) {
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
-
     items: frozenItems,
-
     transaction_id,
     amount: productPrice + shippingFee,
     netAmount,
     fees: totalFees,
     fees_breakdown: breakdown,
     currency,
-
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
       name: buyerEmail?.split("@")[0] || "client",
       address: buyerAddress || "Adresse inconnue",
     },
-
     status: "PENDING",
   });
 
@@ -535,7 +528,6 @@ CinetPayService.createSellerContact = async function(seller) {
   // 🔹 APPEL CINETPAY
   // =============================
   const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
-
   const payload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
@@ -568,8 +560,6 @@ CinetPayService.createSellerContact = async function(seller) {
     totalFees,
   };
 };
-
-
 
    //=====================================================
   // 			VERFYPAYIN
