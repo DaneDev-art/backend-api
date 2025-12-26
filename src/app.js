@@ -164,15 +164,15 @@ app.get("/health", (req, res) => {
 })();
 
 // =======================
-// 🔹 Exemple route GitHub : déclencher workflow
+// 🔹 Route GitHub : déclencher workflow (SÉCURISÉE)
 // =======================
-app.post("/api/github/deploy", async (req, res) => {
+app.post("/api/github/deploy", deployAuth, async (req, res) => {
   try {
     const octokit = await getGithubClient();
 
     await octokit.rest.actions.createWorkflowDispatch({
-      owner: "DaneDev-art", 
-      repo: "backend-api",   
+      owner: "DaneDev-art",
+      repo: "backend-api",
       workflow_id: "deploy.yml",
       ref: "main",
     });
@@ -183,6 +183,7 @@ app.post("/api/github/deploy", async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // =======================
 // 🔹 Gestion globale des erreurs
