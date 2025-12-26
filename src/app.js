@@ -8,7 +8,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
-const deployAuth = require("./middlewares/deployAuth");
+const deployAuth = require("./middleware/deployAuth");
 
 // 🔹 GitHub App
 const { getGithubClient } = require("./githubClient");
