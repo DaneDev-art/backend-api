@@ -413,7 +413,6 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 NORMALISATION PANIER
   // =============================
-  items = items || arguments[0]?.items;
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Le panier (items) est requis");
   }
@@ -438,6 +437,7 @@ CinetPayService.createSellerContact = async function(seller) {
 
   // =============================
   // 🔥 VALIDATION & SNAPSHOT PRODUITS
+  // (AUCUN filtre status ici)
   // =============================
   const productObjectIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
@@ -448,7 +448,6 @@ CinetPayService.createSellerContact = async function(seller) {
 
   const products = await Product.find({
     _id: { $in: productObjectIds },
-    status: "actif",
   })
     .select("_id name images")
     .lean();
@@ -466,17 +465,14 @@ CinetPayService.createSellerContact = async function(seller) {
     productMap[p._id.toString()] = p;
   }
 
-  /**
-   * ✅ STRUCTURE CONFORME AU SCHÉMA PayinTransaction
-   * items[].product est OBLIGATOIRE
-   */
+  // =============================
+  // ✅ ITEMS CONFORMES AU SCHÉMA
+  // =============================
   const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
 
     return {
-      product: product._id,                 // 🔥 FIX MAJEUR
-      productName: product.name,             // snapshot
-      productImage: product.images?.[0] || null,
+      product: product._id, // 🔥 CHAMP OBLIGATOIRE
       quantity: Number(item.quantity),
       price: Number(item.price),
     };
@@ -516,7 +512,7 @@ CinetPayService.createSellerContact = async function(seller) {
     sellerId: seller._id,
     clientId: resolvedClientId,
 
-    items: frozenItems, // ✅ SCHÉMA OK
+    items: frozenItems,
 
     transaction_id,
     amount: productPrice + shippingFee,
@@ -565,7 +561,7 @@ CinetPayService.createSellerContact = async function(seller) {
   await tx.save();
 
   // =============================
-  // ✅ RÉPONSE FLUTTER
+  // ✅ RÉPONSE FRONTEND
   // =============================
   return {
     success: true,
