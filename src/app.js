@@ -10,6 +10,9 @@ const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
 
+// 🔹 GitHub App
+const { getGithubClient } = require("./githubClient");
+
 // Charger variables d'environnement
 dotenv.config();
 const app = express();
@@ -113,9 +116,7 @@ app.use("/api/upload", require("./routes/uploadRoutes"));
 // Deliveries
 app.use("/api/deliveries", require("./routes/deliveries"));
 
-// =======================
 // 🚚 DELIVERY ASSIGNMENTS
-// =======================
 app.use(
   "/api/delivery-assignments",
   require("./routes/deliveryAssignments")
@@ -147,6 +148,40 @@ app.get("/health", (req, res) => {
     mongo_uri: process.env.MONGO_ATLAS_URI ? "configured" : "not set",
     timestamp: new Date().toISOString(),
   });
+});
+
+// =======================
+// 🔹 Test GitHub App au démarrage
+// =======================
+(async () => {
+  try {
+    const octokit = await getGithubClient();
+    const authData = await octokit.rest.apps.getAuthenticated();
+    console.log("✅ GitHub App connectée :", authData.data.name);
+  } catch (err) {
+    console.error("❌ Erreur GitHub App :", err.message);
+  }
+})();
+
+// =======================
+// 🔹 Exemple route GitHub : déclencher workflow
+// =======================
+app.post("/api/github/deploy", async (req, res) => {
+  try {
+    const octokit = await getGithubClient();
+
+    await octokit.rest.actions.createWorkflowDispatch({
+      owner: "DaneDev-art", 
+      repo: "backend-api",   
+      workflow_id: "deploy.yml",
+      ref: "main",
+    });
+
+    res.json({ success: true, message: "Workflow déclenché" });
+  } catch (err) {
+    console.error("❌ Erreur GitHub :", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // =======================
