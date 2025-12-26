@@ -1,7 +1,6 @@
 // =======================
 // src/app.js
 // =======================
-
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
@@ -9,6 +8,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
+const deployAuth = require("./middlewares/deployAuth");
 
 // 🔹 GitHub App
 const { getGithubClient } = require("./githubClient");
