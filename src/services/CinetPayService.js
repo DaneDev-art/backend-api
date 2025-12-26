@@ -437,7 +437,7 @@ CinetPayService.createSellerContact = async function(seller) {
   if (!seller) throw new Error("Vendeur introuvable");
 
   // =============================
-  // 🔥 SNAPSHOT PRODUITS
+  // 🔥 VALIDATION & SNAPSHOT PRODUITS
   // =============================
   const productObjectIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
@@ -446,7 +446,6 @@ CinetPayService.createSellerContact = async function(seller) {
     return new mongoose.Types.ObjectId(i.productId);
   });
 
-  // 🔹 Recherche sans filtrer sur le stock
   const products = await Product.find({
     _id: { $in: productObjectIds },
     status: "actif",
@@ -467,11 +466,16 @@ CinetPayService.createSellerContact = async function(seller) {
     productMap[p._id.toString()] = p;
   }
 
+  /**
+   * ✅ STRUCTURE CONFORME AU SCHÉMA PayinTransaction
+   * items[].product est OBLIGATOIRE
+   */
   const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
+
     return {
-      productId: product._id,
-      productName: product.name,
+      product: product._id,                 // 🔥 FIX MAJEUR
+      productName: product.name,             // snapshot
       productImage: product.images?.[0] || null,
       quantity: Number(item.quantity),
       price: Number(item.price),
@@ -481,13 +485,16 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 CALCUL DES FRAIS
   // =============================
-  const { totalFees, netToSeller, breakdown } = calculateFees(productPrice, 0);
+  const { totalFees, netToSeller, breakdown } =
+    calculateFees(productPrice, 0);
+
   const netAmount = netToSeller + shippingFee;
 
   // =============================
   // 🔹 IDS & URLS
   // =============================
   const transaction_id = this.generateTransactionId("PAYIN");
+
   returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
   notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
@@ -497,31 +504,34 @@ CinetPayService.createSellerContact = async function(seller) {
   buyerEmail = buyerEmail?.trim() || null;
   buyerPhone = buyerPhone?.replace(/\D/g, "") || null;
 
-  let resolvedClientId = clientId;
-  if (!resolvedClientId) {
-    resolvedClientId = new mongoose.Types.ObjectId();
-  }
+  const resolvedClientId = mongoose.Types.ObjectId.isValid(clientId)
+    ? clientId
+    : new mongoose.Types.ObjectId();
 
   // =============================
-  // 🔹 CRÉATION TRANSACTION
+  // 🔹 CRÉATION TRANSACTION (MONGO)
   // =============================
   const tx = await PayinTransaction.create({
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
-    items: frozenItems,
+
+    items: frozenItems, // ✅ SCHÉMA OK
+
     transaction_id,
     amount: productPrice + shippingFee,
     netAmount,
     fees: totalFees,
     fees_breakdown: breakdown,
     currency,
+
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
       name: buyerEmail?.split("@")[0] || "client",
       address: buyerAddress || "Adresse inconnue",
     },
+
     status: "PENDING",
   });
 
@@ -529,6 +539,7 @@ CinetPayService.createSellerContact = async function(seller) {
   // 🔹 APPEL CINETPAY
   // =============================
   const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+
   const payload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
@@ -550,9 +561,12 @@ CinetPayService.createSellerContact = async function(seller) {
     timeout: 20000,
   });
 
-  tx.paymentUrl = resp.data?.data?.payment_url;
+  tx.paymentUrl = resp.data?.data?.payment_url || null;
   await tx.save();
 
+  // =============================
+  // ✅ RÉPONSE FLUTTER
+  // =============================
   return {
     success: true,
     transaction_id,
