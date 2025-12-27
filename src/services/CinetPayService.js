@@ -389,7 +389,7 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================ PAYIN (FINAL & MONGOOSE-SAFE) ============================
- CinetPayService.createPayIn = async function ({
+CinetPayService.createPayIn = async function ({
   items,
   productPrice,
   shippingFee = 0,
@@ -442,14 +442,13 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 
   /* ======================================================
-     🔥 VALIDATION PRODUITS
-     (AUCUNE dépendance frontend)
+     🔥 VALIDATION PRODUITS (ID MONGO IMMUTABLE)
   ====================================================== */
-  const productObjectIds = items.map((i) => {
-    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
-      throw new Error(`ID produit invalide: ${i.productId}`);
+  const productObjectIds = items.map((item) => {
+    if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+      throw new Error(`ID produit invalide: ${item.productId}`);
     }
-    return new mongoose.Types.ObjectId(i.productId);
+    return new mongoose.Types.ObjectId(item.productId);
   });
 
   const products = await Product.find({
@@ -463,23 +462,41 @@ CinetPayService.createSellerContact = async function(seller) {
     const missing = items
       .map((i) => i.productId)
       .filter((id) => !foundIds.includes(id));
+
     throw new Error(`Produit introuvable: ${missing.join(", ")}`);
   }
 
+  /* ======================================================
+     🔹 MAP PRODUITS (_id → produit)
+  ====================================================== */
   const productMap = {};
-  for (const p of products) {
-    productMap[p._id.toString()] = p;
+  for (const product of products) {
+    productMap[product._id.toString()] = product;
   }
 
   /* ======================================================
-     ✅ ITEMS BACKEND STRICTS (PayinTransaction)
-     🔒 UNE SEULE SOURCE DE VÉRITÉ
+     ✅ ITEMS BACKEND FIGÉS + SNAPSHOT
+     🔒 SOURCE UNIQUE DE VÉRITÉ
   ====================================================== */
   const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
 
+    if (!product) {
+      throw new Error(`Produit introuvable après mapping: ${item.productId}`);
+    }
+
     return {
-      product: product._id,              // 🔥 Mongo ObjectId UNIQUE
+      // 🔗 Référence Mongo (populate possible)
+      product: product._id,
+
+      // 📸 SNAPSHOT IMMUTABLE (OBLIGATOIRE SCHÉMA)
+      productId: product._id.toString(),
+      productName: product.name,
+      productImage:
+        Array.isArray(product.images) && product.images.length > 0
+          ? product.images[0]
+          : null,
+
       quantity: Number(item.quantity),
       price: Number(item.price),
     };
@@ -516,10 +533,9 @@ CinetPayService.createSellerContact = async function(seller) {
   ====================================================== */
   const tx = await PayinTransaction.create({
     seller: seller._id,
-    sellerId: seller._id,
     clientId: resolvedClientId,
 
-    items: frozenItems, // 🔒 STRUCTURE BACKEND PURE
+    items: frozenItems,
 
     transaction_id,
     amount: productPrice + shippingFee,
@@ -565,6 +581,7 @@ CinetPayService.createSellerContact = async function(seller) {
   });
 
   tx.paymentUrl = resp.data?.data?.payment_url || null;
+  tx.raw_response = resp.data || null;
   await tx.save();
 
   /* ======================================================

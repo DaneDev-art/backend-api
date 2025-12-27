@@ -21,27 +21,33 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📦 PANIER (SNAPSHOT SÉCURISÉ)
+       📦 PANIER (SNAPSHOT SÉCURISÉ & IMMUTABLE)
+       👉 AUCUNE dépendance frontend
     ====================================================== */
     items: [
       {
-        // 🔗 Référence produit (optionnelle)
+        // 🔗 Référence produit Mongo (pour populate, optionnelle)
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
+          index: true,
         },
 
-        // 📸 Snapshot produit (OBLIGATOIRE)
+        // 📸 SNAPSHOT PRODUIT (SOURCE DE VÉRITÉ)
         productId: {
-          type: String,
+          type: String, // ObjectId stringifié
           required: true,
+          index: true,
         },
+
         productName: {
           type: String,
           required: true,
         },
+
         productImage: {
           type: String,
+          default: null,
         },
 
         quantity: {
@@ -51,8 +57,8 @@ const PayinTransactionSchema = new mongoose.Schema(
         },
 
         price: {
-          type: Number,
-          required: true, // prix unitaire au moment du paiement
+          type: Number, // prix unitaire figé au moment du paiement
+          required: true,
           min: 0,
         },
       },
@@ -63,13 +69,13 @@ const PayinTransactionSchema = new mongoose.Schema(
     ====================================================== */
     amount: {
       type: Number,
-      required: true, // Montant total payé
+      required: true, // total payé par le client
       min: 0,
     },
 
     netAmount: {
       type: Number,
-      required: true, // Montant net vendeur
+      required: true, // montant net vendeur
       min: 0,
     },
 
@@ -101,14 +107,17 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     payment_token: {
       type: String,
+      default: null,
     },
 
     payment_method: {
       type: String,
+      default: null,
     },
 
     api_response_id: {
       type: String,
+      default: null,
     },
 
     /* ======================================================
@@ -132,20 +141,21 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       🔐 SÉCURITÉ ESCROW (IDEMPOTENCE)
+       🔐 SÉCURITÉ ESCROW / IDEMPOTENCE
     ====================================================== */
     sellerCredited: {
       type: Boolean,
       default: false,
+      index: true,
     },
 
     /* ======================================================
        👤 INFORMATIONS CLIENT (SNAPSHOT)
     ====================================================== */
     customer: {
-      email: { type: String },
-      phone_number: { type: String },
-      name: { type: String },
+      email: { type: String, default: null },
+      phone_number: { type: String, default: null },
+      name: { type: String, default: "client" },
       address: {
         type: String,
         default: "Adresse inconnue",
@@ -162,6 +172,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     message: {
       type: String,
+      default: null,
     },
   },
   {
@@ -170,10 +181,12 @@ const PayinTransactionSchema = new mongoose.Schema(
 );
 
 /* ======================================================
-   🔹 INDEXES (PROD)
+   🔹 INDEXES (PRODUCTION)
 ====================================================== */
 PayinTransactionSchema.index({ seller: 1, createdAt: -1 });
 PayinTransactionSchema.index({ clientId: 1, createdAt: -1 });
 PayinTransactionSchema.index({ status: 1, createdAt: -1 });
+PayinTransactionSchema.index({ transaction_id: 1 });
+PayinTransactionSchema.index({ "items.productId": 1 });
 
 module.exports = mongoose.model("PayinTransaction", PayinTransactionSchema);
