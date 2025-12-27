@@ -410,34 +410,41 @@ CinetPayService.createSellerContact = async function(seller) {
   const Product = require("../models/Product");
   const PayinTransaction = require("../models/PayinTransaction");
 
-  // =============================
-  // 🔹 NORMALISATION PANIER
-  // =============================
+  /* ======================================================
+     🔹 VALIDATION PANIER
+  ====================================================== */
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Le panier (items) est requis");
   }
 
-  // =============================
-  // 🔹 VALIDATION MONTANTS
-  // =============================
+  /* ======================================================
+     🔹 VALIDATION MONTANTS
+  ====================================================== */
   productPrice = Number(productPrice);
   shippingFee = Number(shippingFee ?? 0);
 
-  if (!Number.isFinite(productPrice) || productPrice <= 0)
+  if (!Number.isFinite(productPrice) || productPrice <= 0) {
     throw new Error("productPrice invalide");
-  if (!Number.isFinite(shippingFee) || shippingFee < 0)
+  }
+  if (!Number.isFinite(shippingFee) || shippingFee < 0) {
     throw new Error("shippingFee invalide");
-  if (!sellerId) throw new Error("sellerId manquant");
+  }
+  if (!sellerId) {
+    throw new Error("sellerId manquant");
+  }
 
-  // =============================
-  // 🔹 VENDEUR
-  // =============================
+  /* ======================================================
+     🔹 VENDEUR
+  ====================================================== */
   const seller = await Seller.findById(sellerId);
-  if (!seller) throw new Error("Vendeur introuvable");
+  if (!seller) {
+    throw new Error("Vendeur introuvable");
+  }
 
-  // =============================
-  // 🔥 VALIDATION & SNAPSHOT PRODUITS
-  // =============================
+  /* ======================================================
+     🔥 VALIDATION PRODUITS
+     (AUCUNE dépendance frontend)
+  ====================================================== */
   const productObjectIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
       throw new Error(`ID produit invalide: ${i.productId}`);
@@ -464,73 +471,78 @@ CinetPayService.createSellerContact = async function(seller) {
     productMap[p._id.toString()] = p;
   }
 
-  // =============================
-  // ✅ ITEMS CONFORMES AU SCHÉMA
-  // =============================
+  /* ======================================================
+     ✅ ITEMS BACKEND STRICTS (PayinTransaction)
+     🔒 UNE SEULE SOURCE DE VÉRITÉ
+  ====================================================== */
   const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
+
     return {
-      product: product._id, // Mongo ObjectId
-      productId: product._id.toString(), // FRONTEND ID
-      productName: product.name,
-      productImage: product.images?.[0] || "",
+      product: product._id,              // 🔥 Mongo ObjectId UNIQUE
       quantity: Number(item.quantity),
       price: Number(item.price),
     };
   });
 
-  // =============================
-  // 🔹 CALCUL DES FRAIS
-  // =============================
-  const { totalFees, netToSeller, breakdown } = calculateFees(
-    productPrice,
-    0
-  );
+  /* ======================================================
+     🔹 FRAIS
+  ====================================================== */
+  const { totalFees, netToSeller, breakdown } =
+    calculateFees(productPrice, 0);
+
   const netAmount = netToSeller + shippingFee;
 
-  // =============================
-  // 🔹 IDS & URLS
-  // =============================
+  /* ======================================================
+     🔹 IDS & URLS
+  ====================================================== */
   const transaction_id = this.generateTransactionId("PAYIN");
+
   returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
   notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-  // =============================
-  // 🔹 CLIENT
-  // =============================
+  /* ======================================================
+     🔹 CLIENT
+  ====================================================== */
   buyerEmail = buyerEmail?.trim() || null;
   buyerPhone = buyerPhone?.replace(/\D/g, "") || null;
+
   const resolvedClientId = mongoose.Types.ObjectId.isValid(clientId)
     ? clientId
     : new mongoose.Types.ObjectId();
 
-  // =============================
-  // 🔹 CRÉATION TRANSACTION (MONGO)
-  // =============================
+  /* ======================================================
+     🔹 TRANSACTION MONGO
+  ====================================================== */
   const tx = await PayinTransaction.create({
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
-    items: frozenItems,
+
+    items: frozenItems, // 🔒 STRUCTURE BACKEND PURE
+
     transaction_id,
     amount: productPrice + shippingFee,
     netAmount,
     fees: totalFees,
     fees_breakdown: breakdown,
     currency,
+
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
       name: buyerEmail?.split("@")[0] || "client",
       address: buyerAddress || "Adresse inconnue",
     },
+
     status: "PENDING",
   });
 
-  // =============================
-  // 🔹 APPEL CINETPAY
-  // =============================
+  /* ======================================================
+     🔹 APPEL CINETPAY
+  ====================================================== */
   const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
+
   const payload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
@@ -555,16 +567,15 @@ CinetPayService.createSellerContact = async function(seller) {
   tx.paymentUrl = resp.data?.data?.payment_url || null;
   await tx.save();
 
-  // =============================
-  // ✅ RÉPONSE FRONTEND
-  // =============================
+  /* ======================================================
+     ✅ RÉPONSE FRONTEND
+  ====================================================== */
   return {
     success: true,
     transaction_id,
     payment_url: tx.paymentUrl,
     netAmount,
     totalFees,
-    items: frozenItems, // 🔹 renvoyé pour le frontend complet
   };
 };
 
@@ -631,7 +642,12 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
   // 🔒 Idempotence stricte
   if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
-    return { success: true, message: "Transaction déjà traitée", transaction_id, status };
+    return {
+      success: true,
+      message: "Transaction déjà traitée",
+      transaction_id,
+      status,
+    };
   }
 
   tx.cinetpay_status = status;
@@ -649,24 +665,23 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     }
 
     // ==================================================
-    // 🆕 1. CRÉATION DE LA COMMANDE (SNAPSHOT FIGÉ)
+    // 🆕 1. CRÉATION COMMANDE (STRUCTURE CONFORME)
     // ==================================================
     let order = await Order.findOne({ payinTransaction: tx._id });
+
     if (!order) {
       if (!Array.isArray(tx.items) || tx.items.length === 0) {
-        throw new Error("Panier figé introuvable dans la transaction");
+        throw new Error("Panier introuvable dans la transaction");
       }
 
-      // 🔒 Snapshot produit complet
-      const itemsSnapshot = tx.items.map((i) => ({
-        productId: i.productId || null,
-        productName: i.productName || "Produit inconnu",
-        productImage: i.productImage || null,
-        quantity: Number(i.quantity || 1),
-        price: Number(i.price || 0),
+      // ✅ ITEMS CONFORMES AU OrderSchema
+      const orderItems = tx.items.map((i) => ({
+        product: i.product, // ObjectId Mongo
+        quantity: Number(i.quantity),
+        price: Number(i.price),
       }));
 
-      const productsTotal = itemsSnapshot.reduce(
+      const productsTotal = orderItems.reduce(
         (sum, i) => sum + i.price * i.quantity,
         0
       );
@@ -677,23 +692,22 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
       order = await Order.create({
         client: tx.clientId,
         seller: tx.sellerId,
-        items: itemsSnapshot,
+        items: orderItems,
         totalAmount,
         shippingFee,
         netAmount: tx.netAmount,
         payinTransaction: tx._id,
         cinetpayTransactionId: tx.transaction_id,
         status: "PAID",
-        deliveryAddress: tx.customer?.address || "Adresse inconnue",
         isConfirmedByClient: false,
         createdAt: new Date(),
       });
 
-      console.log("✅ [VerifyPayIn] Order créée:", order._id);
+      console.log("✅ [VerifyPayIn] Commande créée:", order._id);
     }
 
     // ==================================================
-    // 🔒 2. CRÉDIT VENDEUR (ESCROW / LOCK)
+    // 🔒 2. CRÉDIT VENDEUR (ESCROW)
     // ==================================================
     if (!tx.sellerCredited) {
       const seller = await Seller.findById(tx.sellerId);
@@ -705,7 +719,10 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
       // 💰 Commission plateforme
       if (Number(tx.fees || 0) > 0) {
-        const exists = await PlatformRevenue.findOne({ transaction: tx._id });
+        const exists = await PlatformRevenue.findOne({
+          transaction: tx._id,
+        });
+
         if (!exists) {
           await PlatformRevenue.create({
             transaction: tx._id,
@@ -741,14 +758,25 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     tx.status = "FAILED";
     tx.verifiedAt = new Date();
     await tx.save();
-    return { success: false, message: `Paiement ${status.toLowerCase()}`, transaction_id, status };
+
+    return {
+      success: false,
+      message: `Paiement ${status.toLowerCase()}`,
+      transaction_id,
+      status,
+    };
   }
 
   // ======================================================
   // ⏳ EN ATTENTE
   // ======================================================
   await tx.save();
-  return { success: false, message: "Paiement en attente", transaction_id, status };
+  return {
+    success: false,
+    message: "Paiement en attente",
+    transaction_id,
+    status,
+  };
 };
 
 

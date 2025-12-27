@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 
 const OrderSchema = new mongoose.Schema(
   {
-    // 👤 Client
+    /* ======================================================
+       👤 CLIENT
+    ====================================================== */
     client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -10,53 +12,78 @@ const OrderSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🏪 Vendeur
+    /* ======================================================
+       🏪 VENDEUR
+    ====================================================== */
     seller: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Seller", // ✅ référence correcte
+      ref: "Seller",
       required: true,
       index: true,
     },
 
-    // 📦 Produits commandés
+    /* ======================================================
+       📦 PRODUITS (snapshot sécurisé)
+    ====================================================== */
     items: [
       {
+        // 🔗 Référence produit (optionnelle)
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
+        },
+
+        // 📸 Snapshot produit (OBLIGATOIRE)
+        productId: {
+          type: String,
           required: true,
         },
+        productName: {
+          type: String,
+          required: true,
+        },
+        productImage: {
+          type: String,
+        },
+
         quantity: {
           type: Number,
           required: true,
           min: 1,
         },
+
         price: {
           type: Number,
           required: true,
+          min: 0,
         },
       },
     ],
 
-    // 💰 Montants
+    /* ======================================================
+       💰 MONTANTS
+    ====================================================== */
     totalAmount: {
       type: Number,
       required: true,
+      min: 0,
     },
 
-    // 💰 Montant net vendeur
     netAmount: {
       type: Number,
       required: true,
+      min: 0,
     },
 
-    // 💰 Frais de livraison
     shippingFee: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
-    // 💳 Identifiant transaction CinetPay
+    /* ======================================================
+       💳 PAIEMENT
+    ====================================================== */
     cinetpayTransactionId: {
       type: String,
       required: true,
@@ -64,19 +91,27 @@ const OrderSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 💳 Transaction CinetPay
     payinTransaction: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PayinTransaction",
     },
 
-    // 🚚 Livraison
+    /* ======================================================
+       🚚 LIVRAISON
+    ====================================================== */
+    deliveryAddress: {
+      type: String,
+      required: true,
+    },
+
     deliveryAssignment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "DeliveryAssignment",
     },
 
-    // 📦 Statut commande
+    /* ======================================================
+       📦 STATUT
+    ====================================================== */
     status: {
       type: String,
       enum: [
@@ -92,7 +127,9 @@ const OrderSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ Confirmation client
+    /* ======================================================
+       ✅ CONFIRMATION CLIENT (ESCROW)
+    ====================================================== */
     isConfirmedByClient: {
       type: Boolean,
       default: false,
@@ -104,6 +141,8 @@ const OrderSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
@@ -111,7 +150,7 @@ const OrderSchema = new mongoose.Schema(
    🔹 VIRTUALS
 ====================================================== */
 
-// Nom vendeur (sécurité si non peuplé)
+// 🏪 Nom vendeur (safe)
 OrderSchema.virtual("sellerName").get(function () {
   if (this.seller && typeof this.seller === "object") {
     return this.seller.name || "Vendeur inconnu";
@@ -120,9 +159,10 @@ OrderSchema.virtual("sellerName").get(function () {
 });
 
 /* ======================================================
-   🔹 INDEXES (performance prod)
+   🔹 INDEXES (PROD)
 ====================================================== */
 OrderSchema.index({ client: 1, createdAt: -1 });
 OrderSchema.index({ seller: 1, createdAt: -1 });
+OrderSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", OrderSchema);
