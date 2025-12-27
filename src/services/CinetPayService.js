@@ -437,7 +437,6 @@ CinetPayService.createSellerContact = async function(seller) {
 
   // =============================
   // 🔥 VALIDATION & SNAPSHOT PRODUITS
-  // (AUCUN filtre status ici)
   // =============================
   const productObjectIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
@@ -470,9 +469,11 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   const frozenItems = items.map((item) => {
     const product = productMap[item.productId.toString()];
-
     return {
-      product: product._id, // 🔥 CHAMP OBLIGATOIRE
+      product: product._id, // Mongo ObjectId
+      productId: product._id.toString(), // FRONTEND ID
+      productName: product.name,
+      productImage: product.images?.[0] || "",
       quantity: Number(item.quantity),
       price: Number(item.price),
     };
@@ -481,16 +482,16 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   // 🔹 CALCUL DES FRAIS
   // =============================
-  const { totalFees, netToSeller, breakdown } =
-    calculateFees(productPrice, 0);
-
+  const { totalFees, netToSeller, breakdown } = calculateFees(
+    productPrice,
+    0
+  );
   const netAmount = netToSeller + shippingFee;
 
   // =============================
   // 🔹 IDS & URLS
   // =============================
   const transaction_id = this.generateTransactionId("PAYIN");
-
   returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
   notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
@@ -499,7 +500,6 @@ CinetPayService.createSellerContact = async function(seller) {
   // =============================
   buyerEmail = buyerEmail?.trim() || null;
   buyerPhone = buyerPhone?.replace(/\D/g, "") || null;
-
   const resolvedClientId = mongoose.Types.ObjectId.isValid(clientId)
     ? clientId
     : new mongoose.Types.ObjectId();
@@ -511,23 +511,19 @@ CinetPayService.createSellerContact = async function(seller) {
     seller: seller._id,
     sellerId: seller._id,
     clientId: resolvedClientId,
-
     items: frozenItems,
-
     transaction_id,
     amount: productPrice + shippingFee,
     netAmount,
     fees: totalFees,
     fees_breakdown: breakdown,
     currency,
-
     customer: {
       email: buyerEmail,
       phone_number: buyerPhone,
       name: buyerEmail?.split("@")[0] || "client",
       address: buyerAddress || "Adresse inconnue",
     },
-
     status: "PENDING",
   });
 
@@ -535,7 +531,6 @@ CinetPayService.createSellerContact = async function(seller) {
   // 🔹 APPEL CINETPAY
   // =============================
   const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
-
   const payload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
@@ -569,6 +564,7 @@ CinetPayService.createSellerContact = async function(seller) {
     payment_url: tx.paymentUrl,
     netAmount,
     totalFees,
+    items: frozenItems, // 🔹 renvoyé pour le frontend complet
   };
 };
 
@@ -623,33 +619,19 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   const status = (respData.data?.status || "").toUpperCase();
   const paidAmount = Number(respData.data?.amount || 0);
 
-  console.log(
-    "🧾 [VerifyPayIn] Statut:",
-    status,
-    "Montant payé:",
-    paidAmount
-  );
+  console.log("🧾 [VerifyPayIn] Statut:", status, "Montant payé:", paidAmount);
 
   // =============================
   // 🔹 TRANSACTION LOCALE
   // =============================
   const tx = await PayinTransaction.findOne({ transaction_id });
   if (!tx) {
-    return {
-      success: false,
-      message: "Transaction introuvable",
-      raw: respData,
-    };
+    return { success: false, message: "Transaction introuvable", raw: respData };
   }
 
   // 🔒 Idempotence stricte
   if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
-    return {
-      success: true,
-      message: "Transaction déjà traitée",
-      transaction_id,
-      status,
-    };
+    return { success: true, message: "Transaction déjà traitée", transaction_id, status };
   }
 
   tx.cinetpay_status = status;
@@ -670,13 +652,12 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     // 🆕 1. CRÉATION DE LA COMMANDE (SNAPSHOT FIGÉ)
     // ==================================================
     let order = await Order.findOne({ payinTransaction: tx._id });
-
     if (!order) {
       if (!Array.isArray(tx.items) || tx.items.length === 0) {
         throw new Error("Panier figé introuvable dans la transaction");
       }
 
-      // 🔒 Snapshot produit (AUCUNE dépendance Product)
+      // 🔒 Snapshot produit complet
       const itemsSnapshot = tx.items.map((i) => ({
         productId: i.productId || null,
         productName: i.productName || "Produit inconnu",
@@ -696,20 +677,14 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
       order = await Order.create({
         client: tx.clientId,
         seller: tx.sellerId,
-
         items: itemsSnapshot,
-
         totalAmount,
         shippingFee,
         netAmount: tx.netAmount,
-
         payinTransaction: tx._id,
         cinetpayTransactionId: tx.transaction_id,
-
         status: "PAID",
-        deliveryAddress:
-          tx.customer?.address || "Adresse inconnue",
-
+        deliveryAddress: tx.customer?.address || "Adresse inconnue",
         isConfirmedByClient: false,
         createdAt: new Date(),
       });
@@ -725,17 +700,12 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
       if (!seller) throw new Error("Vendeur introuvable");
 
       const net = Number(tx.netAmount || 0);
-      seller.balance_locked =
-        Number(seller.balance_locked || 0) + net;
-
+      seller.balance_locked = Number(seller.balance_locked || 0) + net;
       await seller.save();
 
       // 💰 Commission plateforme
       if (Number(tx.fees || 0) > 0) {
-        const exists = await PlatformRevenue.findOne({
-          transaction: tx._id,
-        });
-
+        const exists = await PlatformRevenue.findOne({ transaction: tx._id });
         if (!exists) {
           await PlatformRevenue.create({
             transaction: tx._id,
@@ -767,32 +737,20 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   // ======================================================
   // ❌ ÉCHEC / ANNULATION
   // ======================================================
-  if (
-    ["FAILED", "CANCELLED", "CANCELED", "REFUSED"].includes(status)
-  ) {
+  if (["FAILED", "CANCELLED", "CANCELED", "REFUSED"].includes(status)) {
     tx.status = "FAILED";
     tx.verifiedAt = new Date();
     await tx.save();
-
-    return {
-      success: false,
-      message: `Paiement ${status.toLowerCase()}`,
-      transaction_id,
-      status,
-    };
+    return { success: false, message: `Paiement ${status.toLowerCase()}`, transaction_id, status };
   }
 
   // ======================================================
   // ⏳ EN ATTENTE
   // ======================================================
   await tx.save();
-  return {
-    success: false,
-    message: "Paiement en attente",
-    transaction_id,
-    status,
-  };
+  return { success: false, message: "Paiement en attente", transaction_id, status };
 };
+
 
   //=====================================================
   // 			PAYOUT
