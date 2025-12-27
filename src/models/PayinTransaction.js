@@ -1,8 +1,17 @@
-// src/models/PayinTransaction.js
 const mongoose = require("mongoose");
 
 const PayinTransactionSchema = new mongoose.Schema(
   {
+    /* ======================================================
+       🔗 COMMANDE (SOURCE UNIQUE DE VÉRITÉ)
+    ====================================================== */
+    order: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      required: true,
+      index: true,
+    },
+
     /* ======================================================
        🧍‍♂️ RÉFÉRENCES
     ====================================================== */
@@ -13,56 +22,12 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    clientId: {
+    client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
     },
-
-    /* ======================================================
-       📦 PANIER (SNAPSHOT SÉCURISÉ & IMMUTABLE)
-       👉 AUCUNE dépendance frontend
-    ====================================================== */
-    items: [
-      {
-        // 🔗 Référence produit Mongo (pour populate, optionnelle)
-        product: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "Product",
-          index: true,
-        },
-
-        // 📸 SNAPSHOT PRODUIT (SOURCE DE VÉRITÉ)
-        productId: {
-          type: String, // ObjectId stringifié
-          required: true,
-          index: true,
-        },
-
-        productName: {
-          type: String,
-          required: true,
-        },
-
-        productImage: {
-          type: String,
-          default: null,
-        },
-
-        quantity: {
-          type: Number,
-          required: true,
-          min: 1,
-        },
-
-        price: {
-          type: Number, // prix unitaire figé au moment du paiement
-          required: true,
-          min: 0,
-        },
-      },
-    ],
 
     /* ======================================================
        💰 MONTANTS
@@ -75,7 +40,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     netAmount: {
       type: Number,
-      required: true, // montant net vendeur
+      required: true, // montant net vendeur (bloqué)
       min: 0,
     },
 
@@ -141,7 +106,8 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       🔐 SÉCURITÉ ESCROW / IDEMPOTENCE
+       🔐 ESCROW
+       💡 Fonds bloqués tant que client non confirmé
     ====================================================== */
     sellerCredited: {
       type: Boolean,
@@ -149,8 +115,13 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    creditedAt: {
+      type: Date,
+      default: null,
+    },
+
     /* ======================================================
-       👤 INFORMATIONS CLIENT (SNAPSHOT)
+       👤 SNAPSHOT CLIENT (AUDIT)
     ====================================================== */
     customer: {
       email: { type: String, default: null },
@@ -183,10 +154,10 @@ const PayinTransactionSchema = new mongoose.Schema(
 /* ======================================================
    🔹 INDEXES (PRODUCTION)
 ====================================================== */
+PayinTransactionSchema.index({ order: 1 });
 PayinTransactionSchema.index({ seller: 1, createdAt: -1 });
-PayinTransactionSchema.index({ clientId: 1, createdAt: -1 });
+PayinTransactionSchema.index({ client: 1, createdAt: -1 });
 PayinTransactionSchema.index({ status: 1, createdAt: -1 });
 PayinTransactionSchema.index({ transaction_id: 1 });
-PayinTransactionSchema.index({ "items.productId": 1 });
 
 module.exports = mongoose.model("PayinTransaction", PayinTransactionSchema);

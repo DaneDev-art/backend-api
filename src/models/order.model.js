@@ -110,25 +110,40 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📦 STATUT
+       📦 STATUT (ESCROW)
     ====================================================== */
     status: {
       type: String,
       enum: [
-        "PENDING",
-        "PAID",
+        "CREATED",          // commande créée, pas encore payée
+        "PAYMENT_PENDING", // redirection CinetPay
+        "PAID",             // PayIn OK → fonds BLOQUÉS
         "ASSIGNED",
         "SHIPPED",
         "DELIVERED",
-        "COMPLETED",
+        "COMPLETED",        // client confirme → fonds LIBÉRÉS
+        "DISPUTED",
         "CANCELLED",
       ],
-      default: "PAID",
+      default: "CREATED",
       index: true,
     },
 
     /* ======================================================
-       ✅ CONFIRMATION CLIENT (ESCROW)
+       🔐 ESCROW
+    ====================================================== */
+    escrow: {
+      isLocked: {
+        type: Boolean,
+        default: true,
+      },
+      releasedAt: {
+        type: Date,
+      },
+    },
+
+    /* ======================================================
+       ✅ CONFIRMATION CLIENT
     ====================================================== */
     isConfirmedByClient: {
       type: Boolean,
