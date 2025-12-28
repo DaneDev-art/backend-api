@@ -389,7 +389,7 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================
-// PAYIN — CLEAN ESCROW VERSION
+// PAYIN — CLEAN ESCROW VERSION (FINAL)
 // ============================
 
 CinetPayService.createPayIn = async function ({
@@ -403,7 +403,7 @@ CinetPayService.createPayIn = async function ({
   returnUrl,
   notifyUrl,
   sellerId,
-  clientId, // OBLIGATOIRE maintenant
+  clientId, // 🔴 OBLIGATOIRE
 }) {
   const mongoose = require("mongoose");
   const axios = require("axios");
@@ -437,7 +437,9 @@ CinetPayService.createPayIn = async function ({
   // VENDEUR
   // ==============================
   const seller = await Seller.findById(sellerId);
-  if (!seller) throw new Error("Vendeur introuvable");
+  if (!seller) {
+    throw new Error("Vendeur introuvable");
+  }
 
   // ==============================
   // PRODUITS (SOURCE OF TRUTH)
@@ -539,7 +541,16 @@ CinetPayService.createPayIn = async function ({
   });
 
   // ==============================
-  // CINETPAY
+  // CINETPAY ITEMS (OBLIGATOIRE)
+  // ==============================
+  const cinetpayItems = frozenItems.map((item) => ({
+    name: item.productName,
+    quantity: item.quantity,
+    price: item.price,
+  }));
+
+  // ==============================
+  // CINETPAY PAYLOAD
   // ==============================
   const payload = {
     apikey: CINETPAY_API_KEY,
@@ -550,12 +561,20 @@ CinetPayService.createPayIn = async function ({
     description: description || "Paiement eMarket",
     return_url: returnUrl,
     notify_url: notifyUrl,
+
     customer_email: tx.customer.email,
     customer_phone_number: tx.customer.phone_number,
     customer_address: tx.customer.address,
+
+    items: cinetpayItems, // ✅ CORRECTION CRITIQUE
     channels: "MOBILE_MONEY",
   };
 
+  console.log("📤 CINETPAY PAYLOAD", JSON.stringify(payload, null, 2));
+
+  // ==============================
+  // APPEL CINETPAY
+  // ==============================
   const resp = await axios.post(
     `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`,
     payload,
