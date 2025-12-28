@@ -20,7 +20,6 @@ router.get("/me", verifyToken, async (req, res) => {
         path: "items.product",
         select: "name images price",
       })
-      .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
 
     res.set("Cache-Control", "no-store");
@@ -28,13 +27,13 @@ router.get("/me", verifyToken, async (req, res) => {
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
       sellerName: o.seller?.name || "Vendeur inconnu",
-      amount: o.totalAmount || 0,
-      netAmount: o.payinTransaction?.netAmount || 0,
+      totalAmount: o.totalAmount || 0,
+      netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
-      payinTransactionId: o.payinTransaction?._id || null,
+      payinTransactionId: o.payinTransaction || null,
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -67,14 +66,17 @@ router.get("/me", verifyToken, async (req, res) => {
 router.get("/seller", verifyToken, async (req, res) => {
   try {
     const seller = await Seller.findOne({ user: req.user._id });
-    if (!seller) return res.status(403).json({ success: false, error: "Accès vendeur requis" });
+    if (!seller) {
+      return res
+        .status(403)
+        .json({ success: false, error: "Accès vendeur requis" });
+    }
 
     const orders = await Order.find({ seller: seller._id })
       .populate({
         path: "items.product",
         select: "name images price",
       })
-      .populate("payinTransaction", "netAmount")
       .sort({ createdAt: -1 });
 
     res.set("Cache-Control", "no-store");
@@ -82,8 +84,8 @@ router.get("/seller", verifyToken, async (req, res) => {
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
       sellerName: seller.name,
-      amount: o.totalAmount || 0,
-      netAmount: o.payinTransaction?.netAmount || 0,
+      totalAmount: o.totalAmount || 0,
+      netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
@@ -100,10 +102,16 @@ router.get("/seller", verifyToken, async (req, res) => {
       createdAt: o.createdAt,
     }));
 
-    res.status(200).json({ success: true, orders: ordersForFrontend });
+    res.status(200).json({
+      success: true,
+      orders: ordersForFrontend,
+    });
   } catch (err) {
     console.error("❌ GET /orders/seller:", err);
-    res.status(500).json({ success: false, error: "Erreur récupération commandes vendeur" });
+    res.status(500).json({
+      success: false,
+      error: "Erreur récupération commandes vendeur",
+    });
   }
 });
 
@@ -115,29 +123,42 @@ router.get("/:orderId", verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
       .populate("seller", "name")
-      .populate({ path: "items.product", select: "name images price" })
-      .populate("payinTransaction", "netAmount");
+      .populate({
+        path: "items.product",
+        select: "name images price",
+      });
 
-    if (!order) return res.status(404).json({ success: false, error: "Commande introuvable" });
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Commande introuvable" });
+    }
 
-    const isClient = order.client.toString() === req.user._id.toString();
+    const isClient =
+      order.client.toString() === req.user._id.toString();
+
     const seller = await Seller.findOne({ user: req.user._id });
-    const isSeller = seller && order.seller._id.toString() === seller._id.toString();
+    const isSeller =
+      seller && order.seller.toString() === seller._id.toString();
 
-    if (!isClient && !isSeller) return res.status(403).json({ success: false, error: "Accès non autorisé" });
+    if (!isClient && !isSeller) {
+      return res
+        .status(403)
+        .json({ success: false, error: "Accès non autorisé" });
+    }
 
     res.status(200).json({
       success: true,
       order: {
         _id: order._id,
         sellerName: order.seller?.name || "Vendeur inconnu",
-        amount: order.totalAmount || 0,
-        netAmount: order.payinTransaction?.netAmount || 0,
+        totalAmount: order.totalAmount || 0,
+        netAmount: order.netAmount || 0,
         shippingFee: order.shippingFee || 0,
         deliveryAddress: order.deliveryAddress || "Adresse inconnue",
         status: order.status,
         isConfirmedByClient: order.isConfirmedByClient || false,
-        payinTransactionId: order.payinTransaction?._id || null,
+        payinTransactionId: order.payinTransaction || null,
         items: order.items.map((i) => ({
           product: {
             _id: i.product?._id || i.productId,
@@ -152,7 +173,10 @@ router.get("/:orderId", verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ GET /orders/:orderId:", err);
-    res.status(500).json({ success: false, error: "Erreur récupération commande" });
+    res.status(500).json({
+      success: false,
+      error: "Erreur récupération commande",
+    });
   }
 });
 
@@ -166,16 +190,29 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
   try {
     const order = await Order.findById(req.params.orderId).session(session);
-    if (!order) return res.status(404).json({ success: false, error: "Commande introuvable" });
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Commande introuvable" });
+    }
 
-    if (order.client.toString() !== req.user._id.toString())
-      return res.status(403).json({ success: false, error: "Accès non autorisé" });
+    if (order.client.toString() !== req.user._id.toString()) {
+      return res
+        .status(403)
+        .json({ success: false, error: "Accès non autorisé" });
+    }
 
-    if (order.isConfirmedByClient)
-      return res.status(400).json({ success: false, error: "Commande déjà confirmée" });
+    if (order.isConfirmedByClient) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Commande déjà confirmée" });
+    }
 
-    if (order.status !== "DELIVERED")
-      return res.status(400).json({ success: false, error: "Commande non livrée" });
+    if (order.status !== "DELIVERED") {
+      return res
+        .status(400)
+        .json({ success: false, error: "Commande non livrée" });
+    }
 
     const transaction = await PayinTransaction.findOne({
       _id: order.payinTransaction,
@@ -183,14 +220,28 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       sellerCredited: true,
     }).session(session);
 
-    if (!transaction) return res.status(400).json({ success: false, error: "Transaction invalide" });
+    if (!transaction) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Transaction invalide" });
+    }
 
     const seller = await Seller.findById(order.seller).session(session);
-    if (!seller) return res.status(404).json({ success: false, error: "Vendeur introuvable" });
+    if (!seller) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Vendeur introuvable" });
+    }
 
     const amount = Number(transaction.netAmount || 0);
-    seller.balance_locked -= amount;
-    seller.balance_available += amount;
+
+    seller.balance_locked = Math.max(
+      0,
+      (seller.balance_locked || 0) - amount
+    );
+    seller.balance_available =
+      (seller.balance_available || 0) + amount;
+
     await seller.save({ session });
 
     order.isConfirmedByClient = true;
@@ -207,7 +258,10 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     });
   } catch (err) {
     await session.abortTransaction();
-    res.status(400).json({ success: false, error: err.message });
+    res.status(400).json({
+      success: false,
+      error: err.message,
+    });
   } finally {
     session.endSession();
   }
