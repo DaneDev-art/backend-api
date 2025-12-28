@@ -388,376 +388,269 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 };
 
-// ============================
-// PAYIN — CLEAN ESCROW VERSION (FINAL)
-// ============================
-
-CinetPayService.createPayIn = async function ({
-  items,
-  shippingFee = 0,
+  CinetPayService.createPayIn = async function({
+  productPrice,      // prix du produit uniquement
+  shippingFee = 0,   // frais d’envoi du vendeur
   currency = "XOF",
   buyerEmail,
   buyerPhone,
-  buyerAddress,
   description,
   returnUrl,
   notifyUrl,
   sellerId,
-  clientId, // 🔴 OBLIGATOIRE
+  clientId,
 }) {
+  if (!productPrice || !sellerId) throw new Error("Champs manquants: productPrice ou sellerId");
+
   const mongoose = require("mongoose");
   const axios = require("axios");
-
   const Seller = require("../models/Seller");
-  const Product = require("../models/Product");
   const PayinTransaction = require("../models/PayinTransaction");
-  const Order = require("../models/order.model");
 
-  // ==============================
-  // VALIDATIONS
-  // ==============================
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new Error("Panier vide");
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(sellerId)) {
-    throw new Error("sellerId invalide");
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(clientId)) {
-    throw new Error("clientId invalide");
-  }
-
-  shippingFee = Number(shippingFee);
-  if (!Number.isFinite(shippingFee) || shippingFee < 0) {
-    throw new Error("shippingFee invalide");
-  }
-
-  // ==============================
-  // VENDEUR
-  // ==============================
+  // 🔹 Vérifie le vendeur
   const seller = await Seller.findById(sellerId);
-  if (!seller) {
-    throw new Error("Vendeur introuvable");
-  }
+  if (!seller) throw new Error("Vendeur introuvable");
 
-  // ==============================
-  // PRODUITS (SOURCE OF TRUTH)
-  // ==============================
-  const productIds = items.map((i) => {
-    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
-      throw new Error(`Produit invalide: ${i.productId}`);
-    }
-    return new mongoose.Types.ObjectId(i.productId);
-  });
+  // 🔹 Calcul des frais
+  const payinFee = roundCFA(productPrice * FEES.payinCinetPay);
+  const payoutFee = roundCFA(productPrice * FEES.payoutCinetPay);
+  const flutterFee = roundCFA(productPrice * FEES.appFlutter);
+  const totalFees = roundCFA(payinFee + payoutFee + flutterFee);
 
-  const products = await Product.find({ _id: { $in: productIds } })
-    .select("_id name images price")
-    .lean();
+  // 🔹 Montant net que le vendeur reçoit = produit - totalFees + shipping
+  const netAmount = roundCFA(productPrice - totalFees + (shippingFee || 0));
 
-  if (products.length !== items.length) {
-    throw new Error("Certains produits sont introuvables");
-  }
-
-  const productMap = Object.fromEntries(
-    products.map((p) => [p._id.toString(), p])
-  );
-
-  // ==============================
-  // SNAPSHOT ITEMS + TOTAL BACKEND
-  // ==============================
-  let productTotal = 0;
-
-  const frozenItems = items.map((i) => {
-    const product = productMap[i.productId];
-    const qty = Math.max(1, Number(i.quantity));
-
-    productTotal += product.price * qty;
-
-    return {
-      product: product._id,
-      productId: product._id.toString(),
-      productName: product.name,
-      productImage: product.images?.[0] || null,
-      quantity: qty,
-      price: product.price,
-    };
-  });
-
-  const totalAmount = productTotal + shippingFee;
-
-  // ==============================
-  // FEES & NET
-  // ==============================
-  const { totalFees, netToSeller, breakdown } =
-    calculateFees(productTotal, 0);
-
-  const netAmount = netToSeller + shippingFee;
-
-  // ==============================
-  // IDS & URLS
-  // ==============================
+  // 🔹 Génère un ID unique
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  returnUrl ||= `${BASE_URL}/api/cinetpay/payin/verify`;
-  notifyUrl ||= `${BASE_URL}/api/cinetpay/payin/verify`;
+  // 🔹 Définit des URLs fallback sûres
+  returnUrl = returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  notifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-  // ==============================
-  // PAYIN TRANSACTION (ESCROW)
-  // ==============================
-  const tx = await PayinTransaction.create({
-    transaction_id,
+  // 🔹 Nettoyage infos client
+  buyerEmail = (buyerEmail || "").trim() || null;
+  buyerPhone = (buyerPhone || "").replace(/\D/g, "") || null;
+  const customerName = buyerEmail ? buyerEmail.split("@")[0] : "client";
+
+  // 🔹 Associer clientId si email/phone fourni
+  let resolvedClientId = clientId || null;
+  if (!resolvedClientId && (buyerEmail || buyerPhone)) {
+    resolvedClientId = await this.resolveClientObjectId(null, buyerEmail || buyerPhone);
+  }
+  if (!resolvedClientId) resolvedClientId = new mongoose.Types.ObjectId();
+
+  // 🔹 Crée la transaction MongoDB
+  const tx = new PayinTransaction({
     seller: seller._id,
-    clientId,
-    items: frozenItems,
-    amount: totalAmount,
+    sellerId: seller._id,
+    clientId: resolvedClientId,
+    amount: productPrice,
     netAmount,
     fees: totalFees,
-    fees_breakdown: breakdown,
+    fees_breakdown: { payinFee, payoutFee, flutterFee },
     currency,
-    status: "PENDING",
-    sellerCredited: false,
+    transaction_id,
+    description: description || `Paiement vendeur ${seller.name || seller._id}`,
+    shippingFee: shippingFee || 0,
     customer: {
-      email: buyerEmail || "client@emarket.tg",
-      phone_number: buyerPhone || "",
-      address: buyerAddress || "Adresse inconnue",
+      email: buyerEmail,
+      phone_number: buyerPhone,
+      name: customerName,
     },
+    status: "PENDING",
   });
 
-  // ==============================
-  // ORDER (EN ATTENTE DE PAIEMENT)
-  // ==============================
-  const order = await Order.create({
-    client: clientId,
-    seller: seller._id,
-    items: frozenItems,
-    totalAmount,
-    netAmount,
-    shippingFee,
-    deliveryAddress: buyerAddress || "Adresse inconnue",
-    status: "PENDING_PAYMENT",
-    isConfirmedByClient: false,
-    payinTransaction: tx._id,
-  });
+  console.log("[PayIn] Création transaction:", { transaction_id, netAmount, clientId: tx.clientId, seller: tx.seller });
+  await tx.save();
 
-  // ==============================
-  // CINETPAY ITEMS (OBLIGATOIRE)
-  // ==============================
-  const cinetpayItems = frozenItems.map((item) => ({
-    name: item.productName,
-    quantity: item.quantity,
-    price: item.price,
-  }));
-
-  // ==============================
-  // CINETPAY PAYLOAD
-  // ==============================
+  // 🔹 Construction du payload CinetPay
+  const payinUrl = `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`;
   const payload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
     transaction_id,
-    amount: totalAmount,
-    currency,
+    amount: productPrice,
+    currency: currency || "XOF",
     description: description || "Paiement eMarket",
     return_url: returnUrl,
     notify_url: notifyUrl,
-
-    customer_email: tx.customer.email,
-    customer_phone_number: tx.customer.phone_number,
-    customer_address: tx.customer.address,
-
-    items: cinetpayItems, // ✅ CORRECTION CRITIQUE
+    customer_name: customerName,
+    customer_surname: "achat",
+    customer_email: buyerEmail || "client@emarket.tg",
+    customer_phone_number: buyerPhone || "",
+    customer_address: "Lome, Togo",
     channels: "MOBILE_MONEY",
+    metadata: JSON.stringify({ sellerId: sellerId, shippingFee }),
   };
 
-  console.log("📤 CINETPAY PAYLOAD", JSON.stringify(payload, null, 2));
+  console.log("[CinetPay][createPayIn] Payload:", payload);
 
-  // ==============================
-  // APPEL CINETPAY
-  // ==============================
-  const resp = await axios.post(
-    `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`,
-    payload,
-    { timeout: 20000 }
-  );
+  try {
+    const resp = await axios.post(payinUrl, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 20000,
+    });
 
-  tx.paymentUrl = resp.data?.data?.payment_url || null;
-  tx.raw_response = resp.data;
-  await tx.save();
+    const respData = resp.data;
+    tx.raw_response = respData;
 
-  // ==============================
-  // FRONTEND RESPONSE
-  // ==============================
-  return {
-    success: true,
-    orderId: order._id,
-    transaction_id,
-    payment_url: tx.paymentUrl,
-    totalAmount,
-    netAmount,
-  };
+    const isSuccess =
+      respData.code === 0 ||
+      respData.code === "0" ||
+      respData.code === 201 ||
+      respData.code === "201" ||
+      (respData.message && respData.message.toUpperCase() === "CREATED");
+
+    if (isSuccess) {
+      tx.payment_token = respData.data?.payment_token;
+      tx.message = respData.message || "Transaction créée avec succès";
+      await tx.save();
+
+      console.log("✅ [CinetPay] Transaction créée :", { transaction_id, payment_url: respData.data?.payment_url });
+      return {
+        success: true,
+        transaction_id,
+        payment_url: respData.data?.payment_url,
+        netAmount,
+        totalFees,
+        fees_breakdown: { payinFee, payoutFee, flutterFee },
+      };
+    } else {
+      tx.status = "FAILED";
+      tx.message = respData.message || respData.description || "Erreur CinetPay";
+      await tx.save();
+      throw new Error(`CinetPay erreur: ${tx.message}`);
+    }
+  } catch (err) {
+    const body = err.response?.data || err.message;
+    console.error("[CinetPay][createPayIn] API error:", body);
+    tx.status = "FAILED";
+    tx.raw_response = body;
+    tx.message = body?.message || body?.description || body;
+    await tx.save();
+    throw new Error(`Erreur interne createPayIn: ${tx.message}`);
+  }
 };
 
-
-   //=====================================================
-// VERIFY PAYIN — CLEAN ESCROW VERSION
-//=====================================================
-
-CinetPayService.verifyPayIn = async function (transaction_id) {
-  if (!transaction_id) {
-    throw new Error("transaction_id est requis");
-  }
+CinetPayService.verifyPayIn = async function(transaction_id) {
+  if (!transaction_id) throw new Error("transaction_id est requis");
 
   const axios = require("axios");
+  const mongoose = require("mongoose");
   const PayinTransaction = require("../models/PayinTransaction");
   const Seller = require("../models/Seller");
   const PlatformRevenue = require("../models/PlatformRevenue");
-  const Order = require("../models/order.model");
 
-  // ==============================
-  // CINETPAY CHECK URL
-  // ==============================
-  let verifyUrl = (CINETPAY_BASE_URL || "https://api-checkout.cinetpay.com/v2")
-    .replace(/\/+$/, "");
+  // 🔹 URL sécurisée pour la vérification
+  let verifyUrl = CINETPAY_BASE_URL?.replace(/\/+$/, "") || "https://api-checkout.cinetpay.com/v2";
+  if (!verifyUrl.endsWith("/payment/check")) verifyUrl = `${verifyUrl}/payment/check`;
 
-  if (!verifyUrl.endsWith("/payment/check")) {
-    verifyUrl += "/payment/check";
-  }
+  console.log("🔍 [CinetPay][VerifyPayIn] URL:", verifyUrl);
+  console.log("🔍 [CinetPay][VerifyPayIn] Transaction ID:", transaction_id);
 
-  // ==============================
-  // CALL CINETPAY
-  // ==============================
-  let resp;
+  // 🔹 Appel API CinetPay
+  let response;
   try {
-    resp = await axios.post(
+    response = await axios.post(
       verifyUrl,
       {
         apikey: CINETPAY_API_KEY,
         site_id: CINETPAY_SITE_ID,
         transaction_id,
       },
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: 15000,
-      }
+      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
     );
   } catch (err) {
+    console.error("[CinetPay][VerifyPayIn] Erreur requête:", err.response?.data || err.message);
     throw new Error("Erreur lors de la vérification PayIn");
   }
 
-  const data = resp.data?.data || {};
-  const status = (data.status || "").toUpperCase();
-  const paidAmount = Number(data.amount || 0);
+  // 🔹 Analyse de la réponse
+  const respData = response.data || {};
+  const status = (respData.data?.status || "").toString().toUpperCase();
+  console.log("🧾 [CinetPay][VerifyPayIn] Statut reçu:", status);
 
-  // ==============================
-  // LOCAL TRANSACTION
-  // ==============================
+  // 🔹 Recherche de la transaction Mongo
   const tx = await PayinTransaction.findOne({ transaction_id });
   if (!tx) {
-    return {
-      success: false,
-      message: "Transaction introuvable",
-      transaction_id,
-    };
+    console.warn(`[CinetPay][VerifyPayIn] Transaction introuvable: ${transaction_id}`);
+    return { success: false, message: "Transaction introuvable", raw: respData };
   }
 
-  // ==============================
-  // IDÉMPOTENCE
-  // ==============================
-  if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
-    return {
-      success: true,
-      message: "Transaction déjà traitée",
-      transaction_id,
-      status: tx.status,
-    };
-  }
-
+  // 🔹 Sauvegarde du statut brut
   tx.cinetpay_status = status;
-  tx.raw_response = data;
+  tx.raw_response = respData;
 
-  // ==============================
-  // SUCCESS PAYIN
-  // ==============================
+  // =====================================================
+  // ✅ CAS SUCCÈS (paiement validé)
+  // =====================================================
   if (["ACCEPTED", "SUCCESS", "PAID"].includes(status)) {
-    // 🔐 Sécurité montant
-    if (paidAmount !== Number(tx.amount)) {
-      tx.status = "FAILED";
+    if (tx.status !== "SUCCESS") {
+      tx.status = "SUCCESS";
+      tx.verifiedAt = new Date();
       await tx.save();
-      throw new Error("Montant payé incohérent");
-    }
 
-    // ==========================
-    // ORDER (DÉJÀ EXISTANTE)
-    // ==========================
-    const order = await Order.findOne({ payinTransaction: tx._id });
-    if (!order) {
-      throw new Error("Commande associée introuvable");
-    }
-
-    // ==========================
-    // CREDIT SELLER (ESCROW)
-    // ==========================
-    if (!tx.sellerCredited) {
-      const seller = await Seller.findById(tx.seller);
-      if (!seller) throw new Error("Vendeur introuvable");
-
-      seller.balance_locked =
-        (seller.balance_locked || 0) + Number(tx.netAmount || 0);
-
-      await seller.save();
-
-      // ======================
-      // PLATFORM REVENUE
-      // ======================
-      if (Number(tx.fees || 0) > 0) {
-        const exists = await PlatformRevenue.findOne({
-          payinTransactionId: tx._id,
-        });
-
-        if (!exists) {
-          await PlatformRevenue.create({
-            payinTransactionId: tx._id,
-            currency: tx.currency || "XOF",
-            amount: tx.fees,
-            breakdown: tx.fees_breakdown,
-          });
+      // 🔸 Créditer le vendeur
+      try {
+        const seller = await Seller.findById(tx.seller || tx.sellerId);
+        if (seller) {
+          const net = Number(tx.netAmount || 0);
+          seller.balance_locked = Math.max(0, (seller.balance_locked || 0) - net);
+          seller.balance_available = roundCFA((seller.balance_available || 0) + net);
+          await seller.save();
+          console.log(`💰 [CinetPay][VerifyPayIn] Crédité ${net} XOF à ${seller.shopName || seller._id}`);
+        } else {
+          console.error(`[CinetPay][VerifyPayIn] Vendeur introuvable pour tx ${tx._id}`);
         }
+      } catch (err) {
+        console.error("[CinetPay][VerifyPayIn] Erreur crédit vendeur:", err.message);
       }
 
-      tx.sellerCredited = true;
+      // 🔸 Enregistrer la commission plateforme (évite double enregistrement)
+      try {
+        if (tx.fees && tx.fees > 0) {
+          const exists = await PlatformRevenue.findOne({ transaction: tx._id });
+          if (!exists) {
+            await PlatformRevenue.create({
+              transaction: tx._id,
+              amount: tx.fees,
+              breakdown: tx.fees_breakdown,
+              createdAt: new Date(),
+            });
+            console.log(`🏦 [CinetPay][VerifyPayIn] Commission enregistrée: ${tx.fees} XOF`);
+          }
+        }
+      } catch (err) {
+        console.error("[CinetPay][VerifyPayIn] Erreur enregistrement PlatformRevenue:", err.message);
+      }
     }
 
-    // ==========================
-    // FINAL STATES
-    // ==========================
-    tx.status = "SUCCESS";
-    tx.verifiedAt = new Date();
-
-    if (order.status !== "PAID") {
-      order.status = "PAID";
-      await order.save();
-    }
-
-    await tx.save();
-
-    return {
-      success: true,
-      message: "Paiement confirmé – fonds bloqués en escrow",
-      transaction_id,
-      orderId: order._id,
-      status: "SUCCESS",
-    };
+    return { success: true, message: "Paiement validé", transaction_id, status };
   }
 
-  // ==============================
-  // FAILURE
-  // ==============================
+  // =====================================================
+  // ❌ CAS ÉCHEC / ANNULATION
+  // =====================================================
   if (["FAILED", "CANCELLED", "CANCELED", "REFUSED"].includes(status)) {
-    tx.status = "FAILED";
-    tx.verifiedAt = new Date();
-    await tx.save();
+    if (tx.status !== "FAILED") {
+      tx.status = "FAILED";
+      tx.verifiedAt = new Date();
+      await tx.save();
 
+      // 🔸 Libérer le montant verrouillé sans créditer
+      try {
+        const seller = await Seller.findById(tx.seller || tx.sellerId);
+        if (seller) {
+          const net = Number(tx.netAmount || 0);
+          seller.balance_locked = Math.max(0, (seller.balance_locked || 0) - net);
+          await seller.save();
+        }
+      } catch (err) {
+        console.error("[CinetPay][VerifyPayIn] Échec déverrouillage balance vendeur:", err.message);
+      }
+    }
+
+    console.warn(`[CinetPay][VerifyPayIn] Paiement refusé/annulé: ${transaction_id}`);
     return {
       success: false,
       message: `Paiement ${status.toLowerCase()}`,
@@ -766,23 +659,23 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     };
   }
 
-  // ==============================
-  // PENDING
-  // ==============================
-  await tx.save();
+  // =====================================================
+  // ⏳ CAS PENDING / AUTRE
+  // =====================================================
+  if (tx.status !== "PENDING") {
+    tx.status = "PENDING";
+    await tx.save();
+  }
 
+  console.log(`[CinetPay][VerifyPayIn] Paiement en attente: ${transaction_id}`);
   return {
     success: false,
-    message: "Paiement en attente",
+    message: "Paiement en attente de confirmation",
     transaction_id,
     status,
   };
 };
 
-
-  //=====================================================
-  // 			PAYOUT
-  // =====================================================
   CinetPayService.createPayOutForSeller = async function({ sellerId, amount, currency = "XOF", notifyUrl = null }) {
   const Seller = require("../models/Seller");
   const PayoutTransaction = require("../models/PayoutTransaction");
@@ -961,21 +854,16 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   }
 };
 
-  // ============================ WEBHOOK (ESCROW SAFE) ============================
-
-CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
+  // ============================ WEBHOOK ============================
+CinetPayService.handleWebhook = async function(webhookPayload, headers = {}) {
   const crypto = require("crypto");
   const PayoutTransaction = require("../models/PayoutTransaction");
   const PayinTransaction = require("../models/PayinTransaction");
   const Seller = require("../models/Seller");
 
-  // ==========================
-  // SIGNATURE CHECK
-  // ==========================
+  // 🔐 Vérification signature
   if (WEBHOOK_SECRET) {
-    const signature =
-      headers["x-cinetpay-signature"] || headers["signature"];
-
+    const signature = headers["x-cinetpay-signature"] || headers["signature"];
     if (signature) {
       const computed = crypto
         .createHmac("sha256", WEBHOOK_SECRET)
@@ -988,9 +876,6 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
     }
   }
 
-  // ==========================
-  // TRANSACTION ID
-  // ==========================
   const client_transaction_id =
     webhookPayload.client_transaction_id ||
     webhookPayload.data?.client_transaction_id ||
@@ -998,26 +883,22 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
     webhookPayload.data?.transaction_id;
 
   if (!client_transaction_id) {
-    throw new Error("Webhook: transaction_id manquant");
+    throw new Error("webhook: client_transaction_id/transaction_id absent");
   }
-
-  const statusFromWebhook = (
-    webhookPayload.status ||
-    webhookPayload.data?.status ||
-    webhookPayload.message ||
-    ""
-  )
-    .toString()
-    .toUpperCase();
 
   // ======================================================
   // 🔁 PAYOUT WEBHOOK
   // ======================================================
-  const payoutTx = await PayoutTransaction.findOne({
-    client_transaction_id,
-  });
-
+  const payoutTx = await PayoutTransaction.findOne({ client_transaction_id });
   if (payoutTx) {
+    const statusFromWebhook = (
+      webhookPayload.status ||
+      webhookPayload.data?.status ||
+      webhookPayload.message ||
+      ""
+    ).toString().toUpperCase();
+
+    // ⛔ Bloquer toute modification après SUCCESS
     if (payoutTx.status === "SUCCESS") {
       return { ok: true, txType: "payout", tx: payoutTx };
     }
@@ -1026,16 +907,17 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
       payoutTx.status = "SUCCESS";
       payoutTx.completedAt = new Date();
     } else if (
-      ["FAILED", "CANCEL"].some((s) => statusFromWebhook.includes(s)) &&
+      (statusFromWebhook.includes("FAILED") || statusFromWebhook.includes("CANCEL")) &&
       payoutTx.status !== "FAILED"
     ) {
       payoutTx.status = "FAILED";
 
-      // rollback vendeur
-      const seller = await Seller.findById(payoutTx.seller);
+      // 🔁 Remboursement UNIQUE
+      const seller = await Seller.findById(payoutTx.seller || payoutTx.sellerId);
       if (seller) {
-        seller.balance_available =
-          (seller.balance_available || 0) + Number(payoutTx.amount || 0);
+        seller.balance_available = roundCFA(
+          (seller.balance_available || 0) + (payoutTx.amount || 0)
+        );
         await seller.save();
       }
     }
@@ -1048,18 +930,37 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
   }
 
   // ======================================================
-  // 🔁 PAYIN WEBHOOK (INFO ONLY)
+  // 🔁 PAYIN WEBHOOK (CONFIRMATION UNIQUEMENT)
   // ======================================================
   const payinTx = await PayinTransaction.findOne({
     transaction_id: client_transaction_id,
   });
 
   if (payinTx) {
-    // ⚠️ NE PAS toucher aux fonds ici
-    payinTx.cinetpay_status = statusFromWebhook;
-    payinTx.raw_response = webhookPayload;
-    payinTx.updatedAt = new Date();
+    const statusFromWebhook = (
+      webhookPayload.status ||
+      webhookPayload.data?.status ||
+      webhookPayload.message ||
+      ""
+    ).toString().toUpperCase();
 
+    // 🔒 NE JAMAIS toucher aux soldes ici
+    if (
+      (statusFromWebhook.includes("SUCCESS") ||
+        statusFromWebhook.includes("ACCEPTED") ||
+        statusFromWebhook.includes("PAID")) &&
+      payinTx.status !== "SUCCESS"
+    ) {
+      payinTx.status = "SUCCESS";
+      payinTx.verifiedAt = new Date();
+    } else if (
+      (statusFromWebhook.includes("FAILED") || statusFromWebhook.includes("CANCEL")) &&
+      payinTx.status !== "FAILED"
+    ) {
+      payinTx.status = "FAILED";
+    }
+
+    payinTx.raw_response = webhookPayload;
     await payinTx.save();
 
     return { ok: true, txType: "payin", tx: payinTx };
@@ -1067,6 +968,5 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
 
   return { ok: false, message: "Transaction inconnue" };
 };
-
 
 module.exports = CinetPayService;
