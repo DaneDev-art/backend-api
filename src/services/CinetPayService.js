@@ -389,7 +389,7 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================
-// PAYIN — CLEAN ESCROW VERSION (FINAL)
+// PAYIN — CLEAN ESCROW VERSION (FINAL FIXED)
 // ============================
 
 CinetPayService.createPayIn = async function ({
@@ -470,7 +470,7 @@ CinetPayService.createPayIn = async function ({
 
   const frozenItems = items.map((i) => {
     const product = productMap[i.productId];
-    const qty = Math.max(1, Number(i.quantity));
+    const qty = Math.max(1, Number(i.quantity) || 1);
 
     productTotal += product.price * qty;
 
@@ -484,7 +484,7 @@ CinetPayService.createPayIn = async function ({
     };
   });
 
-  const totalAmount = productTotal + shippingFee;
+  const totalAmount = Math.round(productTotal + shippingFee); // 🔐 sécurité entier
 
   // ==============================
   // FEES & NET
@@ -492,7 +492,7 @@ CinetPayService.createPayIn = async function ({
   const { totalFees, netToSeller, breakdown } =
     calculateFees(productTotal, 0);
 
-  const netAmount = netToSeller + shippingFee;
+  const netAmount = Math.round(netToSeller + shippingFee);
 
   // ==============================
   // IDS & URLS
@@ -541,13 +541,22 @@ CinetPayService.createPayIn = async function ({
   });
 
   // ==============================
-  // CINETPAY ITEMS (OBLIGATOIRE)
+  // CINETPAY ITEMS (FORMAT OFFICIEL)
   // ==============================
   const cinetpayItems = frozenItems.map((item) => ({
     name: item.productName,
     quantity: item.quantity,
     price: item.price,
   }));
+
+  // (OPTIONNEL) afficher livraison comme item
+  // if (shippingFee > 0) {
+  //   cinetpayItems.push({
+  //     name: "Frais de livraison",
+  //     quantity: 1,
+  //     price: shippingFee,
+  //   });
+  // }
 
   // ==============================
   // CINETPAY PAYLOAD
@@ -566,7 +575,7 @@ CinetPayService.createPayIn = async function ({
     customer_phone_number: tx.customer.phone_number,
     customer_address: tx.customer.address,
 
-    items: cinetpayItems, // ✅ CORRECTION CRITIQUE
+    items: cinetpayItems, // ✅ STRUCTURE VALIDÉE
     channels: "MOBILE_MONEY",
   };
 
@@ -580,6 +589,10 @@ CinetPayService.createPayIn = async function ({
     payload,
     { timeout: 20000 }
   );
+
+  if (!resp.data || resp.data.code !== "201") {
+    throw new Error("CinetPay Payin failed");
+  }
 
   tx.paymentUrl = resp.data?.data?.payment_url || null;
   tx.raw_response = resp.data;
@@ -599,8 +612,8 @@ CinetPayService.createPayIn = async function ({
 };
 
 
-   //=====================================================
-// VERIFY PAYIN — CLEAN ESCROW VERSION
+//=====================================================
+// VERIFY PAYIN — CLEAN ESCROW VERSION (FINAL FIXED)
 //=====================================================
 
 CinetPayService.verifyPayIn = async function (transaction_id) {
@@ -642,11 +655,11 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
       }
     );
   } catch (err) {
-    throw new Error("Erreur lors de la vérification PayIn");
+    throw new Error("Erreur lors de la vérification PayIn (CinetPay unreachable)");
   }
 
   const data = resp.data?.data || {};
-  const status = (data.status || "").toUpperCase();
+  const status = String(data.status || "").toUpperCase();
   const paidAmount = Number(data.amount || 0);
 
   // ==============================
@@ -662,7 +675,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   }
 
   // ==============================
-  // IDÉMPOTENCE
+  // IDEMPOTENCE HARD GUARD
   // ==============================
   if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
     return {
@@ -680,15 +693,16 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   // SUCCESS PAYIN
   // ==============================
   if (["ACCEPTED", "SUCCESS", "PAID"].includes(status)) {
-    // 🔐 Sécurité montant
-    if (paidAmount !== Number(tx.amount)) {
+    // 🔐 Sécurité montant (obligatoire)
+    if (Math.round(paidAmount) !== Math.round(Number(tx.amount))) {
       tx.status = "FAILED";
+      tx.verifiedAt = new Date();
       await tx.save();
       throw new Error("Montant payé incohérent");
     }
 
     // ==========================
-    // ORDER (DÉJÀ EXISTANTE)
+    // ORDER (OBLIGATOIRE)
     // ==========================
     const order = await Order.findOne({ payinTransaction: tx._id });
     if (!order) {
@@ -703,12 +717,12 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
       if (!seller) throw new Error("Vendeur introuvable");
 
       seller.balance_locked =
-        (seller.balance_locked || 0) + Number(tx.netAmount || 0);
+        Number(seller.balance_locked || 0) + Number(tx.netAmount || 0);
 
       await seller.save();
 
       // ======================
-      // PLATFORM REVENUE
+      // PLATFORM REVENUE (IDEMPOTENT)
       // ======================
       if (Number(tx.fees || 0) > 0) {
         const exists = await PlatformRevenue.findOne({
@@ -751,7 +765,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   }
 
   // ==============================
-  // FAILURE
+  // FAILURE STATES
   // ==============================
   if (["FAILED", "CANCELLED", "CANCELED", "REFUSED"].includes(status)) {
     tx.status = "FAILED";
@@ -767,7 +781,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   }
 
   // ==============================
-  // PENDING
+  // PENDING / UNKNOWN
   // ==============================
   await tx.save();
 
@@ -778,6 +792,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     status,
   };
 };
+
 
 
   //=====================================================
