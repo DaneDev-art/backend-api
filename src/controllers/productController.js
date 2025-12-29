@@ -21,39 +21,31 @@ const enrichProduct = async (product) => {
   let shopName = "";
   let country = "";
 
-  // 🔹 Récupération sellerId
+  // 🔹 sellerId
   if (product.seller) {
-    if (typeof product.seller === "string") {
-      sellerId = product.seller;
-    } else if (product.seller._id) {
-      sellerId = product.seller._id.toString();
-    }
-  } else if (product.sellerId) {
-    sellerId = product.sellerId.toString();
+    sellerId =
+      typeof product.seller === "string"
+        ? product.seller
+        : product.seller._id?.toString();
   }
 
-  // 🔹 Récupération shopName et country
-  if (product.shopName && product.shopName.trim() !== "") {
-    shopName = product.shopName;
-  }
+  // 🔹 shopName / country depuis produit
+  if (product.shopName?.trim()) shopName = product.shopName;
+  if (product.country?.trim()) country = product.country;
 
-  if (product.country && product.country.trim() !== "") {
-    country = product.country;
-  }
-
-  // 🔹 Si les champs sont encore vides, tenter de récupérer depuis la collection users
+  // 🔹 fallback depuis User
   if ((!shopName || !country) && sellerId) {
     try {
       const User = require("../models/user.model");
       const seller = await User.findById(sellerId);
       if (seller) {
-        if (!shopName) shopName = seller.shopName || "Boutique inconnue";
-        if (!country) country = seller.country || "Pays inconnu";
+        shopName ||= seller.shopName || "Boutique inconnue";
+        country ||= seller.country || "Pays inconnu";
       }
     } catch (err) {
-      console.error("❌ enrichProduct fetch user error:", err);
-      if (!shopName) shopName = "Boutique inconnue";
-      if (!country) country = "Pays inconnu";
+      console.error("❌ enrichProduct user fetch error:", err);
+      shopName ||= "Boutique inconnue";
+      country ||= "Pays inconnu";
     }
   }
 
@@ -69,22 +61,23 @@ const enrichProduct = async (product) => {
     rating: product.rating,
     numReviews: product.numReviews,
     sellerId,
-    shopName: shopName || "Boutique inconnue",
-    country: country || "Pays inconnu",
+    shopName,
+    country,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
 };
 
 // ==========================================
-// ✅ Obtenir tous les produits
+// ✅ GET — Tous les produits PAYABLES (PUBLIC)
 // ==========================================
 exports.getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 });
+    const products = await Product.find({
+      status: "actif", // 🔐 CRITIQUE
+    }).sort({ createdAt: -1 });
 
     const enriched = await Promise.all(products.map(enrichProduct));
-
     res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getAllProducts error:", err);
@@ -93,18 +86,18 @@ exports.getAllProducts = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Obtenir les produits d’un vendeur spécifique
+// ✅ GET — Produits PAYABLES d’un vendeur
 // ==========================================
 exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
 
-    const products = await Product.find({ seller: sellerId }).sort({
-      createdAt: -1,
-    });
+    const products = await Product.find({
+      seller: sellerId,
+      status: "actif", // 🔐 CRITIQUE
+    }).sort({ createdAt: -1 });
 
     const enriched = await Promise.all(products.map(enrichProduct));
-
     res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getProductsBySeller error:", err);
@@ -113,26 +106,24 @@ exports.getProductsBySeller = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Ajouter un produit (auth requis)
+// ✅ POST — Ajouter un produit (auth requis)
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
     const { name, description, price, category, images } = req.body;
-    const sellerId = req.user._id;
+    const sellerId = req.user?._id;
 
     if (!sellerId)
       return res.status(401).json({ message: "Utilisateur non authentifié" });
-    if (!name || !price)
-      return res.status(400).json({ message: "Nom et prix du produit sont obligatoires" });
 
-    // 🔹 Récupérer shopName et country depuis la collection "users"
-    const User = require("../models/user.model"); // Assurez-vous que le modèle User est importé
+    if (!name || !price)
+      return res
+        .status(400)
+        .json({ message: "Nom et prix obligatoires" });
+
+    const User = require("../models/user.model");
     const seller = await User.findById(sellerId);
 
-    const shopName = seller?.shopName || "";
-    const country = seller?.country || "";
-
-    // 🔹 Créer le produit avec shopName et country du vendeur
     const product = new Product({
       name,
       description,
@@ -140,23 +131,24 @@ exports.addProduct = async (req, res) => {
       category,
       seller: sellerId,
       images: [],
-      shopName,
-      country,
-      status: "actif",
+      shopName: seller?.shopName || "",
+      country: seller?.country || "",
+      status: "actif", // ✅ PAYABLE PAR DÉFAUT
     });
 
-    // 🔹 Upload Cloudinary si images fournies
-    if (images && images.length > 0) {
+    // 🔹 Upload images Cloudinary
+    if (Array.isArray(images)) {
       for (const img of images) {
-        const uploadRes = await cloudinary.uploader.upload(img, { folder: "products" });
-        product.images.push(uploadRes.secure_url);
+        const upload = await cloudinary.uploader.upload(img, {
+          folder: "products",
+        });
+        product.images.push(upload.secure_url);
       }
     }
 
     await product.save();
 
-    const enriched = await enrichProduct(product);
-    res.status(201).json(enriched);
+    res.status(201).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ addProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -164,12 +156,12 @@ exports.addProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✏️ Modifier un produit (auth requis)
+// ✏️ PUT — Modifier un produit (auth requis)
 // ==========================================
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user._id;
+    const sellerId = req.user?._id;
     const { name, description, price, category, images } = req.body;
 
     const product = await Product.findOne({
@@ -182,13 +174,11 @@ exports.updateProduct = async (req, res) => {
         .status(404)
         .json({ message: "Produit introuvable ou non autorisé" });
 
-    // 🔹 Mettre à jour les champs classiques
     if (name) product.name = name;
     if (description) product.description = description;
     if (price) product.price = price;
     if (category) product.category = category;
 
-    // 🔹 Récupérer shopName et country depuis la collection "users"
     const User = require("../models/user.model");
     const seller = await User.findById(sellerId);
     if (seller) {
@@ -196,11 +186,12 @@ exports.updateProduct = async (req, res) => {
       product.country = seller.country || "";
     }
 
-    // 🔹 Upload Cloudinary si images fournies
-    if (images && images.length > 0) {
+    if (Array.isArray(images) && images.length > 0) {
       const uploaded = [];
       for (const img of images) {
-        const up = await cloudinary.uploader.upload(img, { folder: "products" });
+        const up = await cloudinary.uploader.upload(img, {
+          folder: "products",
+        });
         uploaded.push(up.secure_url);
       }
       product.images = uploaded;
@@ -208,8 +199,7 @@ exports.updateProduct = async (req, res) => {
 
     await product.save();
 
-    const enriched = await enrichProduct(product);
-    res.status(200).json(enriched);
+    res.status(200).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ updateProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -217,12 +207,12 @@ exports.updateProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Supprimer un produit (auth requis)
+// ❌ DELETE — Supprimer un produit (auth requis)
 // ==========================================
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user._id;
+    const sellerId = req.user?._id;
 
     const deleted = await Product.findOneAndDelete({
       _id: productId,
@@ -242,24 +232,23 @@ exports.deleteProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✅ Valider un produit (admin)
+// ✅ ADMIN — Valider un produit (PAYABLE)
 // ==========================================
 exports.validateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
 
     const product = await Product.findById(productId);
-
     if (!product)
       return res.status(404).json({ message: "Produit introuvable" });
 
-    product.status = "validé";
-
+    product.status = "actif"; // 🔥 PAYABLE
     await product.save();
 
-    res
-      .status(200)
-      .json({ message: "Produit validé avec succès", product: await enrichProduct(product) });
+    res.status(200).json({
+      message: "Produit validé et activé",
+      product: await enrichProduct(product),
+    });
   } catch (err) {
     console.error("❌ validateProduct error:", err);
     res.status(500).json({ error: err.message });
@@ -267,23 +256,23 @@ exports.validateProduct = async (req, res) => {
 };
 
 // ==========================================
-// 🚫 Bloquer un produit (admin)
+// 🚫 ADMIN — Bloquer un produit (NON PAYABLE)
 // ==========================================
 exports.blockProduct = async (req, res) => {
   try {
     const { productId } = req.params;
 
     const product = await Product.findById(productId);
-
     if (!product)
       return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "bloqué";
     await product.save();
 
-    res
-      .status(200)
-      .json({ message: "Produit bloqué avec succès", product: await enrichProduct(product) });
+    res.status(200).json({
+      message: "Produit bloqué avec succès",
+      product: await enrichProduct(product),
+    });
   } catch (err) {
     console.error("❌ blockProduct error:", err);
     res.status(500).json({ error: err.message });

@@ -3,69 +3,88 @@
 // ==========================================
 const jwt = require("jsonwebtoken");
 
-// 🔹 Middleware : vérifier que l'utilisateur est connecté
+// ==========================================
+// 🔐 Vérifier authentification utilisateur
+// ==========================================
 const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization || req.headers.Authorization;
+  const authHeader =
+    req.headers.authorization || req.headers.Authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Token manquant ou invalide" });
+    return res
+      .status(401)
+      .json({ message: "Authentification requise" });
   }
 
   const token = authHeader.split(" ")[1];
 
-  try {
-    if (!process.env.JWT_SECRET) {
-      console.error("⚠️ JWT_SECRET manquant dans l'environnement !");
-      return res
-        .status(500)
-        .json({ message: "Erreur serveur: JWT_SECRET manquant" });
-    }
+  if (!process.env.JWT_SECRET) {
+    console.error("❌ JWT_SECRET manquant dans l'environnement");
+    return res
+      .status(500)
+      .json({ message: "Erreur serveur" });
+  }
 
+  try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    // ✅ Données utilisateur injectées dans la requête
+    if (!payload?.id && !payload?._id) {
+      return res
+        .status(401)
+        .json({ message: "Token invalide" });
+    }
+
+    // ✅ Injection utilisateur normalisée
     req.user = {
       _id: payload.id || payload._id,
-      id: payload.id || payload._id, // alias pratique
-      role: payload.role,
-      email: payload.email,
+      id: payload.id || payload._id,
+      role: payload.role?.toLowerCase() || null,
+      email: payload.email || null,
     };
 
-    req.role = payload.role;
+    req.role = req.user.role;
 
     next();
   } catch (err) {
-    console.error("❌ Token invalide:", err.message);
-    return res.status(401).json({ message: "Token invalide" });
+    console.error("❌ JWT error:", err.message);
+    return res
+      .status(401)
+      .json({ message: "Session expirée ou invalide" });
   }
 };
 
-// 🔹 Middleware : vérifier que l'utilisateur est admin
+// ==========================================
+// 🔐 Vérifier rôle administrateur
+// ==========================================
 const verifyAdmin = (req, res, next) => {
-  const adminRoles = [
+  const adminRoles = new Set([
     "admin_general",
     "admin_seller",
     "admin_delivery",
     "admin_buyer",
-  ];
+  ]);
 
-  if (!req.role || !adminRoles.includes(req.role)) {
+  if (!req.role || !adminRoles.has(req.role)) {
     return res
       .status(403)
-      .json({ message: "Accès réservé aux administrateurs" });
+      .json({ message: "Accès administrateur requis" });
   }
 
   next();
 };
 
-// 🔹 Middleware : vérifier un ou plusieurs rôles spécifiques
-// Exemple : verifyRole(["buyer"]), verifyRole(["seller", "admin_seller"])
+// ==========================================
+// 🔐 Vérifier rôle spécifique
+// Usage : verifyRole(["buyer", "seller"])
+// ==========================================
 const verifyRole = (roles = []) => {
+  const allowed = new Set(roles.map((r) => r.toLowerCase()));
+
   return (req, res, next) => {
-    if (!req.role || !roles.includes(req.role)) {
+    if (!req.role || !allowed.has(req.role)) {
       return res
         .status(403)
-        .json({ message: "Accès refusé pour ce rôle" });
+        .json({ message: "Accès refusé" });
     }
     next();
   };
