@@ -189,4 +189,37 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+// ======================================================
+// 🔓 VENDEUR PUBLIC — INFOS POUR ACHAT (TOUS ROLES)
+// GET /api/sellers/:id/public
+// ======================================================
+router.get("/:id/public", async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.params.id);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        error: "Vendeur introuvable",
+      });
+    }
+
+    // Ne renvoie que les infos nécessaires pour le paiement
+    res.json({
+      success: true,
+      seller: {
+        _id: seller._id,
+        name: seller.name,
+        email: seller.email,
+        phone: seller.phone,
+      },
+    });
+  } catch (err) {
+    console.error("❌ GET /api/sellers/:id/public:", err);
+    res.status(500).json({
+      success: false,
+      error: "Erreur récupération vendeur",
+    });
+  }
+});
+
 module.exports = router;
