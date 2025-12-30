@@ -389,22 +389,9 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================
-// PAYIN — CLEAN ESCROW VERSION (FINAL FIXED)
+// PAYIN — CLEAN ESCROW VERSION (ADAPTÉ FLUTTER)
 // ============================
-
-CinetPayService.createPayIn = async function ({
-  items,
-  shippingFee = 0,
-  currency = "XOF",
-  buyerEmail,
-  buyerPhone,
-  buyerAddress,
-  description,
-  returnUrl,
-  notifyUrl,
-  sellerId,
-  clientId, // 🔴 OBLIGATOIRE
-}) {
+CinetPayService.createPayIn = async function (payload) {
   const mongoose = require("mongoose");
   const axios = require("axios");
 
@@ -412,6 +399,24 @@ CinetPayService.createPayIn = async function ({
   const Product = require("../models/Product");
   const PayinTransaction = require("../models/PayinTransaction");
   const Order = require("../models/order.model");
+
+  // ==============================
+  // EXTRAIRE LES CHAMPS
+  // ==============================
+  const {
+    items,
+    shippingFee = 0,
+    currency = "XOF",
+    buyerEmail,
+    buyerPhone,
+    buyerAddress,
+    description,
+    returnUrl,
+    notifyUrl,
+    sellerId,
+    clientId,
+    productPrice, // ⚡ Nouvel ajout depuis Flutter
+  } = payload;
 
   // ==============================
   // VALIDATIONS
@@ -433,6 +438,12 @@ CinetPayService.createPayIn = async function ({
     throw new Error("shippingFee invalide");
   }
 
+  if (productPrice !== undefined) {
+    if (typeof productPrice !== "number" || productPrice < 0) {
+      throw new Error("productPrice invalide");
+    }
+  }
+
   // ==============================
   // VENDEUR
   // ==============================
@@ -452,7 +463,7 @@ CinetPayService.createPayIn = async function ({
   });
 
   const products = await Product.find({ _id: { $in: productIds } })
-    .select("_id name images price seller") // 🔥 FIX: seller requis
+    .select("_id name images price seller")
     .lean();
 
   if (products.length !== items.length) {
@@ -460,7 +471,7 @@ CinetPayService.createPayIn = async function ({
   }
 
   // ==============================
-  // 🔒 FIX CRITIQUE : COHÉRENCE PRODUIT ↔ VENDEUR
+  // 🔒 COHÉRENCE PRODUIT ↔ VENDEUR
   // ==============================
   for (const product of products) {
     if (product.seller.toString() !== sellerId.toString()) {
@@ -482,7 +493,6 @@ CinetPayService.createPayIn = async function ({
   const frozenItems = items.map((i) => {
     const product = productMap[i.productId];
     const qty = Math.max(1, Number(i.quantity) || 1);
-
     productTotal += product.price * qty;
 
     return {
@@ -495,7 +505,10 @@ CinetPayService.createPayIn = async function ({
     };
   });
 
-  const totalAmount = Math.round(productTotal + shippingFee);
+  // 🔹 UTILISER productPrice venant de Flutter si disponible
+  const totalAmount = Math.round(
+    (productPrice !== undefined ? productPrice : productTotal) + shippingFee
+  );
 
   // ==============================
   // FEES & NET
@@ -563,7 +576,7 @@ CinetPayService.createPayIn = async function ({
   // ==============================
   // CINETPAY PAYLOAD
   // ==============================
-  const payload = {
+  const cpPayload = {
     apikey: CINETPAY_API_KEY,
     site_id: CINETPAY_SITE_ID,
     transaction_id,
@@ -579,14 +592,14 @@ CinetPayService.createPayIn = async function ({
     channels: "MOBILE_MONEY",
   };
 
-  console.log("📤 CINETPAY PAYLOAD", JSON.stringify(payload, null, 2));
+  console.log("📤 CINETPAY PAYLOAD", JSON.stringify(cpPayload, null, 2));
 
   // ==============================
   // APPEL CINETPAY
   // ==============================
   const resp = await axios.post(
     `${CINETPAY_BASE_URL.replace(/\/+$/, "")}/payment`,
-    payload,
+    cpPayload,
     { timeout: 20000 }
   );
 
