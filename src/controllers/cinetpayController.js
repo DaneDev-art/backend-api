@@ -32,9 +32,7 @@ module.exports = {
         items,
       } = req.body;
 
-      /* ==========================
-         🔒 AUTH
-      ========================== */
+      // 🔒 AUTH
       const clientId = req.user?.id || req.user?._id;
       if (!clientId) {
         return res
@@ -46,9 +44,7 @@ module.exports = {
         return res.status(400).json({ error: "sellerId requis" });
       }
 
-      /* ==========================
-         🔥 MAPPING MONTANT
-      ========================== */
+      // 🔥 MAPPING MONTANT
       const resolvedProductPrice =
         productPrice !== undefined ? productPrice : amount;
 
@@ -61,9 +57,7 @@ module.exports = {
         });
       }
 
-      /* ==========================
-         📦 VALIDATION PANIER (FIX)
-      ========================== */
+      // 📦 VALIDATION PANIER (FIX)
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
           error: "items requis (panier vide ou invalide)",
@@ -98,9 +92,7 @@ module.exports = {
         });
       }
 
-      /* ==========================
-         🔍 VÉRIFICATION VENDEUR
-      ========================== */
+      // 🔍 VÉRIFICATION VENDEUR
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
 
@@ -112,33 +104,24 @@ module.exports = {
         return res.status(400).json({ error: "Compte non vendeur" });
       }
 
-      /* ==========================
-         🔗 URL SÉCURISÉES
-      ========================== */
+      // 🔗 URL SÉCURISÉES
       const safeReturnUrl =
         returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
       const safeNotifyUrl =
         notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
-      /* ==========================
-         🚀 DELEGATION SERVICE
-      ========================== */
+      // 🚀 DELEGATION SERVICE
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
-
-        items: safeItems, // ✅ SNAPSHOT SÉCURISÉ
-
+        items: safeItems,
         productPrice: Number(resolvedProductPrice),
         shippingFee: Number(shippingFee) || 0,
         currency,
-
         buyerEmail: req.user?.email || null,
         buyerPhone: req.user?.phone || null,
-
         description:
           description || `Paiement vers ${seller.name || "vendeur"}`,
-
         returnUrl: safeReturnUrl,
         notifyUrl: safeNotifyUrl,
       });
@@ -175,7 +158,6 @@ module.exports = {
       return res.status(500).json({ error: err.message });
     }
   },
-};
 
   /* ======================================================
      🔵 CREATE PAYOUT (Vendeur → Mobile Money / Banque)
