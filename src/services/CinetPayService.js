@@ -389,8 +389,9 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================
-// PAYIN — CLEAN ESCROW VERSION (ADAPTÉ FLUTTER)
+// PAYIN — CLEAN ESCROW VERSION (FLUTTER SAFE)
 // ============================
+
 CinetPayService.createPayIn = async function (payload) {
   const mongoose = require("mongoose");
   const axios = require("axios");
@@ -401,7 +402,7 @@ CinetPayService.createPayIn = async function (payload) {
   const Order = require("../models/order.model");
 
   // ==============================
-  // EXTRAIRE LES CHAMPS
+  // EXTRACTION PAYLOAD (SAFE)
   // ==============================
   const {
     items,
@@ -415,11 +416,11 @@ CinetPayService.createPayIn = async function (payload) {
     notifyUrl,
     sellerId,
     clientId,
-    productPrice, // ⚡ Nouvel ajout depuis Flutter
+    productPrice, // ✅ depuis Flutter (informatif)
   } = payload;
 
   // ==============================
-  // VALIDATIONS
+  // VALIDATIONS CRITIQUES
   // ==============================
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Panier vide");
@@ -433,15 +434,16 @@ CinetPayService.createPayIn = async function (payload) {
     throw new Error("clientId invalide");
   }
 
-  shippingFee = Number(shippingFee);
-  if (!Number.isFinite(shippingFee) || shippingFee < 0) {
+  const shippingFeeAmount = Number(shippingFee);
+  if (!Number.isFinite(shippingFeeAmount) || shippingFeeAmount < 0) {
     throw new Error("shippingFee invalide");
   }
 
-  if (productPrice !== undefined) {
-    if (typeof productPrice !== "number" || productPrice < 0) {
-      throw new Error("productPrice invalide");
-    }
+  if (
+    productPrice !== undefined &&
+    (typeof productPrice !== "number" || productPrice < 0)
+  ) {
+    throw new Error("productPrice invalide");
   }
 
   // ==============================
@@ -453,7 +455,7 @@ CinetPayService.createPayIn = async function (payload) {
   }
 
   // ==============================
-  // PRODUITS (SOURCE OF TRUTH)
+  // PRODUITS (SOURCE DE VÉRITÉ)
   // ==============================
   const productIds = items.map((i) => {
     if (!mongoose.Types.ObjectId.isValid(i.productId)) {
@@ -493,6 +495,7 @@ CinetPayService.createPayIn = async function (payload) {
   const frozenItems = items.map((i) => {
     const product = productMap[i.productId];
     const qty = Math.max(1, Number(i.quantity) || 1);
+
     productTotal += product.price * qty;
 
     return {
@@ -505,26 +508,29 @@ CinetPayService.createPayIn = async function (payload) {
     };
   });
 
-  // 🔹 UTILISER productPrice venant de Flutter si disponible
+  // 🔐 Total final (Flutter UI OU backend)
   const totalAmount = Math.round(
-    (productPrice !== undefined ? productPrice : productTotal) + shippingFee
+    (productPrice !== undefined ? productPrice : productTotal) +
+      shippingFeeAmount
   );
 
   // ==============================
-  // FEES & NET
+  // FEES & NET (ESCROW)
   // ==============================
   const { totalFees, netToSeller, breakdown } =
     calculateFees(productTotal, 0);
 
-  const netAmount = Math.round(netToSeller + shippingFee);
+  const netAmount = Math.round(netToSeller + shippingFeeAmount);
 
   // ==============================
   // IDS & URLS
   // ==============================
   const transaction_id = this.generateTransactionId("PAYIN");
 
-  returnUrl ||= `${BASE_URL}/api/cinetpay/payin/verify`;
-  notifyUrl ||= `${BASE_URL}/api/cinetpay/payin/verify`;
+  const finalReturnUrl =
+    returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  const finalNotifyUrl =
+    notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
   // ==============================
   // PAYIN TRANSACTION
@@ -557,7 +563,7 @@ CinetPayService.createPayIn = async function (payload) {
     items: frozenItems,
     totalAmount,
     netAmount,
-    shippingFee,
+    shippingFee: shippingFeeAmount,
     deliveryAddress: buyerAddress || "Adresse inconnue",
     status: "PENDING_PAYMENT",
     isConfirmedByClient: false,
@@ -583,8 +589,8 @@ CinetPayService.createPayIn = async function (payload) {
     amount: totalAmount,
     currency,
     description: description || "Paiement eMarket",
-    return_url: returnUrl,
-    notify_url: notifyUrl,
+    return_url: finalReturnUrl,
+    notify_url: finalNotifyUrl,
     customer_email: tx.customer.email,
     customer_phone_number: tx.customer.phone_number,
     customer_address: tx.customer.address,
