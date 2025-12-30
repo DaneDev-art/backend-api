@@ -208,6 +208,7 @@ router.get("/:id/public", async (req, res) => {
       success: true,
       seller: {
         _id: seller._id,
+        sellerId: seller._id, // ajouté pour compatibilité Flutter
         name: seller.name,
         email: seller.email,
         phone: seller.phone,
