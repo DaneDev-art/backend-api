@@ -3,6 +3,7 @@
 // ==========================================
 const Product = require("../models/Product");
 const cloudinary = require("cloudinary").v2;
+const mongoose = require("mongoose");
 
 // ==========================================
 // 🔹 Configuration Cloudinary
@@ -14,73 +15,70 @@ cloudinary.config({
 });
 
 // ==========================================
-// 🔹 Fonction utilitaire pour enrichir un produit
+// 🔹 Enrichissement PRODUIT (JSON STABLE)
 // ==========================================
 const enrichProduct = async (product) => {
-  let sellerId = "";
-  let shopName = "";
-  let country = "";
+  const sellerId =
+    typeof product.seller === "string"
+      ? product.seller
+      : product.seller?._id?.toString() || "";
 
-  // 🔹 sellerId
-  if (product.seller) {
-    sellerId =
-      typeof product.seller === "string"
-        ? product.seller
-        : product.seller._id?.toString();
-  }
+  let shopName = product.shopName || "";
+  let country = product.country || "";
 
-  // 🔹 shopName / country depuis produit
-  if (product.shopName?.trim()) shopName = product.shopName;
-  if (product.country?.trim()) country = product.country;
-
-  // 🔹 fallback depuis User
   if ((!shopName || !country) && sellerId) {
     try {
       const User = require("../models/user.model");
-      const seller = await User.findById(sellerId);
+      const seller = await User.findById(sellerId).lean();
       if (seller) {
         shopName ||= seller.shopName || "Boutique inconnue";
         country ||= seller.country || "Pays inconnu";
       }
-    } catch (err) {
-      console.error("❌ enrichProduct user fetch error:", err);
+    } catch (_) {
       shopName ||= "Boutique inconnue";
       country ||= "Pays inconnu";
     }
   }
 
   return {
-    _id: product._id,
+    _id: product._id.toString(), // 🔥 ID MONGO UNIQUE
     name: product.name,
     description: product.description,
     price: product.price,
     stock: product.stock,
-    images: product.images,
+    images: product.images || [],
     category: product.category,
     status: product.status,
-    rating: product.rating,
-    numReviews: product.numReviews,
+    rating: product.rating || 0,
+    numReviews: product.numReviews || 0,
+
+    // 🔥 CRITIQUE POUR FLUTTER
+    seller: sellerId,
     sellerId,
     shopName,
     country,
+
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
 };
 
 // ==========================================
-// ✅ GET — Tous les produits PAYABLES (PUBLIC)
+// ✅ GET — Tous les produits PAYABLES
 // ==========================================
-exports.getAllProducts = async (req, res) => {
+exports.getAllProducts = async (_, res) => {
   try {
-    const products = await Product.find({
-      status: "actif", // 🔐 CRITIQUE
-    }).sort({ createdAt: -1 });
+    const products = await Product.find({ status: "actif" })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const enriched = await Promise.all(products.map(enrichProduct));
+    const enriched = await Promise.all(
+      products.map((p) => enrichProduct(p))
+    );
+
     res.status(200).json(enriched);
   } catch (err) {
-    console.error("❌ getAllProducts error:", err);
+    console.error("❌ getAllProducts:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -92,37 +90,48 @@ exports.getProductsBySeller = async (req, res) => {
   try {
     const { sellerId } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: "sellerId invalide" });
+    }
+
     const products = await Product.find({
       seller: sellerId,
-      status: "actif", // 🔐 CRITIQUE
-    }).sort({ createdAt: -1 });
+      status: "actif",
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const enriched = await Promise.all(products.map(enrichProduct));
+    const enriched = await Promise.all(
+      products.map((p) => enrichProduct(p))
+    );
+
     res.status(200).json(enriched);
   } catch (err) {
-    console.error("❌ getProductsBySeller error:", err);
+    console.error("❌ getProductsBySeller:", err);
     res.status(500).json({ error: err.message });
   }
 };
 
 // ==========================================
-// ✅ POST — Ajouter un produit (auth requis)
+// ✅ POST — Ajouter un produit
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
-    const { name, description, price, category, images } = req.body;
+    const { name, description, price, category, images = [] } = req.body;
     const sellerId = req.user?._id;
 
-    if (!sellerId)
-      return res.status(401).json({ message: "Utilisateur non authentifié" });
+    if (!sellerId) {
+      return res.status(401).json({ message: "Non authentifié" });
+    }
 
-    if (!name || !price)
-      return res
-        .status(400)
-        .json({ message: "Nom et prix obligatoires" });
+    if (!name || !Number(price) || price <= 0) {
+      return res.status(400).json({
+        message: "Nom et prix valide obligatoires",
+      });
+    }
 
     const User = require("../models/user.model");
-    const seller = await User.findById(sellerId);
+    const seller = await User.findById(sellerId).lean();
 
     const product = new Product({
       name,
@@ -133,11 +142,57 @@ exports.addProduct = async (req, res) => {
       images: [],
       shopName: seller?.shopName || "",
       country: seller?.country || "",
-      status: "actif", // ✅ PAYABLE PAR DÉFAUT
+      status: "actif",
     });
 
-    // 🔹 Upload images Cloudinary
+    for (const img of images) {
+      const upload = await cloudinary.uploader.upload(img, {
+        folder: "products",
+      });
+      product.images.push(upload.secure_url);
+    }
+
+    await product.save();
+
+    res.status(201).json(await enrichProduct(product));
+  } catch (err) {
+    console.error("❌ addProduct:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ==========================================
+// ✏️ PUT — Modifier un produit
+// ==========================================
+exports.updateProduct = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const sellerId = req.user?._id;
+
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({ message: "productId invalide" });
+    }
+
+    const product = await Product.findOne({
+      _id: productId,
+      seller: sellerId,
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Produit introuvable ou non autorisé",
+      });
+    }
+
+    const { name, description, price, category, images } = req.body;
+
+    if (name) product.name = name;
+    if (description) product.description = description;
+    if (price && price > 0) product.price = price;
+    if (category) product.category = category;
+
     if (Array.isArray(images)) {
+      product.images = [];
       for (const img of images) {
         const upload = await cloudinary.uploader.upload(img, {
           folder: "products",
@@ -147,134 +202,39 @@ exports.addProduct = async (req, res) => {
     }
 
     await product.save();
-
-    res.status(201).json(await enrichProduct(product));
-  } catch (err) {
-    console.error("❌ addProduct error:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ==========================================
-// ✏️ PUT — Modifier un produit (auth requis)
-// ==========================================
-exports.updateProduct = async (req, res) => {
-  try {
-    const { productId } = req.params;
-    const sellerId = req.user?._id;
-    const { name, description, price, category, images } = req.body;
-
-    const product = await Product.findOne({
-      _id: productId,
-      seller: sellerId,
-    });
-
-    if (!product)
-      return res
-        .status(404)
-        .json({ message: "Produit introuvable ou non autorisé" });
-
-    if (name) product.name = name;
-    if (description) product.description = description;
-    if (price) product.price = price;
-    if (category) product.category = category;
-
-    const User = require("../models/user.model");
-    const seller = await User.findById(sellerId);
-    if (seller) {
-      product.shopName = seller.shopName || "";
-      product.country = seller.country || "";
-    }
-
-    if (Array.isArray(images) && images.length > 0) {
-      const uploaded = [];
-      for (const img of images) {
-        const up = await cloudinary.uploader.upload(img, {
-          folder: "products",
-        });
-        uploaded.push(up.secure_url);
-      }
-      product.images = uploaded;
-    }
-
-    await product.save();
-
     res.status(200).json(await enrichProduct(product));
   } catch (err) {
-    console.error("❌ updateProduct error:", err);
+    console.error("❌ updateProduct:", err);
     res.status(500).json({ error: err.message });
   }
 };
 
 // ==========================================
-// ❌ DELETE — Supprimer un produit (auth requis)
+// ❌ DELETE — Supprimer (SAFE)
 // ==========================================
 exports.deleteProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const sellerId = req.user?._id;
 
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({ message: "productId invalide" });
+    }
+
     const deleted = await Product.findOneAndDelete({
       _id: productId,
       seller: sellerId,
     });
 
-    if (!deleted)
-      return res
-        .status(404)
-        .json({ message: "Produit non trouvé ou non autorisé" });
+    if (!deleted) {
+      return res.status(404).json({
+        message: "Produit non trouvé ou non autorisé",
+      });
+    }
 
-    res.status(200).json({ message: "Produit supprimé avec succès" });
+    res.status(200).json({ message: "Produit supprimé" });
   } catch (err) {
-    console.error("❌ deleteProduct error:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ==========================================
-// ✅ ADMIN — Valider un produit (PAYABLE)
-// ==========================================
-exports.validateProduct = async (req, res) => {
-  try {
-    const { productId } = req.params;
-
-    const product = await Product.findById(productId);
-    if (!product)
-      return res.status(404).json({ message: "Produit introuvable" });
-
-    product.status = "actif"; // 🔥 PAYABLE
-    await product.save();
-
-    res.status(200).json({
-      message: "Produit validé et activé",
-      product: await enrichProduct(product),
-    });
-  } catch (err) {
-    console.error("❌ validateProduct error:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ==========================================
-// 🚫 ADMIN — Bloquer un produit (NON PAYABLE)
-// ==========================================
-exports.blockProduct = async (req, res) => {
-  try {
-    const { productId } = req.params;
-
-    const product = await Product.findById(productId);
-    if (!product)
-      return res.status(404).json({ message: "Produit introuvable" });
-
-    product.status = "bloqué";
-    await product.save();
-
-    res.status(200).json({
-      message: "Produit bloqué avec succès",
-      product: await enrichProduct(product),
-    });
-  } catch (err) {
-    console.error("❌ blockProduct error:", err);
+    console.error("❌ deleteProduct:", err);
     res.status(500).json({ error: err.message });
   }
 };

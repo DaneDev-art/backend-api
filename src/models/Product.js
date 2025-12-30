@@ -1,74 +1,75 @@
 const mongoose = require("mongoose");
 
-// ==========================================
-// 🔹 Schéma du modèle Product
-// ==========================================
 const ProductSchema = new mongoose.Schema(
   {
-    // 🔸 Nom du produit
     name: {
       type: String,
-      required: [true, "Le nom du produit est obligatoire"],
-      index: true,
+      required: true,
       trim: true,
+      index: true,
     },
 
-    // 🔸 Description du produit
     description: {
       type: String,
       default: "",
       trim: true,
     },
 
-    // 🔸 Prix
     price: {
       type: Number,
-      required: [true, "Le prix du produit est obligatoire"],
-      min: [0, "Le prix ne peut pas être négatif"],
+      required: true,
+      min: 1, // 🔥 pas de produit gratuit
     },
 
-    // 🔸 Stock disponible
     stock: {
       type: Number,
       default: 0,
-      min: [0, "Le stock ne peut pas être négatif"],
+      min: 0,
     },
 
-    // 🔸 Images (URLs Cloudinary, max 3)
     images: {
       type: [String],
       validate: {
-        validator: function (arr) {
-          return Array.isArray(arr) && arr.length <= 3;
-        },
-        message: "Un produit ne peut pas avoir plus de 3 images.",
+        validator: (arr) => Array.isArray(arr) && arr.length <= 3,
+        message: "Maximum 3 images autorisées",
       },
       default: [],
     },
 
-    // 🔸 Catégorie
     category: {
       type: String,
-      index: true,
       trim: true,
       default: "Autre",
+      index: true,
     },
 
-    // 🔸 Référence au vendeur (User)
     seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: [true, "Un produit doit être associé à un vendeur"],
+      required: true,
+      index: true,
     },
 
-    // 🔸 Statut (utile si tu veux filtrer ou modérer les produits)
+    // 🔥 Infos vendeur figées (snapshot)
+    shopName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    country: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     status: {
       type: String,
-      enum: ["actif", "inactif", "en_attente"],
-      default: "actif",
+      enum: ["actif", "inactif", "en_attente", "bloqué"],
+      default: "en_attente",
+      index: true,
     },
 
-    // 🔸 Note moyenne (facultatif)
     rating: {
       type: Number,
       default: 0,
@@ -76,23 +77,20 @@ const ProductSchema = new mongoose.Schema(
       max: 5,
     },
 
-    // 🔸 Nombre d’avis (facultatif)
     numReviews: {
       type: Number,
       default: 0,
+      min: 0,
     },
   },
   {
-    timestamps: true, // createdAt + updatedAt
+    timestamps: true,
+    strict: true, // 🔒 empêche les champs fantômes
   }
 );
 
-// ==========================================
-// ✅ Index pour la recherche texte
-// ==========================================
+// 🔍 Index combiné PayIn-safe
+ProductSchema.index({ seller: 1, status: 1 });
 ProductSchema.index({ name: "text", category: 1 });
 
-// ==========================================
-// ✅ Export du modèle
-// ==========================================
 module.exports = mongoose.model("Product", ProductSchema);
