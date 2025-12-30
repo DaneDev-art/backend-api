@@ -1,11 +1,12 @@
 // =============================================
 // controllers/cinetpayController.js
-// ✅ Version finale propre & production-ready
+// ✅ FIX STRUCTURE ITEM — PRODUCTION READY
 // =============================================
 
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
+const Product = require("../models/product.model");
 
 // URL de base plateforme
 const BASE_URL =
@@ -61,7 +62,7 @@ module.exports = {
       }
 
       /* ==========================
-         📦 VALIDATION PANIER
+         📦 VALIDATION PANIER (FIX)
       ========================== */
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
@@ -69,18 +70,32 @@ module.exports = {
         });
       }
 
+      // 🔥 Reconstruction serveur (SOURCE DE VÉRITÉ)
+      const safeItems = [];
+
       for (const item of items) {
-        if (
-          !item.productId ||
-          !item.productName ||
-          typeof item.quantity !== "number" ||
-          typeof item.price !== "number"
-        ) {
+        if (!item.productId || typeof item.quantity !== "number") {
           return res.status(400).json({
             error: "Structure item invalide",
             item,
           });
         }
+
+        const product = await Product.findById(item.productId);
+        if (!product) {
+          return res.status(404).json({
+            error: "Produit introuvable",
+            productId: item.productId,
+          });
+        }
+
+        safeItems.push({
+          productId: product._id.toString(),
+          productName: product.name,
+          price: Number(product.price),
+          quantity: item.quantity,
+          total: Number(product.price) * item.quantity,
+        });
       }
 
       /* ==========================
@@ -112,7 +127,7 @@ module.exports = {
         sellerId,
         clientId,
 
-        items, // 🔥 SNAPSHOT PANIER TRANSMIS
+        items: safeItems, // ✅ SNAPSHOT SÉCURISÉ
 
         productPrice: Number(resolvedProductPrice),
         shippingFee: Number(shippingFee) || 0,
@@ -131,11 +146,6 @@ module.exports = {
       return res.status(201).json(result);
     } catch (err) {
       console.error("❌ Erreur createPayIn:", err.message);
-
-      if (/invalide|manquant|introuvable|incohérent/i.test(err.message)) {
-        return res.status(400).json({ error: err.message });
-      }
-
       return res
         .status(500)
         .json({ error: "Erreur interne serveur createPayIn" });
@@ -143,7 +153,7 @@ module.exports = {
   },
 
   /* ======================================================
-     🟡 VERIFY PAYIN (Return URL + Webhook)
+     🟡 VERIFY PAYIN
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
@@ -154,22 +164,18 @@ module.exports = {
         req.query.transaction_id;
 
       if (!transactionId) {
-        console.warn("⚠️ verifyPayIn sans transaction_id:", req.body);
         return res
           .status(400)
           .json({ error: "transaction_id requis" });
       }
 
-      console.log("🔍 [verifyPayIn] Transaction:", transactionId);
-
       const result = await CinetPayService.verifyPayIn(transactionId);
-
       return res.status(200).json(result);
     } catch (err) {
-      console.error("❌ verifyPayIn:", err.message);
       return res.status(500).json({ error: err.message });
     }
   },
+};
 
   /* ======================================================
      🔵 CREATE PAYOUT (Vendeur → Mobile Money / Banque)
