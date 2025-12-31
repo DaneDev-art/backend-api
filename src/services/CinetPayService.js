@@ -402,7 +402,7 @@ CinetPayService.createPayIn = async function (payload) {
   const Order = require("../models/order.model");
 
   // ==============================
-  // EXTRACTION PAYLOAD (SAFE)
+  // EXTRACTION PAYLOAD
   // ==============================
   const {
     items,
@@ -416,11 +416,10 @@ CinetPayService.createPayIn = async function (payload) {
     notifyUrl,
     sellerId,
     clientId,
-    productPrice, // ✅ depuis Flutter (informatif)
   } = payload;
 
   // ==============================
-  // VALIDATIONS CRITIQUES
+  // VALIDATIONS DE BASE
   // ==============================
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Panier vide");
@@ -439,13 +438,6 @@ CinetPayService.createPayIn = async function (payload) {
     throw new Error("shippingFee invalide");
   }
 
-  if (
-    productPrice !== undefined &&
-    (typeof productPrice !== "number" || productPrice < 0)
-  ) {
-    throw new Error("productPrice invalide");
-  }
-
   // ==============================
   // VENDEUR
   // ==============================
@@ -455,43 +447,41 @@ CinetPayService.createPayIn = async function (payload) {
   }
 
   // ==============================
-  // PRODUITS (SOURCE DE VÉRITÉ) ✅ FIX mongoId / _id
+  // PRODUITS — mongoId = SOURCE DE VÉRITÉ
   // ==============================
-  const rawProductIds = items.map((i) => i.productId);
-
-  const objectIds = rawProductIds.filter((id) =>
-    mongoose.Types.ObjectId.isValid(id)
-  );
+  const productMongoIds = items.map((i) => i.productId);
 
   const products = await Product.find({
-    $or: [
-      { _id: { $in: objectIds } },
-      { mongoId: { $in: rawProductIds } },
-    ],
+    mongoId: { $in: productMongoIds },
   })
     .select("_id mongoId name images price seller")
     .lean();
 
   if (products.length !== items.length) {
+    console.error("❌ Mismatch produits", {
+      expected: items.length,
+      found: products.length,
+      productMongoIds,
+    });
     throw new Error("Certains produits sont introuvables");
   }
 
   // ==============================
-  // 🔒 COHÉRENCE PRODUIT ↔ VENDEUR
+  // COHÉRENCE PRODUIT ↔ VENDEUR
   // ==============================
   for (const product of products) {
     if (product.seller.toString() !== sellerId.toString()) {
       throw new Error(
-        `Produit ${product.mongoId || product._id} n'appartient pas au vendeur ${sellerId}`
+        `Produit ${product.mongoId} n'appartient pas au vendeur ${sellerId}`
       );
     }
   }
 
+  // ==============================
+  // MAP PRODUITS (mongoId → product)
+  // ==============================
   const productMap = Object.fromEntries(
-    products.map((p) => [
-      p.mongoId || p._id.toString(),
-      p,
-    ])
+    products.map((p) => [p.mongoId, p])
   );
 
   // ==============================
@@ -501,13 +491,17 @@ CinetPayService.createPayIn = async function (payload) {
 
   const frozenItems = items.map((i) => {
     const product = productMap[i.productId];
-    const qty = Math.max(1, Number(i.quantity) || 1);
 
+    if (!product) {
+      throw new Error(`Produit introuvable après mapping: ${i.productId}`);
+    }
+
+    const qty = Math.max(1, Number(i.quantity) || 1);
     productTotal += product.price * qty;
 
     return {
-      product: product._id,
-      productId: product.mongoId || product._id.toString(),
+      product: product._id,          // 🔐 interne Mongo
+      productId: product.mongoId,    // 🔓 public
       productName: product.name,
       productImage: product.images?.[0] || null,
       quantity: qty,
@@ -515,11 +509,7 @@ CinetPayService.createPayIn = async function (payload) {
     };
   });
 
-  // 🔐 Total final (Flutter UI OU backend)
-  const totalAmount = Math.round(
-    (productPrice !== undefined ? productPrice : productTotal) +
-      shippingFeeAmount
-  );
+  const totalAmount = Math.round(productTotal + shippingFeeAmount);
 
   // ==============================
   // FEES & NET (ESCROW)
@@ -635,6 +625,7 @@ CinetPayService.createPayIn = async function (payload) {
     netAmount,
   };
 };
+
 
 
 //=====================================================
