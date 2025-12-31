@@ -455,17 +455,21 @@ CinetPayService.createPayIn = async function (payload) {
   }
 
   // ==============================
-  // PRODUITS (SOURCE DE VÉRITÉ)
+  // PRODUITS (SOURCE DE VÉRITÉ) ✅ FIX mongoId / _id
   // ==============================
-  const productIds = items.map((i) => {
-    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
-      throw new Error(`Produit invalide: ${i.productId}`);
-    }
-    return new mongoose.Types.ObjectId(i.productId);
-  });
+  const rawProductIds = items.map((i) => i.productId);
 
-  const products = await Product.find({ _id: { $in: productIds } })
-    .select("_id name images price seller")
+  const objectIds = rawProductIds.filter((id) =>
+    mongoose.Types.ObjectId.isValid(id)
+  );
+
+  const products = await Product.find({
+    $or: [
+      { _id: { $in: objectIds } },
+      { mongoId: { $in: rawProductIds } },
+    ],
+  })
+    .select("_id mongoId name images price seller")
     .lean();
 
   if (products.length !== items.length) {
@@ -478,13 +482,16 @@ CinetPayService.createPayIn = async function (payload) {
   for (const product of products) {
     if (product.seller.toString() !== sellerId.toString()) {
       throw new Error(
-        `Produit ${product._id} n'appartient pas au vendeur ${sellerId}`
+        `Produit ${product.mongoId || product._id} n'appartient pas au vendeur ${sellerId}`
       );
     }
   }
 
   const productMap = Object.fromEntries(
-    products.map((p) => [p._id.toString(), p])
+    products.map((p) => [
+      p.mongoId || p._id.toString(),
+      p,
+    ])
   );
 
   // ==============================
@@ -500,7 +507,7 @@ CinetPayService.createPayIn = async function (payload) {
 
     return {
       product: product._id,
-      productId: product._id.toString(),
+      productId: product.mongoId || product._id.toString(),
       productName: product.name,
       productImage: product.images?.[0] || null,
       quantity: qty,
