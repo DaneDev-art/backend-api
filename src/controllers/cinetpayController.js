@@ -6,7 +6,7 @@
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
-const Product = require("../models/product.model");
+const Product = require("../models/Product");
 
 const BASE_URL =
   process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
