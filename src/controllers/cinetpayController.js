@@ -1,6 +1,6 @@
 // =============================================
 // controllers/cinetpayController.js
-// ✅ MONGO-ID NORMALIZED — PRODUCTION READY
+// PRODUCTION READY — SYNTAX FIXED
 // =============================================
 
 const mongoose = require("mongoose");
@@ -18,7 +18,7 @@ module.exports = {
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
-      console.log("📦 PAYIN BODY:", JSON.stringify(req.body, null, 2));
+      console.log("📦 Requête PAYIN reçue:", req.body);
 
       const {
         productPrice,
@@ -32,88 +32,83 @@ module.exports = {
         items,
       } = req.body;
 
-      /* ==========================
-         🔐 CLIENT AUTH
-      ========================== */
-      const clientId = req.user?._id?.toString();
+      const clientId = req.user?.id || req.user?._id;
       if (!clientId) {
         return res.status(401).json({ error: "Utilisateur non authentifié" });
       }
 
-      /* ==========================
-         🧾 BASIC VALIDATION
-      ========================== */
-      if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
-        return res.status(400).json({ error: "sellerId invalide" });
+      if (!sellerId) {
+        return res.status(400).json({ error: "sellerId requis" });
       }
 
       const resolvedProductPrice =
         productPrice !== undefined ? productPrice : amount;
 
       if (!resolvedProductPrice || Number(resolvedProductPrice) <= 0) {
-        return res.status(400).json({ error: "Montant invalide" });
+        return res
+          .status(400)
+          .json({ error: "amount ou productPrice invalide" });
       }
 
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: "Panier vide" });
       }
 
-      /* ==========================
-         🔒 VALIDATE ITEMS (mongoId)
-      ========================== */
-      const productObjectIds = [];
-
+      /* ======================================================
+         🔒 VALIDATION DES IDS
+      ====================================================== */
       for (const item of items) {
-        if (
-          !item.productId ||
-          !mongoose.Types.ObjectId.isValid(item.productId) ||
-          typeof item.quantity !== "number" ||
-          item.quantity <= 0
-        ) {
+        if (!item.productId || typeof item.quantity !== "number") {
           return res.status(400).json({
-            error: "Item invalide",
+            error: "Structure item invalide",
             item,
           });
         }
 
-        productObjectIds.push(
-          new mongoose.Types.ObjectId(item.productId)
-        );
+        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+          return res.status(400).json({
+            error: "productId invalide",
+            productId: item.productId,
+          });
+        }
       }
 
-      /* ==========================
-         🔍 FETCH PRODUCTS (SINGLE QUERY)
-      ========================== */
+      /* ======================================================
+         🔎 FETCH PRODUITS
+      ====================================================== */
+      const productIds = items.map(
+        (i) => new mongoose.Types.ObjectId(i.productId)
+      );
+
       const products = await Product.find({
-        _id: { $in: productObjectIds },
+        _id: { $in: productIds },
       });
 
       if (products.length !== items.length) {
         return res.status(404).json({
-          error: "Produit introuvable dans le panier",
+          error: "Un ou plusieurs produits introuvables",
         });
       }
 
-      /* ==========================
-         🛡️ SAFE ITEMS (CANONICAL)
-      ========================== */
+      /* ======================================================
+         🛡️ ITEMS SAFE
+      ====================================================== */
       const safeItems = items.map((item) => {
         const product = products.find(
           (p) => p._id.toString() === item.productId
         );
 
         return {
-          productId: product._id.toString(), // 🔑 mongoId ONLY
+          productId: product._id.toString(),
           productName: product.name,
-          unitPrice: Number(product.price),
+          price: Number(product.price),
           quantity: item.quantity,
-          total: Number(product.price) * item.quantity,
         };
       });
 
-      /* ==========================
-         👤 SELLER CHECK
-      ========================== */
+      /* ======================================================
+         👤 SELLER
+      ====================================================== */
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
 
@@ -121,18 +116,18 @@ module.exports = {
         return res.status(404).json({ error: "Vendeur introuvable" });
       }
 
-      /* ==========================
-         🚀 CREATE PAYIN (SERVICE)
-      ========================== */
+      /* ======================================================
+         🚀 CINETPAY PAYIN
+      ====================================================== */
       const result = await CinetPayService.createPayIn({
-        sellerId: seller._id.toString(),
+        sellerId,
         clientId,
         items: safeItems,
         productPrice: Number(resolvedProductPrice),
         shippingFee: Number(shippingFee) || 0,
         currency,
-        buyerEmail: req.user?.email || "",
-        buyerPhone: req.user?.phone || "",
+        buyerEmail: req.user?.email || null,
+        buyerPhone: req.user?.phone || null,
         description:
           description || `Paiement vers ${seller.name || "vendeur"}`,
         returnUrl:
@@ -143,7 +138,7 @@ module.exports = {
 
       return res.status(201).json(result);
     } catch (err) {
-      console.error("❌ createPayIn ERROR:", err);
+      console.error("❌ createPayIn:", err);
       return res.status(500).json({
         error: "Erreur interne createPayIn",
         details: err.message,
@@ -162,14 +157,12 @@ module.exports = {
         req.query.transaction_id;
 
       if (!transactionId) {
-        return res.status(400).json({
-          error: "transaction_id requis",
-        });
+        return res
+          .status(400)
+          .json({ error: "transaction_id requis" });
       }
 
-      const result =
-        await CinetPayService.verifyPayIn(transactionId);
-
+      const result = await CinetPayService.verifyPayIn(transactionId);
       return res.status(200).json(result);
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -181,24 +174,18 @@ module.exports = {
   ====================================================== */
   createPayOut: async (req, res) => {
     try {
-      const { sellerId, amount, currency = "XOF", notifyUrl } =
-        req.body;
+      const { sellerId, amount, currency = "XOF", notifyUrl } = req.body;
 
-      if (
-        !sellerId ||
-        !mongoose.Types.ObjectId.isValid(sellerId) ||
-        Number(amount) <= 0
-      ) {
+      if (!sellerId || Number(amount) <= 0) {
         return res.status(400).json({ error: "Données invalides" });
       }
 
-      const result =
-        await CinetPayService.createPayOutForSeller({
-          sellerId,
-          amount,
-          currency,
-          notifyUrl,
-        });
+      const result = await CinetPayService.createPayOutForSeller({
+        sellerId,
+        amount,
+        currency,
+        notifyUrl,
+      });
 
       return res.status(201).json(result);
     } catch (err) {
@@ -219,17 +206,14 @@ module.exports = {
           .json({ error: "transaction_id requis" });
       }
 
-      const data =
-        await CinetPayService.verifyPayOut(transaction_id);
-
+      const data = await CinetPayService.verifyPayOut(transaction_id);
       return res.json({ success: true, data });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
   },
-};
 
-  /* ======================================================
+/* ======================================================
      🧩 REGISTER SELLER
   ====================================================== */
   registerSeller: async (req, res) => {
@@ -273,7 +257,7 @@ module.exports = {
   },
 
   /* ======================================================
-     🔔 WEBHOOK
+     🔔 WEBHOOK CINETPAY
   ====================================================== */
   handleWebhook: async (req, res) => {
     try {
@@ -283,6 +267,7 @@ module.exports = {
       );
       return res.status(200).json({ success: true, result });
     } catch (err) {
+      console.error("❌ Webhook error:", err.message);
       return res.status(500).json({ error: err.message });
     }
   },
