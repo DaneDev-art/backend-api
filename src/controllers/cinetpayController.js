@@ -1,8 +1,9 @@
 // =============================================
 // controllers/cinetpayController.js
-// ✅ STRUCTURE FIX — PRODUCTION READY
+// ✅ PRODUCTION READY — 404 FIXED
 // =============================================
 
+const mongoose = require("mongoose");
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
@@ -53,7 +54,10 @@ module.exports = {
         return res.status(400).json({ error: "Panier vide" });
       }
 
-      const safeItems = [];
+      /* ======================================================
+         🔒 VALIDATION + CAST OBJECTID (FIX 404)
+      ====================================================== */
+      const objectIds = [];
       for (const item of items) {
         if (!item.productId || typeof item.quantity !== "number") {
           return res.status(400).json({
@@ -62,27 +66,58 @@ module.exports = {
           });
         }
 
-        const product = await Product.findById(item.productId);
-        if (!product) {
-          return res
-            .status(404)
-            .json({ error: "Produit introuvable" });
+        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+          return res.status(400).json({
+            error: "productId invalide",
+            productId: item.productId,
+          });
         }
 
-        safeItems.push({
+        objectIds.push(new mongoose.Types.ObjectId(item.productId));
+      }
+
+      /* ======================================================
+         🔎 FETCH PRODUITS (1 SEULE REQUÊTE MONGO)
+      ====================================================== */
+      const products = await Product.find({
+        _id: { $in: objectIds },
+      });
+
+      if (products.length !== items.length) {
+        return res.status(404).json({
+          error: "Un ou plusieurs produits introuvables",
+        });
+      }
+
+      /* ======================================================
+         🛡️ BUILD SAFE ITEMS
+      ====================================================== */
+      const safeItems = items.map((item) => {
+        const product = products.find(
+          (p) => p._id.toString() === item.productId
+        );
+
+        return {
           productId: product._id.toString(),
           productName: product.name,
           price: Number(product.price),
           quantity: item.quantity,
-        });
-      }
+        };
+      });
 
+      /* ======================================================
+         👤 SELLER CHECK
+      ====================================================== */
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
+
       if (!seller) {
         return res.status(404).json({ error: "Vendeur introuvable" });
       }
 
+      /* ======================================================
+         🚀 CREATE PAYIN CINETPAY
+      ====================================================== */
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
@@ -102,8 +137,11 @@ module.exports = {
 
       return res.status(201).json(result);
     } catch (err) {
-      console.error("❌ createPayIn:", err.message);
-      return res.status(500).json({ error: err.message });
+      console.error("❌ createPayIn:", err);
+      return res.status(500).json({
+        error: "Erreur interne createPayIn",
+        details: err.message,
+      });
     }
   },
 
@@ -160,6 +198,7 @@ module.exports = {
   verifyPayOut: async (req, res) => {
     try {
       const { transaction_id } = req.body;
+
       if (!transaction_id) {
         return res
           .status(400)
@@ -173,7 +212,7 @@ module.exports = {
     }
   },
 
- /* ======================================================
+  /* ======================================================
      🧩 REGISTER SELLER
   ====================================================== */
   registerSeller: async (req, res) => {
