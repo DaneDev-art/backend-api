@@ -389,7 +389,7 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 // ============================
-// PAYIN — CLEAN ESCROW VERSION (FLUTTER SAFE)
+// PAYIN — ESCROW VERSION (MONGO _id NORMALIZED)
 // ============================
 
 CinetPayService.createPayIn = async function (payload) {
@@ -447,21 +447,26 @@ CinetPayService.createPayIn = async function (payload) {
   }
 
   // ==============================
-  // PRODUITS — mongoId = SOURCE DE VÉRITÉ
+  // PRODUITS — _id = SOURCE DE VÉRITÉ
   // ==============================
-  const productMongoIds = items.map((i) => i.productId);
+  const productIds = items.map((i) => {
+    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
+      throw new Error(`productId invalide: ${i.productId}`);
+    }
+    return new mongoose.Types.ObjectId(i.productId);
+  });
 
   const products = await Product.find({
-    mongoId: { $in: productMongoIds },
+    _id: { $in: productIds },
   })
-    .select("_id mongoId name images price seller")
+    .select("_id name images price seller")
     .lean();
 
   if (products.length !== items.length) {
-    console.error("❌ Mismatch produits", {
+    console.error("❌ PRODUIT MISMATCH", {
       expected: items.length,
       found: products.length,
-      productMongoIds,
+      productIds,
     });
     throw new Error("Certains produits sont introuvables");
   }
@@ -472,16 +477,16 @@ CinetPayService.createPayIn = async function (payload) {
   for (const product of products) {
     if (product.seller.toString() !== sellerId.toString()) {
       throw new Error(
-        `Produit ${product.mongoId} n'appartient pas au vendeur ${sellerId}`
+        `Produit ${product._id} n'appartient pas au vendeur ${sellerId}`
       );
     }
   }
 
   // ==============================
-  // MAP PRODUITS (mongoId → product)
+  // MAP PRODUITS (_id → product)
   // ==============================
   const productMap = Object.fromEntries(
-    products.map((p) => [p.mongoId, p])
+    products.map((p) => [p._id.toString(), p])
   );
 
   // ==============================
@@ -500,8 +505,8 @@ CinetPayService.createPayIn = async function (payload) {
     productTotal += product.price * qty;
 
     return {
-      product: product._id,          // 🔐 interne Mongo
-      productId: product.mongoId,    // 🔓 public
+      product: product._id,                // 🔐 interne Mongo
+      productId: product._id.toString(),   // 🔓 public
       productName: product.name,
       productImage: product.images?.[0] || null,
       quantity: qty,
