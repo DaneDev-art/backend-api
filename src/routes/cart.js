@@ -1,5 +1,5 @@
 // ==========================================
-// src/routes/cart.js
+// src/routes/cart.js (ARCHITECTURE PROPRE)
 // ==========================================
 const express = require("express");
 const router = express.Router();
@@ -11,20 +11,22 @@ const Product = require("../models/Product");
 // ==========================================
 // 🧾 Schéma MongoDB pour le panier
 // ==========================================
-const cartSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  items: [
-    {
-      productId: { type: String, required: true },
-      name: String,
-      price: Number,
-      quantity: Number,
-      shopName: String,
-      image: String,
-      sellerId: { type: String }, // 🆕 Ajout du vendeur
-    },
-  ],
-});
+const cartSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    items: [
+      {
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+          required: true,
+        },
+        quantity: { type: Number, default: 1, min: 1 },
+      },
+    ],
+  },
+  { timestamps: true }
+);
 
 const Cart = mongoose.model("Cart", cartSchema);
 
@@ -34,8 +36,25 @@ const Cart = mongoose.model("Cart", cartSchema);
 // ==========================================
 router.get("/:userId", async (req, res) => {
   try {
-    const cart = await Cart.findOne({ userId: req.params.userId });
-    res.status(200).json(cart ? cart.items : []);
+    const cart = await Cart.findOne({ userId: req.params.userId })
+      .populate({
+        path: "items.product",
+        select: "_id name price images seller",
+      })
+      .lean();
+
+    if (!cart) return res.status(200).json([]);
+
+    const formattedItems = cart.items.map((item) => ({
+      productId: item.product._id,
+      name: item.product.name,
+      price: item.product.price,
+      image: item.product.images?.[0] || null,
+      sellerId: item.product.seller,
+      quantity: item.quantity,
+    }));
+
+    res.status(200).json(formattedItems);
   } catch (err) {
     console.error("❌ getCart error:", err);
     res.status(500).json({ error: err.message });
@@ -49,44 +68,34 @@ router.get("/:userId", async (req, res) => {
 router.post("/:userId/add", async (req, res) => {
   const { productId, quantity = 1 } = req.body;
 
-  if (!productId) {
-    return res.status(400).json({ error: "productId requis" });
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    return res.status(400).json({ error: "productId invalide" });
   }
 
   try {
-    // 🔹 Récupérer ou créer le panier
-    let cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) cart = new Cart({ userId: req.params.userId, items: [] });
-
-    // 🔹 Vérifier si le produit existe dans la base
-    const product = await Product.findById(productId);
+    const product = await Product.findById(productId).select("_id");
     if (!product) {
       return res.status(404).json({ error: "Produit introuvable" });
     }
 
-    // 🔹 Vérifier si le produit est déjà dans le panier
-    const existingIndex = cart.items.findIndex(
-      (item) => item.productId === productId
+    let cart = await Cart.findOne({ userId: req.params.userId });
+    if (!cart) cart = new Cart({ userId: req.params.userId, items: [] });
+
+    const existingItem = cart.items.find(
+      (item) => item.product.toString() === productId
     );
 
-    if (existingIndex >= 0) {
-      // 🔹 Incrémenter la quantité
-      cart.items[existingIndex].quantity += quantity;
+    if (existingItem) {
+      existingItem.quantity += Math.max(1, quantity);
     } else {
-      // 🔹 Ajouter le produit avec infos vendeur
       cart.items.push({
-        productId,
-        name: product.name,
-        price: product.price,
-        quantity,
-        shopName: product.shopName || "",
-        image: product.images?.[0] || "",
-        sellerId: product.seller?.toString() || null, // 🆕 Récupération du vendeur
+        product: product._id,
+        quantity: Math.max(1, quantity),
       });
     }
 
     await cart.save();
-    res.status(201).json(cart.items);
+    res.status(201).json({ success: true });
   } catch (err) {
     console.error("❌ addToCart error:", err);
     res.status(500).json({ error: err.message });
@@ -94,33 +103,34 @@ router.post("/:userId/add", async (req, res) => {
 });
 
 // ==========================================
-// ✏️ Modifier la quantité d’un produit
+// ✏️ Modifier la quantité
 // PUT /api/cart/:userId/update/:productId
 // ==========================================
 router.put("/:userId/update/:productId", async (req, res) => {
   const { quantity } = req.body;
 
-  if (quantity == null) {
-    return res.status(400).json({ error: "quantity requis" });
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    return res.status(400).json({ error: "quantity invalide" });
   }
 
   try {
     const cart = await Cart.findOne({ userId: req.params.userId });
     if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
 
-    const index = cart.items.findIndex(
-      (item) => item.productId === req.params.productId
+    const item = cart.items.find(
+      (i) => i.product.toString() === req.params.productId
     );
-    if (index === -1) {
+
+    if (!item) {
       return res.status(404).json({ error: "Produit non trouvé dans le panier" });
     }
 
-    cart.items[index].quantity = quantity;
+    item.quantity = quantity;
     await cart.save();
 
-    res.status(200).json(cart.items);
+    res.status(200).json({ success: true });
   } catch (err) {
-    console.error("❌ updateCartItem error:", err);
+    console.error("❌ updateCart error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -135,11 +145,11 @@ router.delete("/:userId/remove/:productId", async (req, res) => {
     if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
 
     cart.items = cart.items.filter(
-      (item) => item.productId !== req.params.productId
+      (item) => item.product.toString() !== req.params.productId
     );
-    await cart.save();
 
-    res.status(200).json(cart.items);
+    await cart.save();
+    res.status(200).json({ success: true });
   } catch (err) {
     console.error("❌ removeFromCart error:", err);
     res.status(500).json({ error: err.message });
@@ -147,18 +157,13 @@ router.delete("/:userId/remove/:productId", async (req, res) => {
 });
 
 // ==========================================
-// 🧹 Vider complètement le panier
+// 🧹 Vider le panier
 // DELETE /api/cart/:userId/clear
 // ==========================================
 router.delete("/:userId/clear", async (req, res) => {
   try {
-    const cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
-
-    cart.items = [];
-    await cart.save();
-
-    res.status(200).json({ message: "Panier vidé avec succès" });
+    await Cart.deleteOne({ userId: req.params.userId });
+    res.status(200).json({ success: true });
   } catch (err) {
     console.error("❌ clearCart error:", err);
     res.status(500).json({ error: err.message });

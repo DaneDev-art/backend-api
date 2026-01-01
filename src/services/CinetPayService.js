@@ -388,8 +388,8 @@ CinetPayService.createSellerContact = async function(seller) {
   }
 };
 
-// ============================
-// PAYIN — ESCROW VERSION (MONGO _id NORMALIZED)
+/// ============================
+// PAYIN — ESCROW VERSION
 // ============================
 
 CinetPayService.createPayIn = async function (payload) {
@@ -449,12 +449,7 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   // PRODUITS — _id = SOURCE DE VÉRITÉ
   // ==============================
-  const productIds = items.map((i) => {
-    if (!mongoose.Types.ObjectId.isValid(i.productId)) {
-      throw new Error(`productId invalide: ${i.productId}`);
-    }
-    return new mongoose.Types.ObjectId(i.productId);
-  });
+  const productIds = items.map(i => i.productId); // <-- correction ici
 
   const products = await Product.find({
     _id: { $in: productIds },
