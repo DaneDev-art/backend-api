@@ -18,7 +18,7 @@ const ProductSchema = new mongoose.Schema(
     price: {
       type: Number,
       required: true,
-      min: 1, // 🔥 pas de produit gratuit
+      min: 1,
     },
 
     stock: {
@@ -43,6 +43,7 @@ const ProductSchema = new mongoose.Schema(
       index: true,
     },
 
+    // 🔑 Lien vendeur (clé forte)
     seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -50,7 +51,7 @@ const ProductSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🔥 Infos vendeur figées (snapshot)
+    // 🧠 Snapshot vendeur (sécurité panier / commandes)
     shopName: {
       type: String,
       default: "",
@@ -85,11 +86,11 @@ const ProductSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    strict: true, // 🔒 empêche les champs fantômes
+    strict: true,
   }
 );
 
-// 🔍 Index combiné PayIn-safe
+// 🔍 Index optimisés panier / paiement
 ProductSchema.index({ seller: 1, status: 1 });
 ProductSchema.index({ name: "text", category: 1 });
 

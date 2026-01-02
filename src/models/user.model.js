@@ -7,7 +7,9 @@ const crypto = require("crypto");
 // ==========================================
 const userSchema = new mongoose.Schema(
   {
+    // =========================
     // 🧩 Informations de base
+    // =========================
     email: {
       type: String,
       required: true,
@@ -38,19 +40,19 @@ const userSchema = new mongoose.Schema(
       default: "buyer",
     },
 
+    // =========================
     // ⭐️ Vérification email
+    // =========================
     isVerified: {
       type: Boolean,
       default: false,
     },
-    verificationToken: {
-      type: String,
-    },
-    verificationTokenExpires: {
-      type: Date,
-    },
+    verificationToken: String,
+    verificationTokenExpires: Date,
 
-    // 🔸 Informations communes
+    // =========================
+    // 👤 Infos personnelles
+    // =========================
     fullName: { type: String, trim: true },
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
@@ -58,25 +60,56 @@ const userSchema = new mongoose.Schema(
     country: { type: String, trim: true },
     city: { type: String, trim: true },
 
-    // 🔸 Infos vendeur
+    // =========================
+    // 🏪 Infos vendeur
+    // =========================
     ownerName: { type: String, trim: true },
     shopName: { type: String, trim: true, index: true },
     shopDescription: { type: String, trim: true },
     logoUrl: { type: String },
 
-    // 🔸 Images de profil (Cloudinary)
+    // =========================
+    // 🖼️ Images profil
+    // =========================
     profileImageUrl: { type: String }, // legacy
     avatarUrl: { type: String, default: "" }, // legacy
-    photoURL: { type: String, trim: true }, // ✅ champ standard (Flutter / API)
+    photoURL: { type: String, trim: true }, // champ standard
 
-    // 🔸 CINETPAY / Soldes
-    cinetpayId: { type: String },
+    // =========================
+    // 🛒 PANIER UTILISATEUR ✅
+    // =========================
+    cart: [
+      {
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+          required: true,
+        },
+        seller: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        quantity: {
+          type: Number,
+          min: 1,
+          default: 1,
+        },
+      },
+    ],
+
+    // =========================
+    // 💳 CINETPAY / SOLDES
+    // =========================
+    cinetpayId: String,
     balance_locked: { type: Number, default: 0 },
     balance_available: { type: Number, default: 0 },
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
-    // 🔸 Infos livreur
+    // =========================
+    // 🚚 Infos livreur
+    // =========================
     plate: { type: String, trim: true },
     idNumber: { type: String, trim: true },
     guarantee: { type: String, trim: true },
@@ -104,12 +137,16 @@ const userSchema = new mongoose.Schema(
       },
     },
 
-    // 🔸 Documents d’identité
-    idCardFrontUrl: { type: String },
-    idCardBackUrl: { type: String },
-    selfieUrl: { type: String },
+    // =========================
+    // 📎 Documents identité
+    // =========================
+    idCardFrontUrl: String,
+    idCardBackUrl: String,
+    selfieUrl: String,
 
-    // 🔸 Champs supplémentaires pour sellers
+    // =========================
+    // 📞 Téléphone normalisé
+    // =========================
     prefix: { type: String, default: "228" },
     fullNumber: { type: String, default: "" },
   },
@@ -128,11 +165,10 @@ userSchema.pre("save", function (next) {
 });
 
 // ==========================================
-// 🔐 Hash du mot de passe avant sauvegarde
+// 🔐 Hash du mot de passe
 // ==========================================
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -143,7 +179,7 @@ userSchema.pre("save", async function (next) {
 });
 
 // ==========================================
-// ⚡ Génère un token de vérification email
+// ⚡ Générer token vérification email
 // ==========================================
 userSchema.methods.generateEmailVerificationToken = function () {
   const token = crypto.randomBytes(32).toString("hex");
@@ -159,7 +195,7 @@ userSchema.methods.generateEmailVerificationToken = function () {
 };
 
 // ==========================================
-// 🔐 Comparaison des mots de passe
+// 🔐 Comparaison mot de passe
 // ==========================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
   if (!this.password) {
@@ -169,7 +205,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 // ==========================================
-// 🧩 Nettoyage du retour public
+// 🧼 Nettoyage retour public
 // ==========================================
 userSchema.methods.toPublicJSON = function () {
   const user = this.toObject();
@@ -181,7 +217,7 @@ userSchema.methods.toPublicJSON = function () {
 };
 
 // ==========================================
-// 🔍 Index pour les recherches
+// 🔍 Index texte
 // ==========================================
 userSchema.index({
   email: "text",
@@ -192,6 +228,6 @@ userSchema.index({
 });
 
 // ==========================================
-// ✅ Export du modèle
+// ✅ Export
 // ==========================================
 module.exports = mongoose.model("User", userSchema, "users");
