@@ -1,15 +1,14 @@
 // ==========================================
-// src/routes/cart.js (ARCHITECTURE PROPRE)
+// src/routes/cart.js (VERSION COMPATIBLE FLUTTER)
 // ==========================================
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 
-// 🔹 Models
 const Product = require("../models/Product");
 
 // ==========================================
-// 🧾 Schéma MongoDB pour le panier
+// 🧾 Cart Schema
 // ==========================================
 const cartSchema = new mongoose.Schema(
   {
@@ -31,30 +30,29 @@ const cartSchema = new mongoose.Schema(
 const Cart = mongoose.model("Cart", cartSchema);
 
 // ==========================================
-// 🔍 Récupérer le panier d’un utilisateur
-// GET /api/cart/:userId
+// 🔍 GET CART — FORMAT FLUTTER SAFE
 // ==========================================
 router.get("/:userId", async (req, res) => {
   try {
     const cart = await Cart.findOne({ userId: req.params.userId })
       .populate({
         path: "items.product",
-        select: "_id name price images seller",
+        select: "_id name description price stock images category seller shopName country",
       })
       .lean();
 
-    if (!cart) return res.status(200).json([]);
+    if (!cart || !cart.items.length) {
+      return res.status(200).json([]);
+    }
 
-    const formattedItems = cart.items.map((item) => ({
-      productId: item.product._id,
-      name: item.product.name,
-      price: item.product.price,
-      image: item.product.images?.[0] || null,
-      sellerId: item.product.seller,
-      quantity: item.quantity,
-    }));
+    const formatted = cart.items
+      .filter((i) => i.product) // sécurité
+      .map((item) => ({
+        ...item.product,
+        quantity: item.quantity,
+      }));
 
-    res.status(200).json(formattedItems);
+    res.status(200).json(formatted);
   } catch (err) {
     console.error("❌ getCart error:", err);
     res.status(500).json({ error: err.message });
@@ -62,8 +60,7 @@ router.get("/:userId", async (req, res) => {
 });
 
 // ==========================================
-// ➕ Ajouter un produit au panier
-// POST /api/cart/:userId/add
+// ➕ ADD TO CART
 // ==========================================
 router.post("/:userId/add", async (req, res) => {
   const { productId, quantity = 1 } = req.body;
@@ -81,12 +78,12 @@ router.post("/:userId/add", async (req, res) => {
     let cart = await Cart.findOne({ userId: req.params.userId });
     if (!cart) cart = new Cart({ userId: req.params.userId, items: [] });
 
-    const existingItem = cart.items.find(
-      (item) => item.product.toString() === productId
+    const item = cart.items.find(
+      (i) => i.product.toString() === productId
     );
 
-    if (existingItem) {
-      existingItem.quantity += Math.max(1, quantity);
+    if (item) {
+      item.quantity += Math.max(1, quantity);
     } else {
       cart.items.push({
         product: product._id,
@@ -103,8 +100,7 @@ router.post("/:userId/add", async (req, res) => {
 });
 
 // ==========================================
-// ✏️ Modifier la quantité
-// PUT /api/cart/:userId/update/:productId
+// ✏️ UPDATE QUANTITY
 // ==========================================
 router.put("/:userId/update/:productId", async (req, res) => {
   const { quantity } = req.body;
@@ -136,8 +132,7 @@ router.put("/:userId/update/:productId", async (req, res) => {
 });
 
 // ==========================================
-// ❌ Supprimer un produit du panier
-// DELETE /api/cart/:userId/remove/:productId
+// ❌ REMOVE ITEM
 // ==========================================
 router.delete("/:userId/remove/:productId", async (req, res) => {
   try {
@@ -145,7 +140,7 @@ router.delete("/:userId/remove/:productId", async (req, res) => {
     if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
 
     cart.items = cart.items.filter(
-      (item) => item.product.toString() !== req.params.productId
+      (i) => i.product.toString() !== req.params.productId
     );
 
     await cart.save();
@@ -157,8 +152,7 @@ router.delete("/:userId/remove/:productId", async (req, res) => {
 });
 
 // ==========================================
-// 🧹 Vider le panier
-// DELETE /api/cart/:userId/clear
+// 🧹 CLEAR CART
 // ==========================================
 router.delete("/:userId/clear", async (req, res) => {
   try {
