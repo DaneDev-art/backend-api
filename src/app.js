@@ -10,7 +10,7 @@ const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
 const deployAuth = require("./middleware/deployAuth");
 
-// 🔹 CORS middleware centralisé
+// 🔹 CORS middleware centralisé (frontend)
 const corsOptions = require("./middleware/cors.middleware");
 
 // 🔹 GitHub App
@@ -30,28 +30,36 @@ app.use(morgan("dev"));
 // =======================
 // 🔒 Limiteur de requêtes
 // =======================
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 150,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    success: false,
-    error: "Trop de requêtes depuis cette IP, réessayez plus tard.",
-  },
-});
-app.use(limiter);
-
-// =======================
-// 🌐 CORS GLOBAL (Frontend uniquement)
-// =======================
-app.use(cors(corsOptions));
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 150,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: "Trop de requêtes depuis cette IP, réessayez plus tard.",
+    },
+  })
+);
 
 // =======================
 // 🧩 Middleware JSON
 // =======================
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// ==================================================
+// 💳 CINETPAY — AVANT LE CORS GLOBAL (CRITIQUE)
+// ==================================================
+// Server-to-server → AUCUNE restriction CORS
+app.use("/api/cinetpay", cors({ origin: true }));
+app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
+
+// =======================
+// 🌐 CORS GLOBAL (Frontend uniquement)
+// =======================
+app.use(cors(corsOptions));
 
 // =======================
 // 🔹 Routes principales
@@ -71,11 +79,6 @@ app.use("/api/orders", require("./routes/order.routes"));
 
 // 📧 Email
 app.use("/api/email", emailRoutes);
-
-// 💳 Paiement CinetPay
-// ⚠️ IMPORTANT : CORS ouvert pour CinetPay (server-to-server)
-app.use("/api/cinetpay", cors({ origin: true }));
-app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 
 // 🛍️ Marketplace
 app.use("/api/products", require("./routes/products"));
@@ -133,7 +136,7 @@ app.get("/health", (req, res) => {
 })();
 
 // =======================
-// 🔹 Route GitHub : déclencher workflow (SÉCURISÉE)
+// 🔹 Route GitHub : déclencher workflow
 // =======================
 app.post("/api/github/deploy", deployAuth, async (req, res) => {
   try {
