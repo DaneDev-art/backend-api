@@ -10,6 +10,9 @@ const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
 const deployAuth = require("./middleware/deployAuth");
 
+// 🔹 CORS middleware centralisé
+const corsOptions = require("./middleware/cors.middleware");
+
 // 🔹 GitHub App
 const { getGithubClient } = require("./githubClient");
 
@@ -40,45 +43,9 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // =======================
-// 🌐 CORS Configuration
+// 🌐 CORS GLOBAL (Frontend uniquement)
 // =======================
-const allowedOriginsProd = [
-  "https://emarket-web.onrender.com",
-  "https://backend-api-m0tf.onrender.com",
-];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-
-      // Dev local
-      if (
-        origin.startsWith("http://localhost:") ||
-        origin.startsWith("chrome-extension://")
-      ) {
-        console.log("🔍 [CORS LOCAL DEV] Autorisé :", origin);
-        return callback(null, true);
-      }
-
-      // Production
-      if (process.env.NODE_ENV === "production") {
-        if (allowedOriginsProd.includes(origin)) {
-          console.log("✅ [CORS PROD] Origine autorisée :", origin);
-          return callback(null, true);
-        }
-        console.warn("❌ [CORS PROD] Origine refusée :", origin);
-        return callback(new Error("Origine non autorisée par CORS"));
-      }
-
-      console.log("🔍 [CORS DEV] Autorisé :", origin);
-      callback(null, true);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+app.use(cors(corsOptions));
 
 // =======================
 // 🧩 Middleware JSON
@@ -90,39 +57,41 @@ app.use(express.urlencoded({ extended: true }));
 // 🔹 Routes principales
 // =======================
 
-// Auth
+// 🔐 Auth
 app.use("/api/auth", require("./routes/authRoutes"));
 
-// Users
+// 👤 Users
 app.use("/api/users", require("./routes/users.routes"));
 
-// Sellers
+// 🏪 Sellers
 app.use("/api/sellers", require("./routes/seller.routes"));
 
-// Orders ✅ (CORRIGÉ)
+// 🛒 Orders
 app.use("/api/orders", require("./routes/order.routes"));
 
-// Email (test)
+// 📧 Email
 app.use("/api/email", emailRoutes);
 
-// Paiement CinetPay
+// 💳 Paiement CinetPay
+// ⚠️ IMPORTANT : CORS ouvert pour CinetPay (server-to-server)
+app.use("/api/cinetpay", cors({ origin: true }));
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
 
-// Marketplace
+// 🛍️ Marketplace
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/upload", require("./routes/uploadRoutes"));
 
-// Deliveries
+// 🚚 Deliveries
 app.use("/api/deliveries", require("./routes/deliveries"));
 
-// 🚚 DELIVERY ASSIGNMENTS
+// 🚚 Delivery Assignments
 app.use(
   "/api/delivery-assignments",
   require("./routes/deliveryAssignments")
 );
 
-// Messages
+// 💬 Messages
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
@@ -183,7 +152,6 @@ app.post("/api/github/deploy", deployAuth, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 
 // =======================
 // 🔹 Gestion globale des erreurs
