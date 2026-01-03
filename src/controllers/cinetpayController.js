@@ -195,8 +195,8 @@ module.exports = {
 
   /* ======================================================
    🟡 VERIFY PAYIN (API + REDIRECT SAFE)
-   ====================================================== */
- verifyPayIn: async (req, res) => {
+  ====================================================== */
+verifyPayIn: async (req, res) => {
   try {
     const transactionId =
       req.body.transaction_id ||
@@ -214,9 +214,25 @@ module.exports = {
      * CinetPay redirige l'utilisateur avec une requête GET
      */
     if (req.method === "GET") {
-      const redirectUrl = `${process.env.FRONTEND_URL}/payin/result?transaction_id=${transactionId}`;
+      const status = result?.status || "PENDING";
+
+      const redirectUrl =
+        `${process.env.FRONTEND_URL}/payin/result` +
+        `?transaction_id=${transactionId}` +
+        `&status=${status}`;
+
       return res.redirect(302, redirectUrl);
     }
+
+    /**
+     * 📦 CAS API / FRONTEND (Flutter, fetch, axios)
+     */
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("❌ verifyPayIn:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+},
 
 /* ======================================================
      🧩 REGISTER SELLER
