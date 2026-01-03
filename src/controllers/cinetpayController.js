@@ -217,44 +217,55 @@ module.exports = {
      🧩 REGISTER SELLER
   ====================================================== */
   registerSeller: async (req, res) => {
-    try {
-      const { name, surname, email, phone, prefix } = req.body;
+  try {
+    const { name, surname, email, phone, prefix } = req.body;
 
-      if (!name || !email || !phone || !prefix) {
-        return res
-          .status(400)
-          .json({ error: "Champs requis manquants" });
-      }
+    if (!name || !email || !phone || !prefix) {
+      return res.status(400).json({ error: "Champs requis manquants" });
+    }
 
-      const existingUser = await User.findOne({ email });
-      const existingSeller = await Seller.findOne({ email });
+    // 1️⃣ Créer ou récupérer User
+    let user = await User.findOne({ email });
 
-      if (
-        (existingUser && existingUser.role === "seller") ||
-        existingSeller
-      ) {
-        return res
-          .status(409)
-          .json({ error: "Vendeur existe déjà" });
-      }
-
-      const seller = await User.create({
+    if (!user) {
+      user = await User.create({
         name,
         surname,
         email,
         phone,
         prefix,
         role: "seller",
-        balance_available: 0,
-        balance_locked: 0,
       });
-
-      return res.status(201).json({ success: true, seller });
-    } catch (err) {
-      console.error("❌ registerSeller:", err.message);
-      return res.status(500).json({ error: err.message });
     }
-  },
+
+    // 2️⃣ Vérifier Seller existant
+    const existingSeller = await Seller.findOne({ user: user._id });
+    if (existingSeller) {
+      return res.status(409).json({ error: "Seller existe déjà" });
+    }
+
+    // 3️⃣ Créer Seller (OBLIGATOIRE)
+    const seller = await Seller.create({
+      user: user._id, // 🔥 CHAMP CRITIQUE
+      name,
+      surname,
+      email,
+      phone,
+      prefix,
+      balance_available: 0,
+      balance_locked: 0,
+    });
+
+    return res.status(201).json({
+      success: true,
+      sellerId: seller._id,
+      userId: user._id,
+    });
+  } catch (err) {
+    console.error("❌ registerSeller:", err);
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   /* ======================================================
      🔔 WEBHOOK CINETPAY

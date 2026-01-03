@@ -595,7 +595,7 @@ CinetPayService.createPayIn = async function (payload) {
 
 
 //=====================================================
-// VERIFY PAYIN — CLEAN ESCROW VERSION (FINAL FIXED)
+// VERIFY PAYIN — CLEAN ESCROW VERSION (SAFE)
 //=====================================================
 
 CinetPayService.verifyPayIn = async function (transaction_id) {
@@ -675,7 +675,7 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
   // SUCCESS PAYIN
   // ==============================
   if (["ACCEPTED", "SUCCESS", "PAID"].includes(status)) {
-    // 🔐 Sécurité montant (obligatoire)
+    // 🔐 Sécurité montant
     if (Math.round(paidAmount) !== Math.round(Number(tx.amount))) {
       tx.status = "FAILED";
       tx.verifiedAt = new Date();
@@ -692,16 +692,18 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
     }
 
     // ==========================
-    // CREDIT SELLER (ESCROW)
+    // CREDIT SELLER (ESCROW SAFE)
     // ==========================
     if (!tx.sellerCredited) {
-      const seller = await Seller.findById(tx.seller);
-      if (!seller) throw new Error("Vendeur introuvable");
+      // ✅ UPDATE ATOMIQUE — PAS DE seller.save()
+      const result = await Seller.updateOne(
+        { _id: tx.seller },
+        { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+      );
 
-      seller.balance_locked =
-        Number(seller.balance_locked || 0) + Number(tx.netAmount || 0);
-
-      await seller.save();
+      if (result.matchedCount === 0) {
+        throw new Error("Vendeur introuvable");
+      }
 
       // ======================
       // PLATFORM REVENUE (IDEMPOTENT)
