@@ -211,6 +211,28 @@ verifyPayIn: async (req, res) => {
     }
   },
 
+/* ======================================================
+   🟡 VERIFY PAYOUT (API + WEBHOOK)
+====================================================== */
+verifyPayOut: async (req, res) => {
+  try {
+    const payoutId = req.body?.payout_id || req.query?.payout_id;
+
+    if (!payoutId) {
+      return res.status(400).json({ error: "payout_id requis" });
+    }
+
+    // Appel au service CinetPay pour vérification (à implémenter)
+    const result = await CinetPayService.verifyPayOut(payoutId);
+
+    // 🔁 CAS API / FRONTEND
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("❌ verifyPayOut:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
 
 /* ======================================================
      🧩 REGISTER SELLER
