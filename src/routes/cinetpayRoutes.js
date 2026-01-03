@@ -1,15 +1,11 @@
-
-//src/routes/cinetpayRoutes.js
-
+// src/routes/cinetpayRoutes.js
 const express = require("express");
 const router = express.Router();
 const bodyParser = require("body-parser");
 const CinetpayController = require("../controllers/cinetpayController");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// ============================
-// 🧩 Middleware Webhook CinetPay
-// ============================
+// Middleware
 router.use(bodyParser.urlencoded({ extended: true }));
 router.use(bodyParser.json());
 
@@ -30,7 +26,7 @@ router.post("/payin/verify", CinetpayController.verifyPayIn);
 // Retrait vendeur (vendeur connecté)
 router.post("/payout/create", verifyToken, CinetpayController.createPayOut);
 
-// Vérification payout (webhook)
+// Vérification payout (webhook / API)
 router.post("/payout/verify", CinetpayController.verifyPayOut);
 
 // ============================
