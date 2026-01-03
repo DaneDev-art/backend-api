@@ -497,11 +497,15 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   const transaction_id = this.generateTransactionId("PAYIN");
 
+  // 🔁 REDIRECTION UTILISATEUR (FRONTEND)
   const finalReturnUrl =
-    returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  returnUrl ||
+  `${process.env.FRONTEND_URL}/payin/result?transaction_id=${transaction_id}`;
 
+  // 🔔 NOTIFICATION BACKEND (SERVER ↔ SERVER)
   const finalNotifyUrl =
-    notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+  notifyUrl ||
+  `${BASE_URL}/api/cinetpay/payin/verify`;
 
   // ==============================
   // ORDER (SCHEMA COMPATIBLE)

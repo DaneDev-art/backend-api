@@ -194,24 +194,29 @@ module.exports = {
   },
 
   /* ======================================================
-     🟠 VERIFY PAYOUT
-  ====================================================== */
-  verifyPayOut: async (req, res) => {
-    try {
-      const { transaction_id } = req.body;
+   🟡 VERIFY PAYIN (API + REDIRECT SAFE)
+   ====================================================== */
+ verifyPayIn: async (req, res) => {
+  try {
+    const transactionId =
+      req.body.transaction_id ||
+      req.body.cpm_trans_id ||
+      req.query.transaction_id;
 
-      if (!transaction_id) {
-        return res
-          .status(400)
-          .json({ error: "transaction_id requis" });
-      }
-
-      const data = await CinetPayService.verifyPayOut(transaction_id);
-      return res.json({ success: true, data });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
+    if (!transactionId) {
+      return res.status(400).json({ error: "transaction_id requis" });
     }
-  },
+
+    const result = await CinetPayService.verifyPayIn(transactionId);
+
+    /**
+     * 🔁 CAS NAVIGATEUR (return_url)
+     * CinetPay redirige l'utilisateur avec une requête GET
+     */
+    if (req.method === "GET") {
+      const redirectUrl = `${process.env.FRONTEND_URL}/payin/result?transaction_id=${transactionId}`;
+      return res.redirect(302, redirectUrl);
+    }
 
 /* ======================================================
      🧩 REGISTER SELLER
