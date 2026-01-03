@@ -30,25 +30,36 @@ const cartSchema = new mongoose.Schema(
 const Cart = mongoose.model("Cart", cartSchema);
 
 // ==========================================
-// 🔍 GET CART — FORMAT FLUTTER SAFE
+// 🔍 GET CART — FORMAT FLUTTER SAFE ✅
 // ==========================================
 router.get("/:userId", async (req, res) => {
   try {
     const cart = await Cart.findOne({ userId: req.params.userId })
       .populate({
         path: "items.product",
-        select: "_id name description price stock images category seller shopName country",
+        select:
+          "_id name description price stock images category seller shopName country",
       })
       .lean();
 
-    if (!cart || !cart.items.length) {
+    if (!cart || !cart.items || cart.items.length === 0) {
       return res.status(200).json([]);
     }
 
+    // 🔥 FORMAT ATTENDU PAR FLUTTER
     const formatted = cart.items
-      .filter((i) => i.product) // sécurité
+      .filter((i) => i.product)
       .map((item) => ({
-        ...item.product,
+        productId: item.product._id.toString(), // ✅ OBLIGATOIRE
+        name: item.product.name,
+        description: item.product.description,
+        price: item.product.price,
+        stock: item.product.stock,
+        images: item.product.images,
+        category: item.product.category,
+        seller: item.product.seller,
+        shopName: item.product.shopName,
+        country: item.product.country,
         quantity: item.quantity,
       }));
 
@@ -76,7 +87,9 @@ router.post("/:userId/add", async (req, res) => {
     }
 
     let cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) cart = new Cart({ userId: req.params.userId, items: [] });
+    if (!cart) {
+      cart = new Cart({ userId: req.params.userId, items: [] });
+    }
 
     const item = cart.items.find(
       (i) => i.product.toString() === productId
@@ -111,14 +124,18 @@ router.put("/:userId/update/:productId", async (req, res) => {
 
   try {
     const cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
+    if (!cart) {
+      return res.status(404).json({ error: "Panier non trouvé" });
+    }
 
     const item = cart.items.find(
       (i) => i.product.toString() === req.params.productId
     );
 
     if (!item) {
-      return res.status(404).json({ error: "Produit non trouvé dans le panier" });
+      return res
+        .status(404)
+        .json({ error: "Produit non trouvé dans le panier" });
     }
 
     item.quantity = quantity;
@@ -137,7 +154,9 @@ router.put("/:userId/update/:productId", async (req, res) => {
 router.delete("/:userId/remove/:productId", async (req, res) => {
   try {
     const cart = await Cart.findOne({ userId: req.params.userId });
-    if (!cart) return res.status(404).json({ error: "Panier non trouvé" });
+    if (!cart) {
+      return res.status(404).json({ error: "Panier non trouvé" });
+    }
 
     cart.items = cart.items.filter(
       (i) => i.product.toString() !== req.params.productId
