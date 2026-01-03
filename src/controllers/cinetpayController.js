@@ -147,27 +147,45 @@ module.exports = {
   },
 
   /* ======================================================
-     🟡 VERIFY PAYIN
-  ====================================================== */
-  verifyPayIn: async (req, res) => {
-    try {
-      const transactionId =
-        req.body.transaction_id ||
-        req.body.cpm_trans_id ||
-        req.query.transaction_id;
+   🟡 VERIFY PAYIN (API + REDIRECT SAFE)
+====================================================== */
+verifyPayIn: async (req, res) => {
+  try {
+    const transactionId =
+      req.body?.transaction_id ||
+      req.body?.cpm_trans_id ||
+      req.query?.transaction_id;
 
-      if (!transactionId) {
-        return res
-          .status(400)
-          .json({ error: "transaction_id requis" });
-      }
-
-      const result = await CinetPayService.verifyPayIn(transactionId);
-      return res.status(200).json(result);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
+    if (!transactionId) {
+      return res.status(400).json({ error: "transaction_id requis" });
     }
-  },
+
+    const result = await CinetPayService.verifyPayIn(transactionId);
+
+    /**
+     * 🔁 CAS NAVIGATEUR (return_url)
+     * CinetPay redirige l'utilisateur via GET
+     */
+    if (req.method === "GET") {
+      const status = result?.status || "PENDING";
+
+      const redirectUrl =
+        `${process.env.FRONTEND_URL}/payin/result` +
+        `?transaction_id=${transactionId}` +
+        `&status=${status}`;
+
+      return res.redirect(302, redirectUrl);
+    }
+
+    /**
+     * 📦 CAS API / MOBILE / FRONTEND
+     */
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("❌ verifyPayIn:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   /* ======================================================
      🔵 CREATE PAYOUT
@@ -193,46 +211,6 @@ module.exports = {
     }
   },
 
-  /* ======================================================
-   🟡 VERIFY PAYIN (API + REDIRECT SAFE)
-  ====================================================== */
-verifyPayIn: async (req, res) => {
-  try {
-    const transactionId =
-      req.body.transaction_id ||
-      req.body.cpm_trans_id ||
-      req.query.transaction_id;
-
-    if (!transactionId) {
-      return res.status(400).json({ error: "transaction_id requis" });
-    }
-
-    const result = await CinetPayService.verifyPayIn(transactionId);
-
-    /**
-     * 🔁 CAS NAVIGATEUR (return_url)
-     * CinetPay redirige l'utilisateur avec une requête GET
-     */
-    if (req.method === "GET") {
-      const status = result?.status || "PENDING";
-
-      const redirectUrl =
-        `${process.env.FRONTEND_URL}/payin/result` +
-        `?transaction_id=${transactionId}` +
-        `&status=${status}`;
-
-      return res.redirect(302, redirectUrl);
-    }
-
-    /**
-     * 📦 CAS API / FRONTEND (Flutter, fetch, axios)
-     */
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error("❌ verifyPayIn:", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-},
 
 /* ======================================================
      🧩 REGISTER SELLER
