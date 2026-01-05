@@ -102,8 +102,8 @@ const OrderSchema = new mongoose.Schema(
     ====================================================== */
     cinetpayTransactionId: {
       type: String,
-      required: true,
       unique: true,
+      sparse: true, // 🔥 CRUCIAL
       index: true,
     },
 
