@@ -23,7 +23,7 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📦 PRODUITS (snapshot sécurisé)
+       📦 PRODUITS (SNAPSHOT IMMUTABLE)
     ====================================================== */
     items: [
       {
@@ -33,15 +33,17 @@ const OrderSchema = new mongoose.Schema(
           ref: "Product",
         },
 
-        // 📸 Snapshot produit (OBLIGATOIRE)
+        // 📸 Snapshot sécurisé
         productId: {
           type: String,
           required: true,
         },
+
         productName: {
           type: String,
           required: true,
         },
+
         productImage: {
           type: String,
         },
@@ -64,12 +66,7 @@ const OrderSchema = new mongoose.Schema(
        💰 MONTANTS
     ====================================================== */
     totalAmount: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-
-    netAmount: {
+      // produits + livraison
       type: Number,
       required: true,
       min: 0,
@@ -81,8 +78,27 @@ const OrderSchema = new mongoose.Schema(
       min: 0,
     },
 
+    platformFee: {
+      // commission marketplace (optionnelle)
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    netAmount: {
+      // montant vendeur (total - platformFee)
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    currency: {
+      type: String,
+      default: "XOF",
+    },
+
     /* ======================================================
-       💳 PAIEMENT
+       💳 PAIEMENT (PAYIN)
     ====================================================== */
     cinetpayTransactionId: {
       type: String,
@@ -101,7 +117,7 @@ const OrderSchema = new mongoose.Schema(
     ====================================================== */
     deliveryAddress: {
       type: String,
-      required: true,
+      default: "Adresse non fournie",
     },
 
     deliveryAssignment: {
@@ -115,7 +131,7 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "CREATED",          // commande créée, pas encore payée
+        "CREATED",          // commande créée
         "PAYMENT_PENDING", // redirection CinetPay
         "PAID",             // PayIn OK → fonds BLOQUÉS
         "ASSIGNED",
@@ -174,7 +190,7 @@ OrderSchema.virtual("sellerName").get(function () {
 });
 
 /* ======================================================
-   🔹 INDEXES (PROD)
+   🔹 INDEXES (PERFORMANCE)
 ====================================================== */
 OrderSchema.index({ client: 1, createdAt: -1 });
 OrderSchema.index({ seller: 1, createdAt: -1 });

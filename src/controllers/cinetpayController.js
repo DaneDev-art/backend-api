@@ -1,20 +1,28 @@
 // =============================================
 // controllers/cinetpayController.js
-// PRODUCTION READY — SYNTAX FIXED
+// PRODUCTION READY — FULL VERSION
 // =============================================
 
 const mongoose = require("mongoose");
 const CinetPayService = require("../services/CinetPayService");
+
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
+const Order = require("../models/order.model");
 
 const BASE_URL =
   process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
 
+/* ======================================================
+   🧠 UTILS
+====================================================== */
+const isValidObjectId = (id) =>
+  mongoose.Types.ObjectId.isValid(id);
+
 module.exports = {
   /* ======================================================
-     🟢 CREATE PAYIN
+     🟢 CREATE PAYIN (ESCROW SAFE)
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
@@ -27,8 +35,6 @@ module.exports = {
         currency = "XOF",
         description,
         sellerId,
-        returnUrl,
-        notifyUrl,
         items,
       } = req.body;
 
@@ -37,8 +43,12 @@ module.exports = {
         return res.status(401).json({ error: "Utilisateur non authentifié" });
       }
 
-      if (!sellerId) {
-        return res.status(400).json({ error: "sellerId requis" });
+      if (!sellerId || !isValidObjectId(sellerId)) {
+        return res.status(400).json({ error: "sellerId invalide" });
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Panier vide" });
       }
 
       const resolvedProductPrice =
@@ -50,35 +60,19 @@ module.exports = {
           .json({ error: "amount ou productPrice invalide" });
       }
 
-      if (!Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ error: "Panier vide" });
-      }
-
-      /* ======================================================
-         🔒 VALIDATION DES IDS
-      ====================================================== */
-      for (const item of items) {
-        if (!item.productId || typeof item.quantity !== "number") {
-          return res.status(400).json({
-            error: "Structure item invalide",
-            item,
-          });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
-          return res.status(400).json({
-            error: "productId invalide",
-            productId: item.productId,
-          });
-        }
-      }
-
       /* ======================================================
          🔎 FETCH PRODUITS
       ====================================================== */
-      const productIds = items.map(
-        (i) => new mongoose.Types.ObjectId(i.productId)
-      );
+      const productIds = items.map((i) => i.productId);
+
+      for (const pid of productIds) {
+        if (!isValidObjectId(pid)) {
+          return res.status(400).json({
+            error: "productId invalide",
+            productId: pid,
+          });
+        }
+      }
 
       const products = await Product.find({
         _id: { $in: productIds },
@@ -91,7 +85,7 @@ module.exports = {
       }
 
       /* ======================================================
-         🛡️ ITEMS SAFE
+         📦 ITEMS SNAPSHOT (IMMUTABLE)
       ====================================================== */
       const safeItems = items.map((item) => {
         const product = products.find(
@@ -99,15 +93,24 @@ module.exports = {
         );
 
         return {
+          product: product._id,
           productId: product._id.toString(),
           productName: product.name,
-          price: Number(product.price),
+          productImage: product.image || null,
           quantity: item.quantity,
+          price: Number(product.price),
         };
       });
 
+      const productTotal = safeItems.reduce(
+        (s, i) => s + i.price * i.quantity,
+        0
+      );
+
+      const totalAmount = productTotal + Number(shippingFee || 0);
+
       /* ======================================================
-         👤 SELLER
+         🏪 SELLER (Seller OU User)
       ====================================================== */
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
@@ -117,26 +120,51 @@ module.exports = {
       }
 
       /* ======================================================
-         🚀 CINETPAY PAYIN
+         🧾 CREATE ORDER (ESCROW LOCKED)
       ====================================================== */
-      const result = await CinetPayService.createPayIn({
-        sellerId,
-        clientId,
+      const order = await Order.create({
+        client: clientId,
+        seller: sellerId,
         items: safeItems,
-        productPrice: Number(resolvedProductPrice),
-        shippingFee: Number(shippingFee) || 0,
-        currency,
-        buyerEmail: req.user?.email || null,
-        buyerPhone: req.user?.phone || null,
-        description:
-          description || `Paiement vers ${seller.name || "vendeur"}`,
-        returnUrl:
-          returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
-        notifyUrl:
-          notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        totalAmount,
+        netAmount: productTotal,
+        shippingFee,
+        deliveryAddress: req.user?.address || "Adresse inconnue",
+        status: "PAYMENT_PENDING",
+        cinetpayTransactionId: "PENDING",
+        escrow: {
+          isLocked: true,
+        },
       });
 
-      return res.status(201).json(result);
+      /* ======================================================
+         🚀 CINETPAY PAYIN
+      ====================================================== */
+      const payin = await CinetPayService.createPayIn({
+        sellerId,
+        clientId,
+        amount: totalAmount,
+        currency,
+        items: safeItems,
+        description:
+          description || `Paiement vers ${seller.name || "vendeur"}`,
+        buyerEmail: req.user?.email || null,
+        buyerPhone: req.user?.phone || null,
+
+        // 🔥 MOBILE DEEPLINK
+        returnUrl: `emarket://payin?transaction_id=${order._id}`,
+        notifyUrl: `${BASE_URL}/api/cinetpay/webhook`,
+      });
+
+      order.cinetpayTransactionId = payin.transaction_id;
+      await order.save();
+
+      return res.status(201).json({
+        success: true,
+        transaction_id: payin.transaction_id,
+        payment_url: payin.payment_url,
+        orderId: order._id,
+      });
     } catch (err) {
       console.error("❌ createPayIn:", err);
       return res.status(500).json({
@@ -147,7 +175,7 @@ module.exports = {
   },
 
   /* ======================================================
-     🟡 VERIFY PAYIN (API + REDIRECT SAFE)
+     🟡 VERIFY PAYIN (API / POLLING / MOBILE)
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
@@ -162,15 +190,14 @@ module.exports = {
 
       const result = await CinetPayService.verifyPayIn(transactionId);
 
-      if (req.method === "GET") {
-        const status = result?.status || "PENDING";
+      const order = await Order.findOne({
+        cinetpayTransactionId: transactionId,
+      });
 
-        const redirectUrl =
-          `${process.env.FRONTEND_URL}/payin/result` +
-          `?transaction_id=${transactionId}` +
-          `&status=${status}`;
-
-        return res.redirect(302, redirectUrl);
+      if (order && result.status === "SUCCESS" && order.status !== "PAID") {
+        order.status = "PAID";
+        order.escrow.isLocked = true;
+        await order.save();
       }
 
       return res.status(200).json(result);
@@ -181,14 +208,14 @@ module.exports = {
   },
 
   /* ======================================================
-     🔵 CREATE PAYOUT
+     🔵 CREATE PAYOUT (SELLER)
   ====================================================== */
   createPayOut: async (req, res) => {
     try {
       const { sellerId, amount, currency = "XOF", notifyUrl } = req.body;
 
-      if (!sellerId || Number(amount) <= 0) {
-        return res.status(400).json({ error: "Données invalides" });
+      if (!sellerId || !isValidObjectId(sellerId) || Number(amount) <= 0) {
+        return res.status(400).json({ error: "Données payout invalides" });
       }
 
       const result = await CinetPayService.createPayOutForSeller({
@@ -200,6 +227,7 @@ module.exports = {
 
       return res.status(201).json(result);
     } catch (err) {
+      console.error("❌ createPayOut:", err.message);
       return res.status(500).json({ error: err.message });
     }
   },
@@ -284,7 +312,20 @@ module.exports = {
         req.body,
         req.headers
       );
-      return res.status(200).json({ success: true, result });
+
+      if (result?.transaction_id && result.status === "SUCCESS") {
+        const order = await Order.findOne({
+          cinetpayTransactionId: result.transaction_id,
+        });
+
+        if (order && order.status !== "PAID") {
+          order.status = "PAID";
+          order.escrow.isLocked = true;
+          await order.save();
+        }
+      }
+
+      return res.status(200).json({ success: true });
     } catch (err) {
       console.error("❌ Webhook error:", err.message);
       return res.status(500).json({ error: err.message });
