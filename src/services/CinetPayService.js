@@ -968,20 +968,19 @@ CinetPayService.verifyPayIn = async function (transaction_id) {
 
 CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
   const crypto = require("crypto");
+  const Order = require("../models/order.model");
   const PayoutTransaction = require("../models/PayoutTransaction");
   const PayinTransaction = require("../models/PayinTransaction");
   const Seller = require("../models/Seller");
 
-  // ==========================
-  // SIGNATURE CHECK
-  // ==========================
-  if (WEBHOOK_SECRET) {
+  /* ========================== SIGNATURE ========================== */
+  if (process.env.WEBHOOK_SECRET) {
     const signature =
       headers["x-cinetpay-signature"] || headers["signature"];
 
     if (signature) {
       const computed = crypto
-        .createHmac("sha256", WEBHOOK_SECRET)
+        .createHmac("sha256", process.env.WEBHOOK_SECRET)
         .update(JSON.stringify(webhookPayload))
         .digest("hex");
 
@@ -991,9 +990,7 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
     }
   }
 
-  // ==========================
-  // TRANSACTION ID
-  // ==========================
+  /* ========================== TRANSACTION ID ========================== */
   const client_transaction_id =
     webhookPayload.client_transaction_id ||
     webhookPayload.data?.client_transaction_id ||
@@ -1013,9 +1010,9 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
     .toString()
     .toUpperCase();
 
-  // ======================================================
-  // 🔁 PAYOUT WEBHOOK
-  // ======================================================
+  /* ======================================================
+     🔁 PAYOUT WEBHOOK
+  ====================================================== */
   const payoutTx = await PayoutTransaction.findOne({
     client_transaction_id,
   });
@@ -1029,8 +1026,7 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
       payoutTx.status = "SUCCESS";
       payoutTx.completedAt = new Date();
     } else if (
-      ["FAILED", "CANCEL"].some((s) => statusFromWebhook.includes(s)) &&
-      payoutTx.status !== "FAILED"
+      ["FAILED", "CANCEL"].some((s) => statusFromWebhook.includes(s))
     ) {
       payoutTx.status = "FAILED";
 
@@ -1050,26 +1046,52 @@ CinetPayService.handleWebhook = async function (webhookPayload, headers = {}) {
     return { ok: true, txType: "payout", tx: payoutTx };
   }
 
-  // ======================================================
-  // 🔁 PAYIN WEBHOOK (INFO ONLY)
-  // ======================================================
+  /* ======================================================
+     🔁 PAYIN WEBHOOK (ESCROW LOCK)
+  ====================================================== */
   const payinTx = await PayinTransaction.findOne({
     transaction_id: client_transaction_id,
   });
 
   if (payinTx) {
-    // ⚠️ NE PAS toucher aux fonds ici
     payinTx.cinetpay_status = statusFromWebhook;
     payinTx.raw_response = webhookPayload;
     payinTx.updatedAt = new Date();
-
     await payinTx.save();
+
+    // 🔥 PAYIN SUCCESS → VERROUILLER ESCROW
+    if (statusFromWebhook.includes("SUCCESS")) {
+      const order = await Order.findById(payinTx.order);
+
+      if (
+        order &&
+        order.status !== "PAID" &&
+        !order.escrow?.isLocked
+      ) {
+        // 💰 Calcul net vendeur (ex: 10% commission)
+        const commissionRate = Number(process.env.PLATFORM_FEE_PERCENT || 10);
+        const commission =
+          (order.totalAmount * commissionRate) / 100;
+
+        const netAmount = order.totalAmount - commission;
+
+        order.status = "PAID";
+        order.netAmount = netAmount;
+
+        order.escrow = {
+          isLocked: true,
+          lockedAt: new Date(),
+          releasedAt: null,
+        };
+
+        await order.save();
+      }
+    }
 
     return { ok: true, txType: "payin", tx: payinTx };
   }
 
   return { ok: false, message: "Transaction inconnue" };
 };
-
 
 module.exports = CinetPayService;

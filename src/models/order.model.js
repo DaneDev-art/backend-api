@@ -23,6 +23,16 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
+       🏪 DELIVERY
+    ====================================================== */
+    delivery: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    /* ======================================================
        📦 PRODUITS (SNAPSHOT IMMUTABLE)
     ====================================================== */
     items: [
