@@ -5,7 +5,7 @@ const Seller = require("../models/Seller");
 const CinetPayService = require("../services/CinetPayService");
 
 /* ======================================================
-   🔹 CREATE ORDER BEFORE PAYIN (ESCROW INIT)
+   🔹 CREATE ORDER BEFORE PAYIN
 ====================================================== */
 exports.createOrderBeforePayIn = async (req, res) => {
   try {
@@ -17,7 +17,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
       deliveryAddress,
     } = req.body;
 
-    /* ================= VALIDATIONS ================= */
+    // ===== VALIDATIONS =====
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Panier vide" });
     }
@@ -30,20 +30,20 @@ exports.createOrderBeforePayIn = async (req, res) => {
       return res.status(400).json({ message: "Adresse de livraison requise" });
     }
 
-    /* ================= SELLER ================= */
-    const seller = await Seller.findById(sellerId);
+    // ===== SELLER =====
+    const seller = await Seller.findById(sellerId).lean();
     if (!seller) {
       return res.status(404).json({ message: "Vendeur introuvable" });
     }
 
-    /* ================= PRODUITS ================= */
+    // ===== PRODUCTS CHECK =====
     const productIds = items.map((i) => i.productId);
 
     const products = await Product.find({
       _id: { $in: productIds },
       seller: sellerId,
     })
-      .select("_id name price images")
+      .select("_id name price images currency")
       .lean();
 
     if (products.length !== items.length) {
@@ -52,56 +52,56 @@ exports.createOrderBeforePayIn = async (req, res) => {
       });
     }
 
+    // map produits
     const productMap = {};
     for (const p of products) {
       productMap[p._id.toString()] = p;
     }
 
-    /* ================= SNAPSHOT PRODUITS ================= */
+    // ===== SNAPSHOT =====
     let productTotal = 0;
 
     const frozenItems = items.map((item) => {
-      const product = productMap[item.productId];   // ✅
+      const product = productMap[item.productId];
 
-      if (!product) {
-        throw new Error("Produit introuvable");
-      }
-
-      const quantity = Number(item.quantity);
+      const quantity = Number(item.quantity || 1);
       const price = Number(product.price);
 
       productTotal += quantity * price;
 
       return {
-        product: product._id,
+        product: product._id,            // ref mongo
         productId: product._id.toString(),
         productName: product.name,
         productImage: product.images?.[0] || null,
         quantity,
         price,
+        currency: product.currency || "XOF",
       };
     });
 
     const totalAmount = productTotal + Number(shippingFee);
 
-    /* ================= CREATE ORDER ================= */
+    // ===== CREATE ORDER =====
     const order = await Order.create({
       client: mongoose.Types.ObjectId.isValid(clientId)
         ? clientId
-        : req.user?._id,   // ✅ préférable si authentifié
+        : req.user?._id,
 
       seller: seller._id,
+
       items: frozenItems,
 
       totalAmount,
       shippingFee: Number(shippingFee),
 
-      // sera recalculé après payin
-      netAmount: 0,
+      currency: frozenItems[0]?.currency || "XOF",
+
+      netAmount: 0, // calculé après PayIn
 
       deliveryAddress,
 
-      status: "PAYMENT_PENDING",   // ✅ ALIGNÉ AU SCHEMA
+      status: "PAYMENT_PENDING",
 
       escrow: {
         isLocked: false,
@@ -116,7 +116,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     return res.status(201).json({
       success: true,
       orderId: order._id,
-      totalAmount: order.totalAmount,
+      totalAmount: order.totalAmount,   // alias getter
       message: "Commande créée, prête pour paiement",
     });
   } catch (error) {
@@ -130,7 +130,37 @@ exports.createOrderBeforePayIn = async (req, res) => {
 };
 
 /* ======================================================
-   🔹 RELEASE FUNDS (CLIENT CONFIRMS DELIVERY)
+   🔹 LOCK AFTER SUCCESSFUL PAYIN
+====================================================== */
+exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error("Commande introuvable");
+
+  // frais plateforme si besoin
+  const PLATFORM_FEE_RATE = 0.04;
+
+  order.netAmount = Math.floor(
+    order.totalAmount * (1 - PLATFORM_FEE_RATE)
+  );
+
+  order.status = "PAID";
+
+  order.escrow.isLocked = true;
+  order.escrow.lockedAt = new Date();
+
+  order.payment = {
+    payinId: payinResult.transaction_id,
+    operator: payinResult.operator || "CinetPay",
+    paidAt: new Date(),
+  };
+
+  await order.save();
+
+  return order;
+};
+
+/* ======================================================
+   🔹 RELEASE FUNDS → PAYOUT SELLER
 ====================================================== */
 exports.releaseOrder = async (req, res) => {
   try {
@@ -141,27 +171,27 @@ exports.releaseOrder = async (req, res) => {
       return res.status(400).json({ error: "orderId invalide" });
     }
 
-    const order = await Order.findById(orderId)
-      .populate("seller");
-
+    const order = await Order.findById(orderId).lean();
     if (!order) {
       return res.status(404).json({ error: "Commande introuvable" });
     }
 
-    /* ================= AUTH CLIENT ================= */
+    // ===== AUTH CLIENT =====
     if (order.client.toString() !== clientId.toString()) {
       return res.status(403).json({ error: "Non autorisé" });
     }
 
-    /* ================= STATUS ================= */
-    const paidStatuses = ["PAID"];
-
-    if (!paidStatuses.includes(order.status)) {
-      return res.status(400).json({ error: "Commande non payée" });
+    // ===== STATUS CHECK =====
+    if (order.status !== "PAID") {
+      return res.status(400).json({
+        error: "Commande non payée",
+      });
     }
 
     if (!order.escrow?.isLocked) {
-      return res.status(400).json({ error: "Fonds non bloqués" });
+      return res.status(400).json({
+        error: "Fonds non bloqués",
+      });
     }
 
     if (order.isConfirmedByClient) {
@@ -176,31 +206,37 @@ exports.releaseOrder = async (req, res) => {
       });
     }
 
-    /* ================= PAYOUT ================= */
-    const payout =
-      await CinetPayService.createPayOutForSeller({
-        sellerId: order.seller._id,
-        amount: order.netAmount,
-        currency: order.currency || "XOF",
-        notifyUrl:
-          `${process.env.PLATFORM_BASE_URL}/api/cinetpay/payout/verify`,
-      });
+    // ===== PAYOUT =====
+    const payout = await CinetPayService.createPayOutForSeller({
+      sellerId: order.seller,
+      amount: order.netAmount,
+      currency: order.currency || "XOF",
+      notifyUrl: `${process.env.PLATFORM_BASE_URL}/api/cinetpay/payout/verify`,
+    });
 
-    /* ================= UPDATE ORDER ================= */
-    order.status = "COMPLETED";
-    order.escrow.isLocked = false;
-    order.escrow.releasedAt = new Date();
+    // ===== UPDATE ORDER =====
+    await Order.updateOne(
+      { _id: orderId },
+      {
+        status: "COMPLETED",
 
-    order.isConfirmedByClient = true;
-    order.confirmedAt = new Date();
+        "escrow.isLocked": false,
+        "escrow.releasedAt": new Date(),
 
-    await order.save();
+        isConfirmedByClient: true,
+        confirmedAt: new Date(),
+
+        payoutInfo: {
+          payoutId: payout.payout_id || payout.transaction_id,
+          createdAt: new Date(),
+        },
+      }
+    );
 
     return res.status(200).json({
       success: true,
-      message:
-        "Commande confirmée, fonds libérés vers le vendeur",
-      orderId: order._id,
+      message: "Commande confirmée, fonds libérés vers le vendeur",
+      orderId,
       releasedAmount: order.netAmount,
       payout,
     });
