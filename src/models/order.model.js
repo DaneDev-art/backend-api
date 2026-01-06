@@ -26,12 +26,12 @@ const OrderSchema = new mongoose.Schema(
        🚚 LIVREUR (USER)
        — très important pour ton escrow workflow
     ====================================================== */
-    delivery: {
+    /*delivery: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
-    },
+    },*/
 
     /* ======================================================
        📦 PRODUITS — SNAPSHOT IMMUTABLE
