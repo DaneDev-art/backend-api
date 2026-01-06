@@ -43,8 +43,18 @@ exports.register = async (req, res) => {
         break;
       }
       case "seller": {
-        const { ownerName, shopName, phone, address, country, shopDescription, logoUrl } = req.body;
-        Object.assign(userData, { ownerName, shopName, phone, address, country, shopDescription, logoUrl, status: "approved" });
+        const { ownerName, shopName, phone, address, country, shopDescription, logoUrl, prefix } = req.body;
+        Object.assign(userData, {
+          ownerName,
+          shopName,
+          phone,
+          prefix: prefix || "228",
+          address,
+          country,
+          shopDescription,
+          logoUrl,
+          status: "approved",
+        });
         break;
       }
       case "delivery": {
@@ -65,7 +75,7 @@ exports.register = async (req, res) => {
         userData.role = "buyer";
     }
 
-    // 🔐 Email verification (nouveaux comptes uniquement)
+    // 🔐 Email verification
     const verificationToken = crypto.randomBytes(32).toString("hex");
     userData.verificationToken = verificationToken;
     userData.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
@@ -89,6 +99,7 @@ exports.register = async (req, res) => {
       },
     });
 
+    // 🔹 Créer / synchroniser le seller après création du user
     if (user.role === "seller") {
       await syncSeller(user);
     }
@@ -98,7 +109,7 @@ exports.register = async (req, res) => {
       user: user.toPublicJSON(),
     });
   } catch (err) {
-    logger.error("Register error:", err);
+    console.error("Register error:", err);
     res.status(500).json({ message: "Erreur serveur lors de l’inscription" });
   }
 };
@@ -291,7 +302,7 @@ exports.updateProfilePhoto = async (req, res) => {
 };
 
 // ======================================================
-// 🔹 SYNC SELLER (FIXED & SAFE)
+// 🔹 SYNC SELLER (création ou mise à jour)
 // ======================================================
 const syncSeller = async (user) => {
   try {
@@ -302,7 +313,8 @@ const syncSeller = async (user) => {
     const fullNumber = phone ? `${prefix}${phone}` : "";
 
     const sellerData = {
-      _id: user._id, // 🔥 CRITIQUE : même ID que users
+      _id: user._id, // même ID que User
+      user: user._id, // 🔹 LIEN USER obligatoire si required:true
       name: user.ownerName || user.shopName || user.email.split("@")[0],
       email: user.email,
       phone,
@@ -312,7 +324,7 @@ const syncSeller = async (user) => {
       payout_method: "MOBILE_MONEY",
     };
 
-    // ✅ UPSERT : crée ou met à jour sans casser les soldes
+    // ✅ UPSERT : crée ou met à jour sans casser les soldes existants
     await Seller.findByIdAndUpdate(
       user._id,
       {
@@ -322,6 +334,7 @@ const syncSeller = async (user) => {
           balance_available: 0,
           cinetpay_contact_added: false,
           cinetpay_contact_id: null,
+          cinetpay_contact_meta: {},
           createdAt: new Date(),
         },
       },

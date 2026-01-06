@@ -8,6 +8,8 @@ const Order = require("../models/order.model");
 const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 
+const BASE_URL = process.env.BACKEND_BASE_URL || "https://mon-backend.com";
+
 /* ======================================================
    1️⃣ Commandes du client connecté
    GET /api/orders/me
@@ -48,7 +50,11 @@ router.get("/me", verifyToken, async (req, res) => {
         product: {
           _id: i.product?._id || i.productId,
           name: i.product?.name || i.productName || "Produit inconnu",
-          image: i.product?.images?.[0] || i.productImage || null,
+          productImage: i.product?.images?.[0]
+            ? `${BASE_URL}/${i.product.images[0]}`
+            : i.productImage
+              ? `${BASE_URL}/${i.productImage}`
+              : null,
           price: i.product?.price || i.price || 0,
         },
         quantity: i.quantity,
@@ -106,13 +112,17 @@ router.get("/seller", verifyToken, async (req, res) => {
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
 
       status: o.status,
-      isConfirmedByClient: o.isConfirmedClient || false,
+      isConfirmedByClient: o.isConfirmedByClient || false,
 
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
           name: i.product?.name || i.productName || "Produit inconnu",
-          image: i.product?.images?.[0] || i.productImage || null,
+          productImage: i.product?.images?.[0]
+            ? `${BASE_URL}/${i.product.images[0]}`
+            : i.productImage
+              ? `${BASE_URL}/${i.productImage}`
+              : null,
           price: i.product?.price || i.price || 0,
         },
         quantity: i.quantity,
@@ -155,8 +165,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    const isClient =
-      order.client.toString() === req.user._id.toString();
+    const isClient = order.client.toString() === req.user._id.toString();
 
     const seller = await Seller.findOne({ user: req.user._id });
 
@@ -191,7 +200,11 @@ router.get("/:orderId", verifyToken, async (req, res) => {
           product: {
             _id: i.product?._id || i.productId,
             name: i.product?.name || i.productName || "Produit inconnu",
-            image: i.product?.images?.[0] || i.productImage || null,
+            productImage: i.product?.images?.[0]
+              ? `${BASE_URL}/${i.product.images[0]}`
+              : i.productImage
+                ? `${BASE_URL}/${i.productImage}`
+                : null,
             price: i.product?.price || i.price || 0,
           },
           quantity: i.quantity,

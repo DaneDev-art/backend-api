@@ -43,7 +43,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
       _id: { $in: productIds },
       seller: sellerId,
     })
-      .select("_id name price images currency")
+      .select("_id name price images imageUrl currency") // ajout de imageUrl
       .lean();
 
     if (products.length !== items.length) {
@@ -70,10 +70,13 @@ exports.createOrderBeforePayIn = async (req, res) => {
       productTotal += quantity * price;
 
       return {
-        product: product._id,            // ref mongo
+        product: product._id, // ref mongo
         productId: product._id.toString(),
         productName: product.name,
-        productImage: product.images?.[0] || null,
+        productImage:
+          product.images?.[0] || // priorité images[0]
+          product.imageUrl || // fallback imageUrl
+          null,
         quantity,
         price,
         currency: product.currency || "XOF",
@@ -116,7 +119,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     return res.status(201).json({
       success: true,
       orderId: order._id,
-      totalAmount: order.totalAmount,   // alias getter
+      totalAmount: order.totalAmount, // alias getter
       message: "Commande créée, prête pour paiement",
     });
   } catch (error) {
