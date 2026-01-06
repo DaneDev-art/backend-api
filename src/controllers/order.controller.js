@@ -6,8 +6,6 @@ const CinetPayService = require("../services/CinetPayService");
 
 /* ======================================================
    🔹 CREATE ORDER BEFORE PAYIN (ESCROW INIT)
-   - Crée la commande avant paiement
-   - Fonds NON verrouillés tant que PayIn non validé
 ====================================================== */
 exports.createOrderBeforePayIn = async (req, res) => {
   try {
@@ -49,9 +47,9 @@ exports.createOrderBeforePayIn = async (req, res) => {
       .lean();
 
     if (products.length !== items.length) {
-      return res
-        .status(400)
-        .json({ message: "Produit invalide ou supprimé" });
+      return res.status(400).json({
+        message: "Produit invalide ou supprimé",
+      });
     }
 
     const productMap = {};
@@ -63,8 +61,11 @@ exports.createOrderBeforePayIn = async (req, res) => {
     let productTotal = 0;
 
     const frozenItems = items.map((item) => {
-      const product = productMap[item.productId];
-      if (!product) throw new Error("Produit introuvable");
+      const product = productMap[item.productId];   // ✅
+
+      if (!product) {
+        throw new Error("Produit introuvable");
+      }
 
       const quantity = Number(item.quantity);
       const price = Number(product.price);
@@ -87,22 +88,21 @@ exports.createOrderBeforePayIn = async (req, res) => {
     const order = await Order.create({
       client: mongoose.Types.ObjectId.isValid(clientId)
         ? clientId
-        : new mongoose.Types.ObjectId(),
+        : req.user?._id,   // ✅ préférable si authentifié
 
       seller: seller._id,
       items: frozenItems,
 
       totalAmount,
-      shippingFee,
+      shippingFee: Number(shippingFee),
 
-      // Sera défini après PayIn
+      // sera recalculé après payin
       netAmount: 0,
 
       deliveryAddress,
 
-      status: "PENDING",
+      status: "PAYMENT_PENDING",   // ✅ ALIGNÉ AU SCHEMA
 
-      // 🔐 ESCROW INITIAL
       escrow: {
         isLocked: false,
         lockedAt: null,
@@ -121,6 +121,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ createOrderBeforePayIn:", error);
+
     return res.status(500).json({
       message: "Erreur création commande",
       error: error.message,
@@ -130,7 +131,6 @@ exports.createOrderBeforePayIn = async (req, res) => {
 
 /* ======================================================
    🔹 RELEASE FUNDS (CLIENT CONFIRMS DELIVERY)
-   - Libère l’ESCROW vers le vendeur
 ====================================================== */
 exports.releaseOrder = async (req, res) => {
   try {
@@ -141,7 +141,8 @@ exports.releaseOrder = async (req, res) => {
       return res.status(400).json({ error: "orderId invalide" });
     }
 
-    const order = await Order.findById(orderId).populate("seller");
+    const order = await Order.findById(orderId)
+      .populate("seller");
 
     if (!order) {
       return res.status(404).json({ error: "Commande introuvable" });
@@ -153,37 +154,43 @@ exports.releaseOrder = async (req, res) => {
     }
 
     /* ================= STATUS ================= */
-    const paidStatuses = ["PAID", "SUCCESS", "PAYMENT_SUCCESS"];
+    const paidStatuses = ["PAID"];
 
     if (!paidStatuses.includes(order.status)) {
       return res.status(400).json({ error: "Commande non payée" });
     }
 
-    /* ================= ESCROW ================= */
-    if (!order.escrow || !order.escrow.isLocked) {
+    if (!order.escrow?.isLocked) {
       return res.status(400).json({ error: "Fonds non bloqués" });
     }
 
     if (order.isConfirmedByClient) {
-      return res.status(400).json({ error: "Commande déjà confirmée" });
+      return res.status(400).json({
+        error: "Commande déjà confirmée",
+      });
     }
 
     if (!order.netAmount || order.netAmount <= 0) {
-      return res.status(400).json({ error: "Montant vendeur invalide" });
+      return res.status(400).json({
+        error: "Montant vendeur invalide",
+      });
     }
 
     /* ================= PAYOUT ================= */
-    const payout = await CinetPayService.createPayOutForSeller({
-      sellerId: order.seller._id,
-      amount: order.netAmount,
-      currency: order.currency || "XOF",
-      notifyUrl: `${process.env.PLATFORM_BASE_URL}/api/cinetpay/payout/verify`,
-    });
+    const payout =
+      await CinetPayService.createPayOutForSeller({
+        sellerId: order.seller._id,
+        amount: order.netAmount,
+        currency: order.currency || "XOF",
+        notifyUrl:
+          `${process.env.PLATFORM_BASE_URL}/api/cinetpay/payout/verify`,
+      });
 
     /* ================= UPDATE ORDER ================= */
     order.status = "COMPLETED";
     order.escrow.isLocked = false;
     order.escrow.releasedAt = new Date();
+
     order.isConfirmedByClient = true;
     order.confirmedAt = new Date();
 
@@ -191,13 +198,17 @@ exports.releaseOrder = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Commande confirmée, fonds libérés vers le vendeur",
+      message:
+        "Commande confirmée, fonds libérés vers le vendeur",
       orderId: order._id,
       releasedAmount: order.netAmount,
       payout,
     });
   } catch (err) {
     console.error("❌ releaseOrder:", err);
-    return res.status(500).json({ error: err.message });
+
+    return res.status(500).json({
+      error: err.message,
+    });
   }
 };
