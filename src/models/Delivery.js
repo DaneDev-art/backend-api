@@ -17,7 +17,7 @@ const deliverySchema = new mongoose.Schema(
     idNumber: { type: String, required: true }, // numéro de carte ID
     guarantee: { type: String, default: "" }, // ex : nom de garant ou somme
 
-    transportMode: { type: String, enum: ["Moto", "Voiture", "Vélo"], required: true },
+    transportMode: { type: String, enum: ["Moto", "Voiture", "Vélo"], required: false },
 
     idCardFrontUrl: { type: String, required: true },
     idCardBackUrl: { type: String, required: true },
