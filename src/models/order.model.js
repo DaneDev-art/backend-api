@@ -23,7 +23,8 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       🏪 DELIVERY
+       🚚 LIVREUR (USER)
+       — très important pour ton escrow workflow
     ====================================================== */
     delivery: {
       type: mongoose.Schema.Types.ObjectId,
@@ -33,20 +34,21 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📦 PRODUITS (SNAPSHOT IMMUTABLE)
+       📦 PRODUITS — SNAPSHOT IMMUTABLE
     ====================================================== */
     items: [
       {
-        // 🔗 Référence produit (optionnelle)
+        // 🔗 Référence produit (optionnelle pour enrichissement)
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
         },
 
-        // 📸 Snapshot sécurisé
+        // 📸 SNAPSHOT = SOURCE UNIQUE DE VÉRITÉ FRONTEND
         productId: {
           type: String,
           required: true,
+          index: true, // recherche rapide même sans populate
         },
 
         productName: {
@@ -76,7 +78,7 @@ const OrderSchema = new mongoose.Schema(
        💰 MONTANTS
     ====================================================== */
     totalAmount: {
-      // produits + livraison
+      // ∑ produits + shippingFee
       type: Number,
       required: true,
       min: 0,
@@ -89,14 +91,12 @@ const OrderSchema = new mongoose.Schema(
     },
 
     platformFee: {
-      // commission marketplace (optionnelle)
       type: Number,
       default: 0,
       min: 0,
     },
 
     netAmount: {
-      // montant vendeur (total - platformFee)
       type: Number,
       required: true,
       min: 0,
@@ -105,25 +105,27 @@ const OrderSchema = new mongoose.Schema(
     currency: {
       type: String,
       default: "XOF",
+      index: true,
     },
 
     /* ======================================================
-       💳 PAIEMENT (PAYIN)
+       💳 PAYIN — ESCROW LIÉ À CINETPAY
     ====================================================== */
     cinetpayTransactionId: {
       type: String,
       unique: true,
-      sparse: true, // 🔥 CRUCIAL
+      sparse: true, // 🔥 évite conflits sur null
       index: true,
     },
 
     payinTransaction: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PayinTransaction",
+      index: true,
     },
 
     /* ======================================================
-       🚚 LIVRAISON
+       📍 LIVRAISON
     ====================================================== */
     deliveryAddress: {
       type: String,
@@ -133,21 +135,24 @@ const OrderSchema = new mongoose.Schema(
     deliveryAssignment: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "DeliveryAssignment",
+      index: true,
     },
 
     /* ======================================================
-       📦 STATUT (ESCROW)
+       📦 STATUT MÉTIER + ESCROW
+       — Ton workflow :
+       PAID → DELIVERED → COMPLETED
     ====================================================== */
     status: {
       type: String,
       enum: [
-        "CREATED",          // commande créée
-        "PAYMENT_PENDING", // redirection CinetPay
-        "PAID",             // PayIn OK → fonds BLOQUÉS
+        "CREATED",
+        "PAYMENT_PENDING",
+        "PAID",       // toutes commandes frontend déjà payées
         "ASSIGNED",
         "SHIPPED",
-        "DELIVERED",
-        "COMPLETED",        // client confirme → fonds LIBÉRÉS
+        "DELIVERED",  // doit être atteint AVANT confirmation client
+        "COMPLETED",  // client confirme → fonds libérés
         "DISPUTED",
         "CANCELLED",
       ],
@@ -162,7 +167,9 @@ const OrderSchema = new mongoose.Schema(
       isLocked: {
         type: Boolean,
         default: true,
+        index: true,
       },
+
       releasedAt: {
         type: Date,
       },
@@ -174,6 +181,7 @@ const OrderSchema = new mongoose.Schema(
     isConfirmedByClient: {
       type: Boolean,
       default: false,
+      index: true,
     },
 
     confirmedAt: {
@@ -202,6 +210,7 @@ OrderSchema.virtual("sellerName").get(function () {
 /* ======================================================
    🔹 INDEXES (PERFORMANCE)
 ====================================================== */
+
 OrderSchema.index({ client: 1, createdAt: -1 });
 OrderSchema.index({ seller: 1, createdAt: -1 });
 OrderSchema.index({ status: 1, createdAt: -1 });
