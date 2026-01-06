@@ -8,7 +8,28 @@ const Order = require("../models/order.model");
 const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 
-const BASE_URL = process.env.BACKEND_BASE_URL || "https://mon-backend.com";
+const BASE_URL = process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
+
+/* ======================================================
+   🔹 Fonction utilitaire pour URLs images absolues
+====================================================== */
+function getProductImageUrl(item) {
+  let img = item.productImage || null;
+
+  // Si snapshot vide, prendre première image du produit
+  if ((!img || img.trim() === "") && item.product) {
+    if (Array.isArray(item.product.images) && item.product.images.length > 0) {
+      img = item.product.images[0];
+    }
+  }
+
+  // Si l’URL n’est pas absolue, ajouter BASE_URL
+  if (img && !img.startsWith("http")) {
+    img = `${BASE_URL.replace(/\/$/, "")}/${img.replace(/^\/+/, "")}`;
+  }
+
+  return img;
+}
 
 /* ======================================================
    1️⃣ Commandes du client connecté
@@ -29,32 +50,23 @@ router.get("/me", verifyToken, async (req, res) => {
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
 
-      // 🏪 vendeur
       sellerName: o.seller?.name || "Vendeur inconnu",
 
-      // 💰 montants
       totalAmount: o.totalAmount || 0,
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
 
-      // 📦 statut
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
 
-      // 💳 payin lié
       payinTransactionId: o.payinTransaction || null,
 
-      // 📦 produits = SNAPSHOT + enrichissement
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
           name: i.product?.name || i.productName || "Produit inconnu",
-          productImage: i.product?.images?.[0]
-            ? `${BASE_URL}/${i.product.images[0]}`
-            : i.productImage
-              ? `${BASE_URL}/${i.productImage}`
-              : null,
+          productImage: getProductImageUrl(i),
           price: i.product?.price || i.price || 0,
         },
         quantity: i.quantity,
@@ -118,11 +130,7 @@ router.get("/seller", verifyToken, async (req, res) => {
         product: {
           _id: i.product?._id || i.productId,
           name: i.product?.name || i.productName || "Produit inconnu",
-          productImage: i.product?.images?.[0]
-            ? `${BASE_URL}/${i.product.images[0]}`
-            : i.productImage
-              ? `${BASE_URL}/${i.productImage}`
-              : null,
+          productImage: getProductImageUrl(i),
           price: i.product?.price || i.price || 0,
         },
         quantity: i.quantity,
@@ -166,11 +174,8 @@ router.get("/:orderId", verifyToken, async (req, res) => {
     }
 
     const isClient = order.client.toString() === req.user._id.toString();
-
     const seller = await Seller.findOne({ user: req.user._id });
-
-    const isSeller =
-      seller && order.seller.toString() === seller._id.toString();
+    const isSeller = seller && order.seller.toString() === seller._id.toString();
 
     if (!isClient && !isSeller) {
       return res.status(403).json({
@@ -200,11 +205,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
           product: {
             _id: i.product?._id || i.productId,
             name: i.product?.name || i.productName || "Produit inconnu",
-            productImage: i.product?.images?.[0]
-              ? `${BASE_URL}/${i.product.images[0]}`
-              : i.productImage
-                ? `${BASE_URL}/${i.productImage}`
-                : null,
+            productImage: getProductImageUrl(i),
             price: i.product?.price || i.price || 0,
           },
           quantity: i.quantity,
@@ -258,7 +259,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
     // 👉 workflow autorisé
     const allowedStatuses = ["PAID", "DELIVERED"];
-
     if (!allowedStatuses.includes(order.status)) {
       return res.status(400).json({
         success: false,
@@ -282,7 +282,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
     // 🏪 récupération vendeur
     const seller = await Seller.findById(order.seller).session(session);
-
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -293,14 +292,8 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     const amount = Number(transaction.netAmount || 0);
 
     // 💰 RELEASE DES FONDS
-    seller.balance_locked = Math.max(
-      0,
-      (seller.balance_locked || 0) - amount
-    );
-
-    seller.balance_available =
-      (seller.balance_available || 0) + amount;
-
+    seller.balance_locked = Math.max(0, (seller.balance_locked || 0) - amount);
+    seller.balance_available = (seller.balance_available || 0) + amount;
     await seller.save({ session });
 
     // 📦 MISE À JOUR COMMANDE SANS VALIDATION MONGOOSE
@@ -327,7 +320,6 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     });
   } catch (err) {
     await session.abortTransaction();
-
     return res.status(400).json({
       success: false,
       error: err.message,
