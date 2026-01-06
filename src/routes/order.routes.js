@@ -228,7 +228,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       });
     }
 
-    // 🔐 sécurité
+    // 🔐 sécurité — seul le client propriétaire
     if (order.client.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
@@ -243,18 +243,17 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       });
     }
 
-    // 🔥 ALIGNEMENT WORKFLOW RÉEL
+    // 👉 workflow autorisé
     const allowedStatuses = ["PAID", "DELIVERED"];
 
     if (!allowedStatuses.includes(order.status)) {
       return res.status(400).json({
         success: false,
-        error:
-          "Confirmation impossible — la commande doit être payée ou livrée",
+        error: "Confirmation impossible — la commande doit être payée ou livrée",
       });
     }
 
-    // 💳 vérification PayIn
+    // 💳 vérification PayIn éligible
     const transaction = await PayinTransaction.findOne({
       _id: order.payinTransaction,
       status: "SUCCESS",
@@ -268,7 +267,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
       });
     }
 
-    // 🏪 vendeur
+    // 🏪 récupération vendeur
     const seller = await Seller.findById(order.seller).session(session);
 
     if (!seller) {
@@ -280,7 +279,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
     const amount = Number(transaction.netAmount || 0);
 
-    // 💰 release des fonds
+    // 💰 RELEASE DES FONDS
     seller.balance_locked = Math.max(
       0,
       (seller.balance_locked || 0) - amount
@@ -291,16 +290,24 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
 
     await seller.save({ session });
 
-    // 📦 mise à jour commande
-    order.isConfirmedByClient = true;
-    order.status = "COMPLETED";
-    order.confirmedAt = new Date();
-
-    await order.save({ session });
+    // 📦 MISE À JOUR COMMANDE SANS VALIDATION MONGOOSE
+    await Order.updateOne(
+      { _id: order._id },
+      {
+        $set: {
+          isConfirmedByClient: true,
+          status: "COMPLETED",
+          confirmedAt: new Date(),
+          "escrow.isLocked": false,
+          "escrow.releasedAt": new Date(),
+        },
+      },
+      { session }
+    );
 
     await session.commitTransaction();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Commande confirmée et fonds libérés",
       releasedAmount: amount,
@@ -308,7 +315,7 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
 
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       error: err.message,
     });
