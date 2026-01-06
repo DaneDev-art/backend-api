@@ -125,7 +125,7 @@ router.get("/seller", verifyToken, async (req, res) => {
     res.status(200).json({
       success: true,
       orders: ordersForFrontend,
-    }));
+    });
   } catch (err) {
     console.error("❌ GET /orders/seller:", err);
     res.status(500).json({
