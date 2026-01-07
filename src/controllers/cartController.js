@@ -31,7 +31,7 @@ exports.getCart = async (req, res) => {
 
     // 🔹 Nettoyage + mapping safe
     const cartWithDetails = user.cart
-      .filter((item) => item.product) // produit supprimé ? on ignore
+      .filter((item) => item.product)
       .map((item) => {
         const product = item.product;
 
@@ -57,13 +57,16 @@ exports.getCart = async (req, res) => {
 };
 
 // ==========================================
-// ➕ ADD TO CART
+// ➕ ADD TO CART — CORRIGÉ ET MIS À JOUR
 // ==========================================
 exports.addToCart = async (req, res) => {
   try {
     const { userId } = req.params;
     let { productId, quantity } = req.body;
 
+    // ─────────────────────────────
+    // VALIDATIONS ID
+    // ─────────────────────────────
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "userId invalide" });
     }
@@ -76,11 +79,9 @@ exports.addToCart = async (req, res) => {
 
     quantity = Number(quantity) > 0 ? Number(quantity) : 1;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur introuvable" });
-    }
-
+    // ─────────────────────────────
+    // CHARGER PRODUIT
+    // ─────────────────────────────
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({ message: "Produit introuvable" });
@@ -92,21 +93,40 @@ exports.addToCart = async (req, res) => {
       });
     }
 
+    // ─────────────────────────────
+    // VÉRIFIER UTILISATEUR
+    // ─────────────────────────────
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    // 🛒 Mise à jour du panier de façon atomique
     const existingItem = user.cart.find(
-      (item) => item.product.toString() === productId
+      (item) => item.product.toString() === productId.toString()
     );
 
     if (existingItem) {
-      existingItem.quantity += quantity;
+      // ✔ incrémenter quantité SANS déclencher validation User.transportMode
+      await User.updateOne(
+        { _id: userId, "cart.product": product._id },
+        { $inc: { "cart.$.quantity": quantity } }
+      );
     } else {
-      user.cart.push({
-        product: product._id,
-        quantity,
-        seller: product.seller,
-      });
+      // ✔ ajouter nouvel élément
+      await User.updateOne(
+        { _id: userId },
+        {
+          $push: {
+            cart: {
+              product: product._id,
+              quantity,
+              seller: product.seller,
+            },
+          },
+        }
+      );
     }
-
-    await user.save();
 
     res.status(201).json({
       message: "Produit ajouté au panier",
@@ -144,9 +164,7 @@ exports.updateCartItem = async (req, res) => {
       return res.status(404).json({ message: "Utilisateur introuvable" });
     }
 
-    const item = user.cart.find(
-      (i) => i.product.toString() === productId
-    );
+    const item = user.cart.find((i) => i.product.toString() === productId);
 
     if (!item) {
       return res.status(404).json({
@@ -215,7 +233,9 @@ exports.clearCart = async (req, res) => {
     user.cart = [];
     await user.save();
 
-    res.status(200).json({ message: "Panier vidé avec succès" });
+    res.status(200).json({
+      message: "Panier vidé avec succès",
+    });
   } catch (err) {
     console.error("❌ clearCart error:", err);
     res.status(500).json({ error: err.message });

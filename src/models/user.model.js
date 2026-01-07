@@ -107,35 +107,57 @@ const userSchema = new mongoose.Schema(
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
-    // =========================
-    // 🚚 Infos livreur
-    // =========================
+    /// =========================
+   // 🚚 Infos livreur
+   // =========================
     plate: { type: String, trim: true },
-    idNumber: { type: String, trim: true },
-    guarantee: { type: String, trim: true },
-    transportMode: {
-      type: String,
-      enum: [
-        "Vélo",
-        "Moto à 2 roues",
-        "Moto à 3 roues",
-        "Taxis 5 places",
-        "Voiture 9 places",
-        "Voiture 15 places",
-        "Bus",
-        "Camion",
-        "Titan",
-        "Autre",
-      ],
-    },
 
-    status: {
-      type: String,
-      enum: ["pending", "approved", "rejected"],
-      default: function () {
-        return this.role === "delivery" ? "pending" : "approved";
-      },
-    },
+    idNumber: { type: String, trim: true },
+
+    guarantee: { type: String, trim: true },
+
+transportMode: {
+  type: String,
+
+  enum: [
+    "Vélo",
+    "Moto à 2 roues",
+    "Moto à 3 roues",
+    "Taxis 5 places",
+    "Voiture 9 places",
+    "Voiture 15 places",
+    "Bus",
+    "Camion",
+    "Titan",
+    "Autre",
+  ],
+
+  // 🔥 ACCEPTER ENTRÉES SIMPLES DEPUIS FLUTTER
+  set: function (v) {
+    if (!v) return v;
+
+    const clean = v.toLowerCase().trim();
+
+    // mapping des valeurs courtes vers enum officiel
+    if (clean === "moto") return "Moto à 2 roues";
+    if (clean === "moto 2 roues") return "Moto à 2 roues";
+    if (clean === "moto 3 roues") return "Moto à 3 roues";
+
+    if (clean === "voiture") return "Voiture 9 places";
+    if (clean === "velo" || clean === "vélo") return "Vélo";
+
+    return v.trim();
+  },
+},
+
+status: {
+  type: String,
+  enum: ["pending", "approved", "rejected"],
+
+  default: function () {
+    return this.role === "delivery" ? "pending" : "approved";
+  },
+},
 
     // =========================
     // 📎 Documents identité
