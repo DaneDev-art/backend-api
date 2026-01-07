@@ -29,7 +29,6 @@ exports.getCart = async (req, res) => {
       return res.status(200).json([]);
     }
 
-    // 🔹 Nettoyage + mapping safe
     const cartWithDetails = user.cart
       .filter((item) => item.product)
       .map((item) => {
@@ -64,10 +63,12 @@ exports.addToCart = async (req, res) => {
     const { userId } = req.params;
     let { productId, quantity } = req.body;
 
+    // ─────────────────────────────
+    // VALIDATIONS ID
+    // ─────────────────────────────
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: "userId invalide" });
     }
-
     if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({
         message: "productId invalide (ObjectId Mongo requis)",
@@ -76,23 +77,21 @@ exports.addToCart = async (req, res) => {
 
     quantity = Number(quantity) > 0 ? Number(quantity) : 1;
 
+    // ─────────────────────────────
+    // CHARGER PRODUIT
+    // ─────────────────────────────
     const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Produit introuvable" });
-    }
+    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+    if (!product.seller)
+      return res.status(400).json({ message: "Produit sans vendeur associé" });
 
-    if (!product.seller) {
-      return res.status(400).json({
-        message: "Produit sans vendeur associé",
-      });
-    }
+    // ─────────────────────────────
+    // VÉRIFIER UTILISATEUR
+    // ─────────────────────────────
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
 
     // 🛒 Mise à jour atomique du panier
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur introuvable" });
-    }
-
     const existingItem = user.cart.find(
       (item) => item.product.toString() === productId.toString()
     );
@@ -107,11 +106,7 @@ exports.addToCart = async (req, res) => {
         { _id: userId },
         {
           $push: {
-            cart: {
-              product: product._id,
-              quantity,
-              seller: product.seller,
-            },
+            cart: { product: product._id, quantity, seller: product.seller },
           },
         }
       );
@@ -129,40 +124,27 @@ exports.addToCart = async (req, res) => {
 };
 
 // ==========================================
-// ✏️ UPDATE QUANTITY
+// ✏️ UPDATE QUANTITY — ATOMIQUE
 // ==========================================
 exports.updateCartItem = async (req, res) => {
   try {
     const { userId, productId } = req.params;
     const { quantity } = req.body;
 
-    if (
-      !mongoose.Types.ObjectId.isValid(userId) ||
-      !mongoose.Types.ObjectId.isValid(productId)
-    ) {
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(productId))
       return res.status(400).json({ message: "ID invalide" });
-    }
 
     const qty = Number(quantity);
-    if (qty <= 0) {
-      return res.status(400).json({ message: "Quantité invalide" });
+    if (qty <= 0) return res.status(400).json({ message: "Quantité invalide" });
+
+    const result = await User.updateOne(
+      { _id: userId, "cart.product": productId },
+      { $set: { "cart.$.quantity": qty } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Produit non trouvé dans le panier" });
     }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "Utilisateur introuvable" });
-    }
-
-    const item = user.cart.find((i) => i.product.toString() === productId);
-
-    if (!item) {
-      return res.status(404).json({
-        message: "Produit non trouvé dans le panier",
-      });
-    }
-
-    item.quantity = qty;
-    await user.save();
 
     res.status(200).json({ message: "Quantité mise à jour" });
   } catch (err) {
@@ -172,24 +154,16 @@ exports.updateCartItem = async (req, res) => {
 };
 
 // ==========================================
-// ❌ REMOVE FROM CART — MIS À JOUR
+// ❌ REMOVE FROM CART — ATOMIQUE
 // ==========================================
 exports.removeFromCart = async (req, res) => {
   try {
     const { userId, productId } = req.params;
 
-    if (
-      !mongoose.Types.ObjectId.isValid(userId) ||
-      !mongoose.Types.ObjectId.isValid(productId)
-    ) {
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(productId))
       return res.status(400).json({ message: "ID invalide" });
-    }
 
-    // Mise à jour atomique pour éviter validation transportMode
-    await User.updateOne(
-      { _id: userId },
-      { $pull: { cart: { product: productId } } }
-    );
+    await User.updateOne({ _id: userId }, { $pull: { cart: { product: productId } } });
 
     res.status(200).json({ message: "Produit retiré du panier" });
   } catch (err) {
@@ -199,25 +173,18 @@ exports.removeFromCart = async (req, res) => {
 };
 
 // ==========================================
-// 🧹 CLEAR CART — MIS À JOUR
+// 🧹 CLEAR CART — ATOMIQUE
 // ==========================================
 exports.clearCart = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!mongoose.Types.ObjectId.isValid(userId))
       return res.status(400).json({ message: "userId invalide" });
-    }
 
-    // Mise à jour atomique pour éviter validation transportMode
-    await User.updateOne(
-      { _id: userId },
-      { $set: { cart: [] } }
-    );
+    await User.updateOne({ _id: userId }, { $set: { cart: [] } });
 
-    res.status(200).json({
-      message: "Panier vidé avec succès",
-    });
+    res.status(200).json({ message: "Panier vidé avec succès" });
   } catch (err) {
     console.error("❌ clearCart error:", err);
     res.status(500).json({ error: err.message });
