@@ -16,8 +16,8 @@ router.use(bodyParser.json());
 // Création paiement (client connecté)
 router.post("/payin/create", verifyToken, CinetpayController.createPayIn);
 
-// Vérification / webhook PayIn (CinetPay ONLY)
-router.post("/payin/verify", CinetpayController.verifyPayIn);
+// Vérification / webhook PayIn (CinetPay)
+router.post("/payin/verify", CinetpayController.handleWebhook);
 
 // ============================
 // 📌 PAYOUT
