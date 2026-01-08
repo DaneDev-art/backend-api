@@ -5,42 +5,66 @@ const bodyParser = require("body-parser");
 const CinetpayController = require("../controllers/cinetpayController");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// Middleware
+// ============================
+// 🧩 MIDDLEWARE
+// ============================
 router.use(bodyParser.urlencoded({ extended: true }));
 router.use(bodyParser.json());
 
 // ============================
-// 📌 PAYIN
+// 💳 PAYIN
 // ============================
 
 // Création paiement (client connecté)
-router.post("/payin/create", verifyToken, CinetpayController.createPayIn);
+router.post(
+  "/payin/create",
+  verifyToken,
+  CinetpayController.createPayIn
+);
 
-// Vérification / webhook PayIn (CinetPay)
-router.post("/payin/verify", CinetpayController.handleWebhook);
-
-// ============================
-// 📌 PAYOUT
-// ============================
-
-// Retrait vendeur (vendeur connecté)
-router.post("/payout/create", verifyToken, CinetpayController.createPayOut);
-
-// Vérification payout (webhook / API)
-router.post("/payout/verify", CinetpayController.verifyPayOut);
+// 🔁 Redirection utilisateur après paiement (PAS un webhook)
+router.get(
+  "/payin/return",
+  CinetpayController.verifyPayIn
+);
 
 // ============================
-// 📌 SELLER → CinetPay (wallet payout)
+// 💸 PAYOUT
 // ============================
-router.post("/seller/register", verifyToken, CinetpayController.registerSeller);
+
+// Retrait vendeur
+router.post(
+  "/payout/create",
+  verifyToken,
+  CinetpayController.createPayOut
+);
+
+// Vérification payout (API / webhook)
+router.post(
+  "/payout/verify",
+  CinetpayController.verifyPayOut
+);
 
 // ============================
-// 📌 WEBHOOK GLOBAL
+// 🏪 SELLER → WALLET CINETPAY
 // ============================
-router.post("/webhook", CinetpayController.handleWebhook);
+router.post(
+  "/seller/register",
+  verifyToken,
+  CinetpayController.registerSeller
+);
 
 // ============================
-// 📌 TEST
+// 🔔 WEBHOOK CINETPAY (UNIQUE)
+// ============================
+// ⚠️ SEUL endpoint appelé par CinetPay
+router.post(
+  "/webhook",
+  CinetpayController.handleWebhook
+);
+
+// ============================
+// 🧪 TEST
 // ============================
 router.get("/test", (req, res) => {
   res.status(200).json({
