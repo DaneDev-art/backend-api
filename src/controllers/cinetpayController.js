@@ -27,7 +27,7 @@ const SUPPORTED_OPERATORS_TG = ["TMONEY", "MOOVMONEY", "WAVE"];
 module.exports = {
   /* ======================================================
      🟢 CREATE PAYIN (CLIENT)
-     — Crée le payin CinetPay et l’order dans la base
+     — Sécurisé : order créé avant le payin, transaction_id mis à jour ensuite
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
@@ -53,27 +53,23 @@ module.exports = {
       if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ error: "Panier vide" });
 
-      // 🔒 VALIDATION ITEMS
+      // 🔒 Validation items
       for (const item of items) {
-        if (
-          !item.productId ||
-          !mongoose.Types.ObjectId.isValid(item.productId) ||
-          typeof item.quantity !== "number" ||
-          item.quantity <= 0
-        ) {
+        if (!item.productId || !mongoose.Types.ObjectId.isValid(item.productId) ||
+            typeof item.quantity !== "number" || item.quantity <= 0) {
           return res.status(400).json({ error: "Item invalide", item });
         }
       }
 
-      // 🔎 FETCH PRODUITS
-      const productIds = items.map((i) => new mongoose.Types.ObjectId(i.productId));
+      // 🔎 Récupération produits
+      const productIds = items.map(i => new mongoose.Types.ObjectId(i.productId));
       const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== productIds.length)
         return res.status(404).json({ error: "Un ou plusieurs produits introuvables" });
 
-      const safeItems = items.map((item) => {
-        const product = products.find((p) => p._id.toString() === item.productId);
+      const safeItems = items.map(item => {
+        const product = products.find(p => p._id.toString() === item.productId);
         return {
           productId: product._id.toString(),
           productName: product.name,
@@ -82,7 +78,7 @@ module.exports = {
         };
       });
 
-      // 👤 VALIDATION VENDEUR
+      // 👤 Validation vendeur
       const seller = (await Seller.findById(sellerId)) || (await User.findById(sellerId));
       if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
 
@@ -90,7 +86,19 @@ module.exports = {
       if (!resolvedAmount || Number(resolvedAmount) <= 0)
         return res.status(400).json({ error: "Montant invalide" });
 
-      // 🚀 CINETPAY PAYIN
+      // 🔹 Création de l’order avant le payin
+      let order = await Order.create({
+        client: clientId,
+        seller: sellerId,
+        items: safeItems,
+        totalAmount: Number(resolvedAmount) + Number(shippingFee),
+        shippingFee: Number(shippingFee),
+        netAmount: Number(resolvedAmount),
+        currency,
+        status: "PAYMENT_PENDING",
+      });
+
+      // 🚀 Création payin chez CinetPay
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
@@ -105,18 +113,11 @@ module.exports = {
         notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
       });
 
-      // 🔹 Création de l’order dans la base
-      const order = await Order.create({
-        client: clientId,
-        seller: sellerId,
-        items: safeItems,
-        totalAmount: Number(resolvedAmount) + Number(shippingFee),
-        shippingFee: Number(shippingFee),
-        netAmount: Number(resolvedAmount),
-        currency,
-        status: "PAYMENT_PENDING",
-        cinetpayTransactionId: result.transaction_id, // 🔥 enregistrement transaction
-      });
+      // 🔹 Mise à jour de l’order avec transaction_id
+      await Order.updateOne(
+        { _id: order._id },
+        { $set: { cinetpayTransactionId: result.transaction_id } }
+      );
 
       return res.status(201).json({
         success: true,
@@ -124,6 +125,7 @@ module.exports = {
         transactionId: result.transaction_id,
         paymentUrl: result.payment_url,
       });
+
     } catch (err) {
       console.error("❌ createPayIn:", err.message, err);
       return res.status(500).json({ error: err.message });
@@ -137,7 +139,6 @@ module.exports = {
   verifyPayIn: async (req, res) => {
     try {
       const payload = req.body;
-
       const result = await CinetPayService.handleWebhook(payload, req.headers);
 
       if (!result || !result.transaction_id) {
@@ -170,22 +171,18 @@ module.exports = {
 
       return res.status(200).json({ success: true });
     } catch (err) {
-      console.error("❌ verifyPayIn webhook:", err.message, err);
+      console.error("❌ verifyPayIn webhook:", err.message);
       return res.status(200).json({ success: false, error: err.message });
     }
   },
 
   /* ======================================================
      🔁 PAYIN RETURN — REDIRECT FRONTEND ONLY
-     ❌ PAS DE LOGIQUE MÉTIER
   ====================================================== */
   payinReturn: (req, res) => {
     const { transaction_id, status } = req.query;
-
     return res.redirect(
-      `${FRONTEND_URL}/payin/result` +
-        `?transaction_id=${transaction_id || ""}` +
-        `&status=${status || "PENDING"}`
+      `${FRONTEND_URL}/payin/result?transaction_id=${transaction_id || ""}&status=${status || "PENDING"}`
     );
   },
 
@@ -225,7 +222,7 @@ module.exports = {
 
       return res.status(201).json(result);
     } catch (err) {
-      console.error("❌ createPayOut:", err.message, err);
+      console.error("❌ createPayOut:", err.message);
       return res.status(500).json({ error: err.message });
     }
   },
