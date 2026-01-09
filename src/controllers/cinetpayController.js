@@ -1,33 +1,25 @@
 // =============================================
 // controllers/cinetpayController.js
-// FINAL — PAYIN SAFE CONFIRMATION + WEB REDIRECT
+// PAYIN SAFE — ESCROW VERSION
 // =============================================
 
 const mongoose = require("mongoose");
 const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
-const Product = require("../models/Product");
 const Order = require("../models/order.model");
 
-// =============================================
-// 🌍 URLS
-// =============================================
 const BASE_URL =
   process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
-
 const FRONTEND_URL =
   process.env.FRONTEND_URL || "https://emarket-web.onrender.com";
 
-// =============================================
-// 🧩 OPERATEURS PAYOUT SUPPORTÉS (TG)
-// =============================================
 const SUPPORTED_OPERATORS_TG = ["TMONEY", "MOOVMONEY", "WAVE"];
 
 module.exports = {
   /* ======================================================
      🟢 CREATE PAYIN (CLIENT)
-     — Sécurisé : order créé avant le payin, transaction_id mis à jour ensuite
+     — Maintenant entièrement sécurisé via CinetPayService
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
@@ -41,6 +33,7 @@ module.exports = {
         returnUrl,
         notifyUrl,
         items,
+        buyerAddress,
       } = req.body;
 
       const clientId = req.user?.id || req.user?._id;
@@ -53,139 +46,46 @@ module.exports = {
       if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ error: "Panier vide" });
 
-      // 🔒 Validation items
-      for (const item of items) {
-        if (
-          !item.productId ||
-          !mongoose.Types.ObjectId.isValid(item.productId) ||
-          typeof item.quantity !== "number" ||
-          item.quantity <= 0
-        ) {
-          return res.status(400).json({ error: "Item invalide", item });
-        }
-      }
-
-      // 🔎 Récupération produits
-      const productIds = items.map(i => new mongoose.Types.ObjectId(i.productId));
-      const products = await Product.find({ _id: { $in: productIds } });
-
-      if (products.length !== productIds.length)
-        return res.status(404).json({ error: "Un ou plusieurs produits introuvables" });
-
-      const safeItems = items.map(item => {
-        const product = products.find(p => p._id.toString() === item.productId);
-        return {
-          productId: product._id.toString(),
-          productName: product.name,
-          price: Number(product.price),
-          quantity: item.quantity,
-        };
-      });
-
-      // 👤 Validation vendeur
-      const seller = (await Seller.findById(sellerId)) || (await User.findById(sellerId));
-      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
-
+      // Montant résolu
       const resolvedAmount = productPrice !== undefined ? productPrice : amount;
       if (!resolvedAmount || Number(resolvedAmount) <= 0)
         return res.status(400).json({ error: "Montant invalide" });
 
-      // 🔹 Création de l’order avant le payin
-      let order = await Order.create({
-        client: clientId,
-        seller: sellerId,
-        items: safeItems,
-        totalAmount: Number(resolvedAmount) + Number(shippingFee),
-        shippingFee: Number(shippingFee),
-        netAmount: Number(resolvedAmount),
-        currency,
-        status: "PAYMENT_PENDING",
-      });
-
-      // 🚀 Création payin chez CinetPay
+      // 🔹 Appel sécurisé du service PAYIN
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
-        items: safeItems,
+        items,
         productPrice: Number(resolvedAmount),
         shippingFee: Number(shippingFee) || 0,
         currency,
         buyerEmail: req.user?.email || null,
         buyerPhone: req.user?.phone || null,
-        description: description || `Paiement vers ${seller.name || "vendeur"}`,
-        returnUrl: returnUrl || `${FRONTEND_URL}/payin/return`,
-        notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        buyerAddress: buyerAddress || null,
+        description,
+        returnUrl,
+        notifyUrl,
       });
 
-      // 🔹 Mise à jour de l’order avec transaction_id, sécurisée contre duplications
-      try {
-        await Order.updateOne(
-          { _id: order._id },
-          { $set: { cinetpayTransactionId: result.transaction_id } }
-        );
-      } catch (err) {
-        if (err.code === 11000) {
-          console.warn("⚠️ Transaction_id déjà existant :", result.transaction_id);
-          return res.status(409).json({
-            error: "transaction_id déjà utilisé, réessayez",
-            transactionId: result.transaction_id,
-          });
-        } else {
-          throw err;
-        }
-      }
-
-      return res.status(201).json({
-        success: true,
-        orderId: order._id,
-        transactionId: result.transaction_id,
-        paymentUrl: result.payment_url,
-      });
-
+      return res.status(201).json(result);
     } catch (err) {
       console.error("❌ createPayIn:", err.message, err);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({
+        error: err.message,
+        hint: "Vérifier payload côté frontend et connexion CinetPay",
+      });
     }
   },
 
   /* ======================================================
      🔔 VERIFY PAYIN — WEBHOOK ONLY (SERVER ↔ SERVER)
-     ⚠️ Met à jour le status de l’order → PAID si paiement réussi
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
       const payload = req.body;
       const result = await CinetPayService.handleWebhook(payload, req.headers);
 
-      if (!result || !result.transaction_id) {
-        console.warn("Webhook reçu sans transaction_id :", payload);
-        return res.status(200).json({ success: false, message: "transaction_id manquant" });
-      }
-
-      if (result.status === "SUCCESS") {
-        const updateResult = await Order.updateOne(
-          {
-            cinetpayTransactionId: result.transaction_id,
-            status: { $ne: "PAID" },
-          },
-          {
-            $set: {
-              status: "PAID",
-              paidAt: new Date(),
-            },
-          }
-        );
-
-        if (updateResult.matchedCount === 0) {
-          console.warn("Aucun order trouvé pour transaction_id :", result.transaction_id);
-        } else {
-          console.log(`Order ${result.transaction_id} mis à jour → PAID`);
-        }
-      } else {
-        console.log(`Paiement non réussi pour transaction_id ${result.transaction_id}:`, result.status);
-      }
-
-      return res.status(200).json({ success: true });
+      return res.status(200).json({ success: true, result });
     } catch (err) {
       console.error("❌ verifyPayIn webhook:", err.message);
       return res.status(200).json({ success: false, error: err.message });
