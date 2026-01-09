@@ -27,6 +27,7 @@ const SUPPORTED_OPERATORS_TG = ["TMONEY", "MOOVMONEY", "WAVE"];
 module.exports = {
   /* ======================================================
      🟢 CREATE PAYIN (CLIENT)
+     — Crée le payin CinetPay et l’order dans la base
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
@@ -43,17 +44,14 @@ module.exports = {
       } = req.body;
 
       const clientId = req.user?.id || req.user?._id;
-      if (!clientId) {
+      if (!clientId)
         return res.status(401).json({ error: "Utilisateur non authentifié" });
-      }
 
-      if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+      if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId))
         return res.status(400).json({ error: "sellerId invalide" });
-      }
 
-      if (!Array.isArray(items) || items.length === 0) {
+      if (!Array.isArray(items) || items.length === 0)
         return res.status(400).json({ error: "Panier vide" });
-      }
 
       // 🔒 VALIDATION ITEMS
       for (const item of items) {
@@ -63,31 +61,19 @@ module.exports = {
           typeof item.quantity !== "number" ||
           item.quantity <= 0
         ) {
-          return res.status(400).json({
-            error: "Item invalide",
-            item,
-          });
+          return res.status(400).json({ error: "Item invalide", item });
         }
       }
 
       // 🔎 FETCH PRODUITS
-      const productIds = items.map(
-        (i) => new mongoose.Types.ObjectId(i.productId)
-      );
-
+      const productIds = items.map((i) => new mongoose.Types.ObjectId(i.productId));
       const products = await Product.find({ _id: { $in: productIds } });
 
-      if (products.length !== productIds.length) {
-        return res.status(404).json({
-          error: "Un ou plusieurs produits introuvables",
-        });
-      }
+      if (products.length !== productIds.length)
+        return res.status(404).json({ error: "Un ou plusieurs produits introuvables" });
 
       const safeItems = items.map((item) => {
-        const product = products.find(
-          (p) => p._id.toString() === item.productId
-        );
-
+        const product = products.find((p) => p._id.toString() === item.productId);
         return {
           productId: product._id.toString(),
           productName: product.name,
@@ -97,20 +83,12 @@ module.exports = {
       });
 
       // 👤 VALIDATION VENDEUR
-      const seller =
-        (await Seller.findById(sellerId)) ||
-        (await User.findById(sellerId));
+      const seller = (await Seller.findById(sellerId)) || (await User.findById(sellerId));
+      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
 
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
-      }
-
-      const resolvedAmount =
-        productPrice !== undefined ? productPrice : amount;
-
-      if (!resolvedAmount || Number(resolvedAmount) <= 0) {
+      const resolvedAmount = productPrice !== undefined ? productPrice : amount;
+      if (!resolvedAmount || Number(resolvedAmount) <= 0)
         return res.status(400).json({ error: "Montant invalide" });
-      }
 
       // 🚀 CINETPAY PAYIN
       const result = await CinetPayService.createPayIn({
@@ -122,53 +100,78 @@ module.exports = {
         currency,
         buyerEmail: req.user?.email || null,
         buyerPhone: req.user?.phone || null,
-        description:
-          description || `Paiement vers ${seller.name || "vendeur"}`,
+        description: description || `Paiement vers ${seller.name || "vendeur"}`,
         returnUrl: returnUrl || `${FRONTEND_URL}/payin/return`,
-        notifyUrl:
-          notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
       });
 
-      return res.status(201).json(result);
+      // 🔹 Création de l’order dans la base
+      const order = await Order.create({
+        client: clientId,
+        seller: sellerId,
+        items: safeItems,
+        totalAmount: Number(resolvedAmount) + Number(shippingFee),
+        shippingFee: Number(shippingFee),
+        netAmount: Number(resolvedAmount),
+        currency,
+        status: "PAYMENT_PENDING",
+        cinetpayTransactionId: result.transaction_id, // 🔥 enregistrement transaction
+      });
+
+      return res.status(201).json({
+        success: true,
+        orderId: order._id,
+        transactionId: result.transaction_id,
+        paymentUrl: result.payment_url,
+      });
     } catch (err) {
-      console.error("❌ createPayIn:", err.message);
+      console.error("❌ createPayIn:", err.message, err);
       return res.status(500).json({ error: err.message });
     }
   },
 
   /* ======================================================
      🔔 VERIFY PAYIN — WEBHOOK ONLY (SERVER ↔ SERVER)
-     ⚠️ JAMAIS DE REDIRECT ICI
+     ⚠️ Met à jour le status de l’order → PAID si paiement réussi
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
       const payload = req.body;
 
-      const result = await CinetPayService.handleWebhook(
-        payload,
-        req.headers
-      );
+      const result = await CinetPayService.handleWebhook(payload, req.headers);
 
-      if (result?.status === "SUCCESS" && result.transaction_id) {
-        await Order.updateOne(
+      if (!result || !result.transaction_id) {
+        console.warn("Webhook reçu sans transaction_id :", payload);
+        return res.status(200).json({ success: false, message: "transaction_id manquant" });
+      }
+
+      if (result.status === "SUCCESS") {
+        const updateResult = await Order.updateOne(
           {
-            transactionId: result.transaction_id,
-            paymentStatus: { $ne: "PAID" },
+            cinetpayTransactionId: result.transaction_id,
+            status: { $ne: "PAID" },
           },
           {
             $set: {
-              paymentStatus: "PAID",
+              status: "PAID",
               paidAt: new Date(),
             },
           }
         );
+
+        if (updateResult.matchedCount === 0) {
+          console.warn("Aucun order trouvé pour transaction_id :", result.transaction_id);
+        } else {
+          console.log(`Order ${result.transaction_id} mis à jour → PAID`);
+        }
+      } else {
+        console.log(`Paiement non réussi pour transaction_id ${result.transaction_id}:`, result.status);
       }
 
-      // ⚠️ Toujours 200 sinon CinetPay retry
       return res.status(200).json({ success: true });
     } catch (err) {
-      console.error("❌ verifyPayIn webhook:", err.message);
-      return res.status(200).json({ success: false });
+      console.error("❌ verifyPayIn webhook:", err.message, err);
+      return res.status(200).json({ success: false, error: err.message });
     }
   },
 
@@ -194,34 +197,18 @@ module.exports = {
       const { sellerId, amount, currency = "XOF" } = req.body;
       const realSellerId = req.user?.sellerId || sellerId;
 
-      if (
-        !realSellerId ||
-        !mongoose.Types.ObjectId.isValid(realSellerId) ||
-        isNaN(amount)
-      ) {
-        return res.status(400).json({
-          error: "sellerId valide et amount requis",
-        });
+      if (!realSellerId || !mongoose.Types.ObjectId.isValid(realSellerId) || isNaN(amount)) {
+        return res.status(400).json({ error: "sellerId valide et amount requis" });
       }
 
       const seller = await Seller.findById(realSellerId);
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
-      }
+      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
 
       if (Number(amount) > Number(seller.balance_available || 0)) {
-        return res.status(409).json({
-          error: "Solde insuffisant",
-          balance: seller.balance_available,
-        });
+        return res.status(409).json({ error: "Solde insuffisant", balance: seller.balance_available });
       }
 
-      if (
-        seller.operator &&
-        !SUPPORTED_OPERATORS_TG.includes(
-          seller.operator.toUpperCase()
-        )
-      ) {
+      if (seller.operator && !SUPPORTED_OPERATORS_TG.includes(seller.operator.toUpperCase())) {
         return res.status(422).json({
           error: "Opérateur payout non supporté",
           operator: seller.operator,
@@ -238,7 +225,7 @@ module.exports = {
 
       return res.status(201).json(result);
     } catch (err) {
-      console.error("❌ createPayOut:", err.message);
+      console.error("❌ createPayOut:", err.message, err);
       return res.status(500).json({ error: err.message });
     }
   },
@@ -249,24 +236,14 @@ module.exports = {
   verifyPayOut: async (req, res) => {
     try {
       const payoutId = req.body?.payout_id || req.query?.payout_id;
-      if (!payoutId) {
-        return res.status(400).json({ error: "payout_id requis" });
-      }
+      if (!payoutId) return res.status(400).json({ error: "payout_id requis" });
 
       const result = await CinetPayService.verifyPayOut(payoutId);
 
-      if (
-        result?.status === "SUCCESS" &&
-        result.sellerId &&
-        !isNaN(result.amount)
-      ) {
+      if (result?.status === "SUCCESS" && result.sellerId && !isNaN(result.amount)) {
         await Seller.updateOne(
           { _id: result.sellerId },
-          {
-            $inc: {
-              balance_locked: -Number(result.amount),
-            },
-          }
+          { $inc: { balance_locked: -Number(result.amount) } }
         );
       }
 
@@ -283,27 +260,17 @@ module.exports = {
   registerSeller: async (req, res) => {
     try {
       const { name, surname, email, phone, prefix } = req.body;
-
       if (!name || !email || !phone || !prefix) {
         return res.status(400).json({ error: "Champs requis manquants" });
       }
 
       let user = await User.findOne({ email });
       if (!user) {
-        user = await User.create({
-          name,
-          surname,
-          email,
-          phone,
-          prefix,
-          role: "seller",
-        });
+        user = await User.create({ name, surname, email, phone, prefix, role: "seller" });
       }
 
       const existingSeller = await Seller.findOne({ user: user._id });
-      if (existingSeller) {
-        return res.status(409).json({ error: "Seller existe déjà" });
-      }
+      if (existingSeller) return res.status(409).json({ error: "Seller existe déjà" });
 
       const seller = await Seller.create({
         user: user._id,
@@ -316,11 +283,7 @@ module.exports = {
         balance_locked: 0,
       });
 
-      return res.status(201).json({
-        success: true,
-        sellerId: seller._id,
-        userId: user._id,
-      });
+      return res.status(201).json({ success: true, sellerId: seller._id, userId: user._id });
     } catch (err) {
       console.error("❌ registerSeller:", err.message);
       return res.status(500).json({ error: err.message });
@@ -332,10 +295,7 @@ module.exports = {
   ====================================================== */
   handleWebhook: async (req, res) => {
     try {
-      const result = await CinetPayService.handleWebhook(
-        req.body,
-        req.headers
-      );
+      const result = await CinetPayService.handleWebhook(req.body, req.headers);
       return res.status(200).json({ success: true, result });
     } catch (err) {
       console.error("❌ Webhook error:", err.message);
