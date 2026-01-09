@@ -1,6 +1,6 @@
 // =============================================
 // controllers/cinetpayController.js
-// UPDATED WITH PAYOUT CONTACT HANDLING — SAFE
+// FINAL — PAYIN SAFE CONFIRMATION + WEB REDIRECT
 // =============================================
 
 const mongoose = require("mongoose");
@@ -8,29 +8,28 @@ const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
+const Order = require("../models/order.model");
 
+// =============================================
+// 🌍 URLS
+// =============================================
 const BASE_URL =
   process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
+
 const FRONTEND_URL =
   process.env.FRONTEND_URL || "https://emarket-web.onrender.com";
 
-// =====================================================
-// 🧩 OPERATEURS PAYOUT SUPPORTÉS AU TOGO
-// =====================================================
-const SUPPORTED_OPERATORS_TG = [
-  "TMONEY",
-  "MOOVMONEY",
-  "WAVE",
-];
+// =============================================
+// 🧩 OPERATEURS PAYOUT SUPPORTÉS (TG)
+// =============================================
+const SUPPORTED_OPERATORS_TG = ["TMONEY", "MOOVMONEY", "WAVE"];
 
 module.exports = {
   /* ======================================================
-     🟢 CREATE PAYIN
+     🟢 CREATE PAYIN (CLIENT)
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
-      console.log("📦 Requête PAYIN reçue:", req.body);
-
       const {
         productPrice,
         amount,
@@ -44,55 +43,39 @@ module.exports = {
       } = req.body;
 
       const clientId = req.user?.id || req.user?._id;
-
       if (!clientId) {
         return res.status(401).json({ error: "Utilisateur non authentifié" });
       }
 
-      if (!sellerId) {
-        return res.status(400).json({ error: "sellerId requis" });
-      }
-
-      const resolvedProductPrice =
-        productPrice !== undefined ? productPrice : amount;
-
-      if (!resolvedProductPrice || Number(resolvedProductPrice) <= 0) {
-        return res.status(400).json({ error: "amount ou productPrice invalide" });
+      if (!sellerId || !mongoose.Types.ObjectId.isValid(sellerId)) {
+        return res.status(400).json({ error: "sellerId invalide" });
       }
 
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: "Panier vide" });
       }
 
-      /* ======================================================
-         🔒 VALIDATION DES IDS PRODUITS
-      ====================================================== */
+      // 🔒 VALIDATION ITEMS
       for (const item of items) {
-        if (!item.productId || typeof item.quantity !== "number") {
+        if (
+          !item.productId ||
+          !mongoose.Types.ObjectId.isValid(item.productId) ||
+          typeof item.quantity !== "number" ||
+          item.quantity <= 0
+        ) {
           return res.status(400).json({
-            error: "Structure item invalide",
+            error: "Item invalide",
             item,
-          });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(item.productId)) {
-          return res.status(400).json({
-            error: "productId invalide",
-            productId: item.productId,
           });
         }
       }
 
-      /* ======================================================
-         🔎 FETCH PRODUITS
-      ====================================================== */
+      // 🔎 FETCH PRODUITS
       const productIds = items.map(
         (i) => new mongoose.Types.ObjectId(i.productId)
       );
 
-      const products = await Product.find({
-        _id: { $in: productIds },
-      });
+      const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== productIds.length) {
         return res.status(404).json({
@@ -113,166 +96,186 @@ module.exports = {
         };
       });
 
-      /* ======================================================
-         👤 VALIDATION VENDEUR
-      ====================================================== */
-      let seller = await Seller.findById(sellerId);
-      if (!seller) {
-        seller = await User.findById(sellerId);
-      }
+      // 👤 VALIDATION VENDEUR
+      const seller =
+        (await Seller.findById(sellerId)) ||
+        (await User.findById(sellerId));
 
       if (!seller) {
         return res.status(404).json({ error: "Vendeur introuvable" });
       }
 
-      /* ======================================================
-         🚀 CINETPAY PAYIN
-      ====================================================== */
+      const resolvedAmount =
+        productPrice !== undefined ? productPrice : amount;
+
+      if (!resolvedAmount || Number(resolvedAmount) <= 0) {
+        return res.status(400).json({ error: "Montant invalide" });
+      }
+
+      // 🚀 CINETPAY PAYIN
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
         items: safeItems,
-        productPrice: Number(resolvedProductPrice),
+        productPrice: Number(resolvedAmount),
         shippingFee: Number(shippingFee) || 0,
         currency,
         buyerEmail: req.user?.email || null,
         buyerPhone: req.user?.phone || null,
-        description: description || `Paiement vers ${seller.name || "vendeur"}`,
-        returnUrl: returnUrl || `${FRONTEND_URL}/paiement/verify`,
-        notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        description:
+          description || `Paiement vers ${seller.name || "vendeur"}`,
+        returnUrl: returnUrl || `${FRONTEND_URL}/payin/return`,
+        notifyUrl:
+          notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
       });
 
       return res.status(201).json(result);
     } catch (err) {
       console.error("❌ createPayIn:", err.message);
-      return res.status(500).json({
-        error: "Erreur interne createPayIn",
-        details: err.message,
-      });
+      return res.status(500).json({ error: err.message });
     }
   },
 
   /* ======================================================
-     🔵 CREATE PAYOUT — ALIGNED WITH SERVICE ✅
-====================================================== */
-createPayOut: async (req, res) => {
-  try {
-    const { sellerId, amount, currency = "XOF", notifyUrl = null } = req.body;
+     🔔 VERIFY PAYIN — WEBHOOK ONLY (SERVER ↔ SERVER)
+     ⚠️ JAMAIS DE REDIRECT ICI
+  ====================================================== */
+  verifyPayIn: async (req, res) => {
+    try {
+      const payload = req.body;
 
-    // 🧩 Resolve sellerId from auth when available
-    const realSellerId = req.user?.sellerId || sellerId;
+      const result = await CinetPayService.handleWebhook(
+        payload,
+        req.headers
+      );
 
-    // 🔒 Validation de base
-    if (!realSellerId || typeof Number(amount) !== "number" || isNaN(amount)) {
-      return res.status(400).json({
-        error: "sellerId et amount (numérique) sont requis",
-      });
+      if (result?.status === "SUCCESS" && result.transaction_id) {
+        await Order.updateOne(
+          {
+            transactionId: result.transaction_id,
+            paymentStatus: { $ne: "PAID" },
+          },
+          {
+            $set: {
+              paymentStatus: "PAID",
+              paidAt: new Date(),
+            },
+          }
+        );
+      }
+
+      // ⚠️ Toujours 200 sinon CinetPay retry
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error("❌ verifyPayIn webhook:", err.message);
+      return res.status(200).json({ success: false });
     }
-
-    if (!mongoose.Types.ObjectId.isValid(realSellerId)) {
-      return res.status(400).json({ error: "sellerId invalide" });
-    }
-
-    // 🔍 Vérifier le vendeur
-    const seller = await Seller.findById(realSellerId);
-    if (!seller) {
-      return res.status(404).json({ error: "Vendeur introuvable" });
-    }
-
-    if (!seller.phone || !seller.prefix) {
-      return res.status(422).json({
-        error: "Vendeur invalide : numéro ou préfixe manquant",
-      });
-    }
-
-    // =====================================================
-    // 🟢 ETAPE 1 — VERIFICATION SOLDE
-    // =====================================================
-    if (Number(amount) > Number(seller.balance_available || 0)) {
-      return res.status(409).json({
-        error: "Solde insuffisant",
-        balance: seller.balance_available,
-      });
-    }
-
-    // =====================================================
-    // 🟢 ETAPE 2 — VERIFIER OPÉRATEUR
-    // =====================================================
-    if (
-      seller.operator &&
-      !SUPPORTED_OPERATORS_TG.includes(seller.operator.toUpperCase())
-    ) {
-      return res.status(422).json({
-        error: "Opérateur payout non supporté actuellement au Togo",
-        operator: seller.operator,
-        supported: SUPPORTED_OPERATORS_TG,
-        hint: "Utiliser TMoney ou MoovMoney",
-      });
-    }
-
-    // =====================================================
-    // 🟢 ETAPE 3 — CREATE PAYOUT (APPEL UNIQUE SERVICE)
-    // =====================================================
-    const result = await CinetPayService.createPayOutForSeller({
-      sellerId: seller._id,
-      amount: Number(amount),
-      currency,
-      notifyUrl:
-        notifyUrl ||
-        `${BASE_URL.replace(/\/+$/, "")}/api/cinetpay/payout-webhook`,
-    });
-
-    return res.status(201).json(result);
-  } catch (err) {
-    console.error("❌ createPayOut:", err.message);
-
-    return res.status(500).json({
-      error: err.message,
-      hint: "Vérifier numéro et opérateur supporté TG",
-      cinetpay: err.cinetpay || null,
-    });
-  }
-},
+  },
 
   /* ======================================================
-     🟡 VERIFY PAYOUT — SAFE UNLOCK ✅
-====================================================== */
-verifyPayOut: async (req, res) => {
-  try {
-    const payoutId = req.body?.payout_id || req.query?.payout_id;
+     🔁 PAYIN RETURN — REDIRECT FRONTEND ONLY
+     ❌ PAS DE LOGIQUE MÉTIER
+  ====================================================== */
+  payinReturn: (req, res) => {
+    const { transaction_id, status } = req.query;
 
-    if (!payoutId) {
-      return res.status(400).json({ error: "payout_id requis" });
+    return res.redirect(
+      `${FRONTEND_URL}/payin/result` +
+        `?transaction_id=${transaction_id || ""}` +
+        `&status=${status || "PENDING"}`
+    );
+  },
+
+  /* ======================================================
+     💸 CREATE PAYOUT — SELLER WITHDRAW
+  ====================================================== */
+  createPayOut: async (req, res) => {
+    try {
+      const { sellerId, amount, currency = "XOF" } = req.body;
+      const realSellerId = req.user?.sellerId || sellerId;
+
+      if (
+        !realSellerId ||
+        !mongoose.Types.ObjectId.isValid(realSellerId) ||
+        isNaN(amount)
+      ) {
+        return res.status(400).json({
+          error: "sellerId valide et amount requis",
+        });
+      }
+
+      const seller = await Seller.findById(realSellerId);
+      if (!seller) {
+        return res.status(404).json({ error: "Vendeur introuvable" });
+      }
+
+      if (Number(amount) > Number(seller.balance_available || 0)) {
+        return res.status(409).json({
+          error: "Solde insuffisant",
+          balance: seller.balance_available,
+        });
+      }
+
+      if (
+        seller.operator &&
+        !SUPPORTED_OPERATORS_TG.includes(
+          seller.operator.toUpperCase()
+        )
+      ) {
+        return res.status(422).json({
+          error: "Opérateur payout non supporté",
+          operator: seller.operator,
+          supported: SUPPORTED_OPERATORS_TG,
+        });
+      }
+
+      const result = await CinetPayService.createPayOutForSeller({
+        sellerId: seller._id,
+        amount: Number(amount),
+        currency,
+        notifyUrl: `${BASE_URL}/api/cinetpay/payout/verify`,
+      });
+
+      return res.status(201).json(result);
+    } catch (err) {
+      console.error("❌ createPayOut:", err.message);
+      return res.status(500).json({ error: err.message });
     }
+  },
 
-    const result = await CinetPayService.verifyPayOut(payoutId);
+  /* ======================================================
+     🟡 VERIFY PAYOUT — WEBHOOK / API
+  ====================================================== */
+  verifyPayOut: async (req, res) => {
+    try {
+      const payoutId = req.body?.payout_id || req.query?.payout_id;
+      if (!payoutId) {
+        return res.status(400).json({ error: "payout_id requis" });
+      }
 
-    // 🔐 Unlock solde si succès et données cohérentes
-    if (
-      result?.status === "SUCCESS" &&
-      result.sellerId &&
-      !isNaN(result.amount)
-    ) {
-      await Seller.updateOne(
-        { _id: result.sellerId },
-        {
-          $inc: {
-            balance_locked: -Number(result.amount || 0),
-          },
-        }
-      );
+      const result = await CinetPayService.verifyPayOut(payoutId);
+
+      if (
+        result?.status === "SUCCESS" &&
+        result.sellerId &&
+        !isNaN(result.amount)
+      ) {
+        await Seller.updateOne(
+          { _id: result.sellerId },
+          {
+            $inc: {
+              balance_locked: -Number(result.amount),
+            },
+          }
+        );
+      }
+
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error("❌ verifyPayOut:", err.message);
+      return res.status(500).json({ error: err.message });
     }
-
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error("[CinetPay][verifyPayOut] erreur:", err.message);
-
-    return res.status(500).json({
-      error: err.message,
-      hint: "Vérifier verifyPayOut côté service",
-    });
-  }
-},
+  },
 
   /* ======================================================
      🧩 REGISTER SELLER
@@ -286,7 +289,6 @@ verifyPayOut: async (req, res) => {
       }
 
       let user = await User.findOne({ email });
-
       if (!user) {
         user = await User.create({
           name,
@@ -298,14 +300,9 @@ verifyPayOut: async (req, res) => {
         });
       }
 
-      const existingSeller = await Seller.findOne({
-        user: user._id,
-      });
-
+      const existingSeller = await Seller.findOne({ user: user._id });
       if (existingSeller) {
-        return res.status(409).json({
-          error: "Seller existe déjà",
-        });
+        return res.status(409).json({ error: "Seller existe déjà" });
       }
 
       const seller = await Seller.create({
@@ -326,14 +323,12 @@ verifyPayOut: async (req, res) => {
       });
     } catch (err) {
       console.error("❌ registerSeller:", err.message);
-      return res.status(500).json({
-        error: err.message,
-      });
+      return res.status(500).json({ error: err.message });
     }
   },
 
   /* ======================================================
-     🔔 WEBHOOK CINETPAY
+     🔔 WEBHOOK GLOBAL CINETPAY (OPTIONNEL)
   ====================================================== */
   handleWebhook: async (req, res) => {
     try {
@@ -341,17 +336,10 @@ verifyPayOut: async (req, res) => {
         req.body,
         req.headers
       );
-
-      return res.status(200).json({
-        success: true,
-        result,
-      });
+      return res.status(200).json({ success: true, result });
     } catch (err) {
       console.error("❌ Webhook error:", err.message);
-
-      return res.status(500).json({
-        error: err.message,
-      });
+      return res.status(500).json({ error: err.message });
     }
   },
 };

@@ -1,4 +1,7 @@
+// ============================================
 // src/routes/cinetpayRoutes.js
+// ============================================
+
 const express = require("express");
 const router = express.Router();
 const bodyParser = require("body-parser");
@@ -15,17 +18,30 @@ router.use(bodyParser.json());
 // 💳 PAYIN
 // ============================
 
-// Création paiement (client connecté)
+// 🟢 Création paiement (frontend)
 router.post(
   "/payin/create",
   verifyToken,
   CinetpayController.createPayIn
 );
 
-// 🔁 Redirection utilisateur après paiement (PAS un webhook)
+// 🔔 WEBHOOK OFFICIEL CINETPAY (SOURCE DE VÉRITÉ)
+// ⚠️ appelé automatiquement par CinetPay
+router.post(
+  "/payin/verify",
+  CinetpayController.verifyPayIn
+);
+
+// 🔁 RETOUR UTILISATEUR (NAVIGATEUR)
+// ⚠️ ne fait QUE rediriger vers Flutter Web
 router.get(
   "/payin/return",
-  CinetpayController.verifyPayIn
+  (req, res) => {
+    const query = new URLSearchParams(req.query).toString();
+    res.redirect(
+      `${process.env.FRONTEND_URL || "https://emarket-web.onrender.com"}?${query}`
+    );
+  }
 );
 
 // ============================
@@ -39,7 +55,7 @@ router.post(
   CinetpayController.createPayOut
 );
 
-// Vérification payout (API / webhook)
+// Vérification payout (webhook/API)
 router.post(
   "/payout/verify",
   CinetpayController.verifyPayOut
@@ -55,9 +71,9 @@ router.post(
 );
 
 // ============================
-// 🔔 WEBHOOK CINETPAY (UNIQUE)
+// 🔔 WEBHOOK GLOBAL (OPTIONNEL / LEGACY)
 // ============================
-// ⚠️ SEUL endpoint appelé par CinetPay
+// ⚠️ à garder seulement si utilisé ailleurs
 router.post(
   "/webhook",
   CinetpayController.handleWebhook

@@ -495,17 +495,19 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   // IDS & URLS
   // ==============================
-  const transaction_id = this.generateTransactionId("PAYIN");
+   const transaction_id = this.generateTransactionId("PAYIN");
 
-       // 🔗 DEEP LINK MOBILE
-  const finalReturnUrl =
-  returnUrl ||
-  `emarket://payin/result?transaction_id=${transaction_id}`;
+  // 🔗 RETURN URL (USER REDIRECT)
 
-      // 🔔 WEBHOOK (SERVER ↔ SERVER)
-  const finalNotifyUrl =
-  notifyUrl ||
-  `${BASE_URL}/api/cinetpay/payin/verify`;
+   const finalReturnUrl =
+    returnUrl ||
+    `${BASE_URL}/api/cinetpay/payin/return?transaction_id=${transaction_id}`;
+
+   // 🔔 WEBHOOK (SERVER ↔ SERVER)
+
+   const finalNotifyUrl =
+    notifyUrl ||
+    `${BASE_URL}/api/cinetpay/payin/verify`;
 
 
   // ==============================
