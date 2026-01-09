@@ -493,30 +493,19 @@ CinetPayService.createPayIn = async function (payload) {
   const netAmount = Math.round(netToSeller + shippingFeeAmount);
 
   // ==============================
-// IDS & URLS (SAFE — NO undefined)
-// ==============================
-const transaction_id = this.generateTransactionId("PAYIN");
+  // IDS & URLS
+  // ==============================
+  const transaction_id = this.generateTransactionId("PAYIN");
 
-// 🔒 Sécurité absolue sur BASE_URL
-if (!BASE_URL || typeof BASE_URL !== "string" || !BASE_URL.startsWith("http")) {
-  throw new Error(
-    "❌ BASE_URL invalide ou non défini. Vérifie la configuration environnement."
-  );
-}
+       // 🔗 DEEP LINK MOBILE
+  const finalReturnUrl =
+  returnUrl ||
+  `emarket://payin/result?transaction_id=${transaction_id}`;
 
-const cleanBaseUrl = BASE_URL.replace(/\/+$/, "");
-
-// 🔗 RETURN URL (REDIRECT USER)
-const finalReturnUrl =
-  typeof returnUrl === "string" && returnUrl.startsWith("http")
-    ? returnUrl
-    : `${cleanBaseUrl}/api/cinetpay/payin/return?transaction_id=${transaction_id}`;
-
-// 🔔 NOTIFY URL (WEBHOOK SERVER ↔ SERVER)
-const finalNotifyUrl =
-  typeof notifyUrl === "string" && notifyUrl.startsWith("http")
-    ? notifyUrl
-    : `${cleanBaseUrl}/api/cinetpay/payin/verify`;
+      // 🔔 WEBHOOK (SERVER ↔ SERVER)
+  const finalNotifyUrl =
+  notifyUrl ||
+  `${BASE_URL}/api/cinetpay/payin/verify`;
 
 
   // ==============================
