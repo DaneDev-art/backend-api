@@ -55,8 +55,12 @@ module.exports = {
 
       // 🔒 Validation items
       for (const item of items) {
-        if (!item.productId || !mongoose.Types.ObjectId.isValid(item.productId) ||
-            typeof item.quantity !== "number" || item.quantity <= 0) {
+        if (
+          !item.productId ||
+          !mongoose.Types.ObjectId.isValid(item.productId) ||
+          typeof item.quantity !== "number" ||
+          item.quantity <= 0
+        ) {
           return res.status(400).json({ error: "Item invalide", item });
         }
       }
@@ -113,11 +117,23 @@ module.exports = {
         notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
       });
 
-      // 🔹 Mise à jour de l’order avec transaction_id
-      await Order.updateOne(
-        { _id: order._id },
-        { $set: { cinetpayTransactionId: result.transaction_id } }
-      );
+      // 🔹 Mise à jour de l’order avec transaction_id, sécurisée contre duplications
+      try {
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { cinetpayTransactionId: result.transaction_id } }
+        );
+      } catch (err) {
+        if (err.code === 11000) {
+          console.warn("⚠️ Transaction_id déjà existant :", result.transaction_id);
+          return res.status(409).json({
+            error: "transaction_id déjà utilisé, réessayez",
+            transactionId: result.transaction_id,
+          });
+        } else {
+          throw err;
+        }
+      }
 
       return res.status(201).json({
         success: true,
