@@ -1,16 +1,23 @@
+// src/routes/me.routes.js
+
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth.middleware");
 
-const {
-  getMyPayinTransactions,
-} = require("../controllers/payinTransaction.controller");
+// ✅ Middleware d'authentification (fonction seule)
+const { verifyToken } = require("../middleware/auth.middleware");
 
-const {
-  getMyPayoutTransactions,
-} = require("../controllers/payoutTransaction.controller");
+// ✅ Contrôleurs
+const payinTransaction = require("../controllers/payinTransaction.controller");
+const payoutTransaction = require("../controllers/payoutTransaction.controller");
 
-router.get("/me/payin-transactions", auth, getMyPayinTransactions);
-router.get("/me/payout-transactions", auth, getMyPayoutTransactions);
+// ===========================
+// 🧾 Routes de l'utilisateur connecté
+// ===========================
+
+// 🔹 Transactions d'entrée (PAYIN)
+router.get("/me/payin-transactions", verifyToken, payinTransaction.getMyPayinTransactions);
+
+// 🔹 Retraits du vendeur connecté (PAYOUT)
+router.get("/me/payout-transactions", verifyToken, payoutTransaction.getMyPayoutTransactions);
 
 module.exports = router;
