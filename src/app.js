@@ -80,6 +80,9 @@ app.use("/api/orders", require("./routes/order.routes"));
 // 📧 Email
 app.use("/api/email", emailRoutes);
 
+// Transactions
+app.use("/api", require("./routes/me.routes"));
+
 // 🛍️ Marketplace
 app.use("/api/products", require("./routes/products"));
 app.use("/api/cart", require("./routes/cart"));

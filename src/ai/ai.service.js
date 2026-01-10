@@ -61,6 +61,7 @@ async function chat({ message }) {
     { key: ["avis", "notation"], reply: "Vous pouvez noter un produit après l’avoir reçu. Cela aide toute la communauté 👍" },
     { key: ["bug", "problème", "erreur"], reply: "Oups 😅 ! Pouvez-vous expliquer le problème ? Je vais vous aider." },
     { key: ["contacts", "coordonnés", "contacter", "appeler"], reply: "Vous pouvez écrire au support par mail uniquement: asdanepro@gmail.com" },
+    { key: ["plusieurs produits au panier"], reply: "Oui vous pavez ajouter plusieurs produits au panier et effectuer un seul paiement; mais attention ces produits doivent appartenir au même vendeur, pas différents vendeurs"},
   ];
 
   // ────────── NOUVELLES INTENTIONS ──────────
@@ -107,7 +108,7 @@ async function chat({ message }) {
     },
     {
       key: ["quel est ton nom", "comment t'appel-tu"],
-      reply: "Je m'appelle Asseham. Comment puis-je vous aider ?"
+      reply: "Je m'appelle Asseham votre Assistant E-Market. Comment puis-je vous aider ?"
     }
   ];
 
