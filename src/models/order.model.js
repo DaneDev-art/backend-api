@@ -23,32 +23,21 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       🚚 LIVREUR (USER)
-       — très important pour ton escrow workflow
-    ====================================================== */
-    /*delivery: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
-    },*/
-
-    /* ======================================================
        📦 PRODUITS — SNAPSHOT IMMUTABLE
+       👉 utilisé par le frontend (client + vendeur)
     ====================================================== */
     items: [
       {
-        // 🔗 Référence produit (optionnelle pour enrichissement)
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
         },
 
-        // 📸 SNAPSHOT = SOURCE UNIQUE DE VÉRITÉ FRONTEND
+        // 🔐 Snapshot garanti
         productId: {
           type: String,
           required: true,
-          index: true, // recherche rapide même sans populate
+          index: true,
         },
 
         productName: {
@@ -57,7 +46,7 @@ const OrderSchema = new mongoose.Schema(
         },
 
         productImage: {
-          type: String,
+          type: String, // URL ABSOLUE
         },
 
         quantity: {
@@ -78,7 +67,6 @@ const OrderSchema = new mongoose.Schema(
        💰 MONTANTS
     ====================================================== */
     totalAmount: {
-      // ∑ produits + shippingFee
       type: Number,
       required: true,
       min: 0,
@@ -109,12 +97,12 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       💳 PAYIN — ESCROW LIÉ À CINETPAY
+       💳 PAYIN — ESCROW
     ====================================================== */
     cinetpayTransactionId: {
       type: String,
       unique: true,
-      sparse: true, // 🔥 évite conflits sur null
+      sparse: true,
       index: true,
     },
 
@@ -139,20 +127,18 @@ const OrderSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📦 STATUT MÉTIER + ESCROW
-       — Ton workflow :
-       PAID → DELIVERED → COMPLETED
+       📦 STATUT MÉTIER
     ====================================================== */
     status: {
       type: String,
       enum: [
         "CREATED",
         "PAYMENT_PENDING",
-        "PAID",       // toutes commandes frontend déjà payées
+        "PAID",
         "ASSIGNED",
         "SHIPPED",
-        "DELIVERED",  // doit être atteint AVANT confirmation client
-        "COMPLETED",  // client confirme → fonds libérés
+        "DELIVERED",
+        "COMPLETED",
         "DISPUTED",
         "CANCELLED",
       ],
@@ -189,22 +175,57 @@ const OrderSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true,
+    timestamps: true, // ⬅ createdAt / updatedAt
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
   }
 );
 
 /* ======================================================
-   🔹 VIRTUALS
+   🔹 VIRTUALS — FRONTEND FRIENDLY
 ====================================================== */
 
-// 🏪 Nom vendeur (safe)
+/**
+ * 👤 Nom du client (safe)
+ */
+OrderSchema.virtual("clientName").get(function () {
+  if (this.client && typeof this.client === "object") {
+    return (
+      this.client.fullName ||
+      this.client.name ||
+      this.client.email ||
+      "Client inconnu"
+    );
+  }
+  return "Client inconnu";
+});
+
+/**
+ * 🏪 Nom vendeur (safe)
+ */
 OrderSchema.virtual("sellerName").get(function () {
   if (this.seller && typeof this.seller === "object") {
     return this.seller.name || "Vendeur inconnu";
   }
   return "Vendeur inconnu";
+});
+
+/**
+ * 📅 Date lisible pour frontend
+ */
+OrderSchema.virtual("orderDate").get(function () {
+  return this.createdAt;
+});
+
+/**
+ * 🖼️ Image principale de la commande
+ * 👉 première image produit
+ */
+OrderSchema.virtual("orderImage").get(function () {
+  if (this.items && this.items.length > 0) {
+    return this.items[0].productImage || null;
+  }
+  return null;
 });
 
 /* ======================================================
