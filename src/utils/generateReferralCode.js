@@ -1,10 +1,9 @@
 const crypto = require("crypto");
-const User = require("../models/user.model");
 
 /**
  * Générer un code de parrainage unique
  * @param {Number} length - longueur du code (6-8 recommandé)
- * @param {Number} maxAttempts - nombre max de tentatives pour générer un code unique
+ * @param {Number} maxAttempts - nombre max de tentatives
  * @returns {String} code unique
  */
 const generateReferralCode = async (length = 6, maxAttempts = 10) => {
@@ -12,12 +11,13 @@ const generateReferralCode = async (length = 6, maxAttempts = 10) => {
   let code;
   let attempt = 0;
 
+  const User = require("../models/user.model"); // ⬅️ Import dynamique ici
+
   while (attempt < maxAttempts) {
     code = Array.from({ length }, () =>
       characters.charAt(Math.floor(Math.random() * characters.length))
     ).join("");
 
-    // Vérifier unicité
     const existingUser = await User.findOne({ referralCode: code }).lean();
     if (!existingUser) return code;
 

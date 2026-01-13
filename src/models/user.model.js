@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
-const generateReferralCode = require("../utils/generateReferralCode");
 
 // ==========================================
 // 🔹 Définition du schéma utilisateur
@@ -177,7 +176,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // ==========================================
-// 🔄 Synchronisation images (compatibilité)
+// 🔄 Synchronisation images
 // ==========================================
 userSchema.pre("save", function (next) {
   if (this.photoURL) {
@@ -202,7 +201,7 @@ userSchema.pre("save", async function (next) {
 });
 
 // ==========================================
-// ⚡ Générer token vérification email
+// ⚡ Token vérification email
 // ==========================================
 userSchema.methods.generateEmailVerificationToken = function () {
   const token = crypto.randomBytes(32).toString("hex");
@@ -243,12 +242,33 @@ userSchema.index({
 });
 
 // ==========================================
-// 🔗 Génération referralCode unique
+// 🔗 Génération referralCode sans circularité
 // ==========================================
 userSchema.pre("save", async function (next) {
   if (!this.referralCode) {
     try {
-      this.referralCode = await generateReferralCode(6, 10); // 6 caractères, 10 tentatives max
+      const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      const User = mongoose.model("User");
+      let code;
+      let attempt = 0;
+      const maxAttempts = 10;
+
+      while (attempt < maxAttempts) {
+        code = Array.from({ length: 6 }, () =>
+          characters.charAt(Math.floor(Math.random() * characters.length))
+        ).join("");
+
+        const existing = await User.findOne({ referralCode: code }).lean();
+        if (!existing) {
+          this.referralCode = code;
+          break;
+        }
+        attempt++;
+      }
+
+      if (!this.referralCode) {
+        return next(new Error("Impossible de générer un code de parrainage unique"));
+      }
     } catch (err) {
       return next(err);
     }
