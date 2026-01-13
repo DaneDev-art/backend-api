@@ -302,37 +302,34 @@ exports.updateProfilePhoto = async (req, res) => {
 };
 
 // ======================================================
-// 🔹 SYNC SELLER (création ou mise à jour)
+// 🔹 SYNC SELLER (création ou mise à jour) - VERSION CORRECTE
 // ======================================================
 const syncSeller = async (user) => {
   try {
     if (!user || user.role !== "seller") return;
 
     const prefix = user.prefix || "228";
-    const phone = user.phone ? String(user.phone).trim() : "00000000"; // valeur par défaut si vide
-    const fullNumber = `${prefix}${phone}`;
+    const phone = user.phone ? String(user.phone).trim() : "00000000";
 
     const sellerData = {
-      _id: user._id, // même ID que User
-      user: user._id, // lien obligatoire
+      user: user._id, // ✅ clé UNIQUE métier
       name: user.ownerName || user.shopName || user.email.split("@")[0],
       email: user.email,
       phone,
       prefix,
-      fullNumber,
+      fullNumber: `${prefix}${phone}`,
       role: "seller",
       payout_method: "MOBILE_MONEY",
 
-      // Champs optionnels
+      // Champs boutique
       address: user.address || "",
       country: user.country || "",
       shopDescription: user.shopDescription || "",
       logoUrl: user.logoUrl || "",
     };
 
-    // ✅ Upsert : crée ou met à jour sans écraser les soldes existantes
-    const seller = await Seller.findByIdAndUpdate(
-      user._id,
+    const seller = await Seller.findOneAndUpdate(
+      { user: user._id }, // ✅ clé correcte
       {
         $set: sellerData,
         $setOnInsert: {
@@ -341,16 +338,18 @@ const syncSeller = async (user) => {
           cinetpay_contact_added: false,
           cinetpay_contact_id: null,
           cinetpay_contact_meta: {},
-          createdAt: new Date(),
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
     );
 
-    console.log("✅ Seller synced:", user.email, seller ? "(existing updated or new created)" : "");
-
+    console.log("✅ Seller synced:", seller.email);
   } catch (err) {
-    console.error("❌ Seller sync error:", err); // affichage complet pour debug
+    console.error("❌ Seller sync error:", err);
   }
 };
 

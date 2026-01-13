@@ -3,53 +3,54 @@ const mongoose = require("mongoose");
 
 const SellerSchema = new mongoose.Schema(
   {
-    // 🔹 Référence vers l'utilisateur
+    // 🔹 Lien UNIQUE vers User
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true, // chaque User ne peut avoir qu'un Seller
+      unique: true,
+      index: true,
     },
 
-    // 🔹 Informations de base
+    // 🔹 Infos principales
     name: { type: String, required: true, trim: true },
-    surname: { type: String, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
 
-    // 🔹 Téléphone et identifiants
+    // 🔹 Téléphone
     phone: { type: String, required: true, trim: true },
     prefix: { type: String, required: true, trim: true },
-    fullNumber: {
-      type: String,
-      unique: true,
-      sparse: true,
-      trim: true,
-    },
+    fullNumber: { type: String, unique: true, sparse: true },
 
-    // 🔹 Intégration CinetPay
+    // 🔹 Infos boutique
+    address: { type: String, default: "" },
+    country: { type: String, default: "" },
+    shopDescription: { type: String, default: "" },
+    logoUrl: { type: String, default: "" },
+
+    // 🔹 CinetPay
     cinetpay_contact_added: { type: Boolean, default: false },
     cinetpay_contact_id: { type: String, default: null },
     cinetpay_contact_meta: { type: Object, default: {} },
 
-    // 🔹 Type de compte pour PayOut
+    // 🔹 Paiement
     payout_method: {
       type: String,
-      enum: ["MOBILE_MONEY", "BANK", null],
+      enum: ["MOBILE_MONEY", "BANK"],
       default: "MOBILE_MONEY",
     },
-    payout_account: { type: String, trim: true },
+    payout_account: { type: String, default: "" },
 
-    // 🔹 Solde
+    // 🔹 Soldes
     balance_locked: { type: Number, default: 0 },
     balance_available: { type: Number, default: 0 },
 
-    // 🔹 Role ajouté pour compatibilité controller
+    // 🔹 Compatibilité controller
     role: { type: String, default: "seller" },
   },
   { timestamps: true }
 );
 
-// 🔹 Middleware pour générer automatiquement fullNumber
+// 🔹 Génération automatique fullNumber
 SellerSchema.pre("save", function (next) {
   if (this.prefix && this.phone) {
     this.fullNumber = `${this.prefix}${this.phone}`;
@@ -57,7 +58,6 @@ SellerSchema.pre("save", function (next) {
   next();
 });
 
-// 🔹 Index pour recherche rapide
 SellerSchema.index({ email: 1, fullNumber: 1 });
 
 module.exports = mongoose.model("Seller", SellerSchema);
