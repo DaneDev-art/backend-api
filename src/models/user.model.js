@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
+const generateReferralCode = require("../utils/generateReferralCode");
 
 // ==========================================
 // 🔹 Définition du schéma utilisateur
@@ -41,12 +42,29 @@ const userSchema = new mongoose.Schema(
     },
 
     // =========================
+    // 🤝 PARRAINAGE (REFERRAL)
+    // =========================
+    referralCode: {
+      type: String,
+      unique: true,
+      index: true,
+    },
+
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    referralStats: {
+      totalReferrals: { type: Number, default: 0 },
+      totalCommissionEarned: { type: Number, default: 0 },
+    },
+
+    // =========================
     // ⭐️ Vérification email
     // =========================
-    isVerified: {
-      type: Boolean,
-      default: false,
-    },
+    isVerified: { type: Boolean, default: false },
     verificationToken: String,
     verificationTokenExpires: Date,
 
@@ -71,12 +89,12 @@ const userSchema = new mongoose.Schema(
     // =========================
     // 🖼️ Images profil
     // =========================
-    profileImageUrl: { type: String }, // legacy
-    avatarUrl: { type: String, default: "" }, // legacy
-    photoURL: { type: String, trim: true }, // champ standard
+    profileImageUrl: { type: String },
+    avatarUrl: { type: String, default: "" },
+    photoURL: { type: String, trim: true },
 
     // =========================
-    // 🛒 PANIER UTILISATEUR ✅
+    // 🛒 PANIER UTILISATEUR
     // =========================
     cart: [
       {
@@ -90,11 +108,7 @@ const userSchema = new mongoose.Schema(
           ref: "User",
           required: true,
         },
-        quantity: {
-          type: Number,
-          min: 1,
-          default: 1,
-        },
+        quantity: { type: Number, min: 1, default: 1 },
       },
     ],
 
@@ -107,57 +121,44 @@ const userSchema = new mongoose.Schema(
     cinetpayContactAdded: { type: Boolean, default: false },
     cinetpayContactMeta: { type: Object, default: {} },
 
-    /// =========================
-   // 🚚 Infos livreur
-   // =========================
+    // =========================
+    // 🚚 Infos livreur
+    // =========================
     plate: { type: String, trim: true },
-
     idNumber: { type: String, trim: true },
-
     guarantee: { type: String, trim: true },
+    transportMode: {
+      type: String,
+      enum: [
+        "Vélo",
+        "Moto à 2 roues",
+        "Moto à 3 roues",
+        "Taxis 5 places",
+        "Voiture 9 places",
+        "Voiture 15 places",
+        "Bus",
+        "Camion",
+        "Titan",
+        "Autre",
+      ],
+      set: function (v) {
+        if (!v) return v;
+        const clean = v.toLowerCase().trim();
+        if (clean === "moto" || clean === "moto 2 roues") return "Moto à 2 roues";
+        if (clean === "moto 3 roues") return "Moto à 3 roues";
+        if (clean === "voiture") return "Voiture 9 places";
+        if (clean === "velo" || clean === "vélo") return "Vélo";
+        return v.trim();
+      },
+    },
 
-transportMode: {
-  type: String,
-
-  enum: [
-    "Vélo",
-    "Moto à 2 roues",
-    "Moto à 3 roues",
-    "Taxis 5 places",
-    "Voiture 9 places",
-    "Voiture 15 places",
-    "Bus",
-    "Camion",
-    "Titan",
-    "Autre",
-  ],
-
-  // 🔥 ACCEPTER ENTRÉES SIMPLES DEPUIS FLUTTER
-  set: function (v) {
-    if (!v) return v;
-
-    const clean = v.toLowerCase().trim();
-
-    // mapping des valeurs courtes vers enum officiel
-    if (clean === "moto") return "Moto à 2 roues";
-    if (clean === "moto 2 roues") return "Moto à 2 roues";
-    if (clean === "moto 3 roues") return "Moto à 3 roues";
-
-    if (clean === "voiture") return "Voiture 9 places";
-    if (clean === "velo" || clean === "vélo") return "Vélo";
-
-    return v.trim();
-  },
-},
-
-status: {
-  type: String,
-  enum: ["pending", "approved", "rejected"],
-
-  default: function () {
-    return this.role === "delivery" ? "pending" : "approved";
-  },
-},
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: function () {
+        return this.role === "delivery" ? "pending" : "approved";
+      },
+    },
 
     // =========================
     // 📎 Documents identité
@@ -205,14 +206,8 @@ userSchema.pre("save", async function (next) {
 // ==========================================
 userSchema.methods.generateEmailVerificationToken = function () {
   const token = crypto.randomBytes(32).toString("hex");
-
-  this.verificationToken = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-
+  this.verificationToken = crypto.createHash("sha256").update(token).digest("hex");
   this.verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-
   return token;
 };
 
@@ -220,9 +215,7 @@ userSchema.methods.generateEmailVerificationToken = function () {
 // 🔐 Comparaison mot de passe
 // ==========================================
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  if (!this.password) {
-    throw new Error("Password not selected in query");
-  }
+  if (!this.password) throw new Error("Password not selected in query");
   return bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -247,6 +240,16 @@ userSchema.index({
   shopName: "text",
   city: "text",
   country: "text",
+});
+
+// ==========================================
+// 🔗 Génération referralCode unique
+// ==========================================
+userSchema.pre("save", async function (next) {
+  if (!this.referralCode) {
+    this.referralCode = await generateReferralCode(6); // 6 caractères uniques
+  }
+  next();
 });
 
 // ==========================================

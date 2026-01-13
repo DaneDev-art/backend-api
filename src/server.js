@@ -18,6 +18,12 @@ const aiConversationRoutes = require("./routes/aiConversation.routes");
 // Middleware global d'erreurs
 const errorHandler = require("./middleware/errorHandler");
 
+// 🔹 Import CRON Referral
+const { releasePendingCommissions } = require("./cron/referral.cron");
+
+// Import Admin Referral
+const adminReferralRoutes = require("./routes/adminReferral.routes");
+
 const PORT = process.env.PORT || 5000;
 
 // =======================
@@ -66,6 +72,9 @@ const connectDB = async (retries = 5, delay = 3000) => {
 (async () => {
   try {
     await connectDB();
+
+    // 🔹 Lancer le CRON Referral au démarrage (optionnel pour tests)
+    releasePendingCommissions();
 
     const server = http.createServer(app);
 
@@ -166,6 +175,9 @@ const connectDB = async (retries = 5, delay = 3000) => {
     // 🔹 Middleware global d'erreurs
     // =======================
     app.use(errorHandler);
+
+    // adminReferralRoutes
+    app.use("/api/admin/referral", adminReferralRoutes);
 
     // --- Démarrage serveur HTTP
     server.listen(PORT, () => {
