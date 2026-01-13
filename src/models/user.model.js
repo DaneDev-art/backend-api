@@ -247,7 +247,11 @@ userSchema.index({
 // ==========================================
 userSchema.pre("save", async function (next) {
   if (!this.referralCode) {
-    this.referralCode = await generateReferralCode(6); // 6 caractères uniques
+    try {
+      this.referralCode = await generateReferralCode(6, 10); // 6 caractères, 10 tentatives max
+    } catch (err) {
+      return next(err);
+    }
   }
   next();
 });
