@@ -101,6 +101,14 @@ app.use(
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
+//Wallet routes
+const walletRoutes = require("./routes/wallet.routes");
+app.use("/api/wallet", walletRoutes);
+
+// 🔗 Referral routes
+const referralRoutes = require("./routes/referral.routes");
+app.use("/api/referral", referralRoutes);
+
 // =======================
 // 🔹 Page d’accueil
 // =======================
