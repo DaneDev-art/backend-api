@@ -309,12 +309,12 @@ const syncSeller = async (user) => {
     if (!user || user.role !== "seller") return;
 
     const prefix = user.prefix || "228";
-    const phone = user.phone ? String(user.phone).trim() : "";
-    const fullNumber = phone ? `${prefix}${phone}` : "";
+    const phone = user.phone ? String(user.phone).trim() : "00000000"; // valeur par défaut si vide
+    const fullNumber = `${prefix}${phone}`;
 
     const sellerData = {
       _id: user._id, // même ID que User
-      user: user._id, // 🔹 LIEN USER obligatoire si required:true
+      user: user._id, // lien obligatoire
       name: user.ownerName || user.shopName || user.email.split("@")[0],
       email: user.email,
       phone,
@@ -322,10 +322,16 @@ const syncSeller = async (user) => {
       fullNumber,
       role: "seller",
       payout_method: "MOBILE_MONEY",
+
+      // Champs optionnels
+      address: user.address || "",
+      country: user.country || "",
+      shopDescription: user.shopDescription || "",
+      logoUrl: user.logoUrl || "",
     };
 
-    // ✅ UPSERT : crée ou met à jour sans casser les soldes existants
-    await Seller.findByIdAndUpdate(
+    // ✅ Upsert : crée ou met à jour sans écraser les soldes existantes
+    const seller = await Seller.findByIdAndUpdate(
       user._id,
       {
         $set: sellerData,
@@ -338,10 +344,13 @@ const syncSeller = async (user) => {
           createdAt: new Date(),
         },
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    console.log("✅ Seller synced:", user.email, seller ? "(existing updated or new created)" : "");
+
   } catch (err) {
-    console.error("❌ Seller sync error:", err.message);
+    console.error("❌ Seller sync error:", err); // affichage complet pour debug
   }
 };
 
