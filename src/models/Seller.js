@@ -1,3 +1,5 @@
+//src/models/Seller
+const mongoose = require("mongoose");
 const SellerSchema = new mongoose.Schema(
   {
     user: {
