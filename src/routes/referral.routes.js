@@ -3,9 +3,7 @@ const router = express.Router();
 
 const ReferralController = require("../controllers/referral.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
-const {
-  validateReferral,
-} = require("../middleware/referral.middleware");
+const { validateReferral } = require("../middleware/referral.middleware");
 
 // ============================
 // 🤝 ROUTES PARRAINAGE
@@ -30,6 +28,16 @@ router.get(
   "/my-referrals",
   verifyToken,
   ReferralController.getMyReferrals
+);
+
+/**
+ * Mon code de parrainage + lien
+ * GET /api/referral/my-code
+ */
+router.get(
+  "/my-code",
+  verifyToken,
+  ReferralController.getMyReferralCode
 );
 
 module.exports = router;
