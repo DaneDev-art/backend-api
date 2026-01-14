@@ -83,6 +83,24 @@ exports.register = async (req, res) => {
 
     const user = await User.create(userData);
 
+    // ======================================================
+    // 🤝 AUTO-APPLICATION DU CODE DE PARRAINAGE (SI PRÉSENT)
+    // ======================================================
+try {
+  const referralCode =
+    req.body.referralCode || req.query.ref;
+
+  if (referralCode) {
+    await ReferralService.applyReferralCode({
+      userId: user._id,
+      referralCode,
+    });
+  }
+} catch (referralError) {
+  // ⚠️ On ne bloque PAS l'inscription si le parrainage échoue
+  console.warn("Referral apply failed:", referralError.message);
+}
+
     // 🔗 URL BACKEND
     const backendUrl = process.env.BACKEND_URL || "https://backend-api-m0tf.onrender.com";
     const verificationUrl = `${backendUrl}/api/auth/verify-email?token=${verificationToken}`;

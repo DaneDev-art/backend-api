@@ -34,33 +34,44 @@ class ReferralController {
   }
 
   /**
-   * Liste des filleuls + stats + code de parrainage
+   * Liste des filleuls + stats + code
    * GET /api/referral/my-referrals
    */
   static async getMyReferrals(req, res, next) {
     try {
       const userId = req.user.id;
+
       const user = await User.findById(userId).lean();
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+        });
+      }
 
-      if (!user) return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
-
-      // Récupérer les filleuls
+      // Récupération brute
       const referralsRaw = await ReferralService.getUserReferrals(userId);
 
-      // Transformer pour Flutter
-      const referrals = referralsRaw.map(r => ({
-        name: r.referred?.fullName || r.referred?.email || "Utilisateur",
+      // Normalisation Flutter
+      const referrals = referralsRaw.map((r) => ({
+        name:
+          r.referred?.fullName ||
+          r.referred?.email ||
+          "Utilisateur",
         commissionEarned: r.commissionEarned || 0,
         createdAt: r.referred?.createdAt || r.createdAt,
       }));
 
       return res.status(200).json({
         success: true,
-        myReferralCode: user.referralCode || "",
-        referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
-        totalReferrals: user.referralStats?.totalReferrals || 0,
-        totalCommissionEarned: user.referralStats?.totalCommissionEarned || 0,
-        referrals,
+        data: {
+          myReferralCode: user.referralCode || "",
+          referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
+          totalReferrals: user.referralStats?.totalReferrals || 0,
+          totalCommissionEarned:
+            user.referralStats?.totalCommissionEarned || 0,
+          referrals,
+        },
       });
     } catch (error) {
       next(error);
@@ -68,28 +79,29 @@ class ReferralController {
   }
 
   /**
-   * Récupérer uniquement le code de parrainage et le lien
+   * Code + lien de parrainage
    * GET /api/referral/my-code
    */
   static async getMyReferralCode(req, res, next) {
     try {
       const user = await User.findById(req.user.id).lean();
-      if (!user) {
-        return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
-      }
 
-      const referralCode = user.referralCode;
-      const referralLink = `${process.env.FRONTEND_URL}/register?ref=${referralCode}`;
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Utilisateur non trouvé",
+        });
+      }
 
       return res.status(200).json({
         success: true,
         data: {
-          referralCode,
-          referralLink,
+          referralCode: user.referralCode || "",
+          referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
         },
       });
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   }
 }
