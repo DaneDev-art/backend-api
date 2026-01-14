@@ -312,7 +312,8 @@ const syncSeller = async (user) => {
     const phone = user.phone ? String(user.phone).trim() : "00000000";
 
     const sellerData = {
-      user: user._id, // ✅ clé UNIQUE métier
+      _id: user._id, // ✅ force le seller à avoir le même _id que l'utilisateur
+      user: user._id,
       name: user.ownerName || user.shopName || user.email.split("@")[0],
       email: user.email,
       phone,
@@ -329,7 +330,7 @@ const syncSeller = async (user) => {
     };
 
     const seller = await Seller.findOneAndUpdate(
-      { user: user._id }, // ✅ clé correcte
+      { _id: user._id }, // ✅ on recherche par le même ID que l'utilisateur
       {
         $set: sellerData,
         $setOnInsert: {
@@ -347,7 +348,7 @@ const syncSeller = async (user) => {
       }
     );
 
-    console.log("✅ Seller synced:", seller.email);
+    console.log("✅ Seller synced with identical ID:", seller._id);
   } catch (err) {
     console.error("❌ Seller sync error:", err);
   }
