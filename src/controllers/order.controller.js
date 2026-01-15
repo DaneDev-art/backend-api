@@ -3,10 +3,11 @@ const Order = require("../models/order.model");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const CinetPayService = require("../services/CinetPayService");
+const ReferralCommissionService = require("../services/referralCommission.service"); // <-- ajouté
 
 /* ======================================================
    🔹 CREATE ORDER BEFORE PAYIN
-====================================================== */
+===================================================== */
 exports.createOrderBeforePayIn = async (req, res) => {
   try {
     const {
@@ -134,7 +135,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
 
 /* ======================================================
    🔹 LOCK AFTER SUCCESSFUL PAYIN
-====================================================== */
+===================================================== */
 exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
   const order = await Order.findById(orderId);
   if (!order) throw new Error("Commande introuvable");
@@ -142,9 +143,7 @@ exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
   // frais plateforme si besoin
   const PLATFORM_FEE_RATE = 0.04;
 
-  order.netAmount = Math.floor(
-    order.totalAmount * (1 - PLATFORM_FEE_RATE)
-  );
+  order.netAmount = Math.floor(order.totalAmount * (1 - PLATFORM_FEE_RATE));
 
   order.status = "PAID";
 
@@ -163,8 +162,8 @@ exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
 };
 
 /* ======================================================
-   🔹 RELEASE FUNDS → PAYOUT SELLER
-====================================================== */
+   🔹 RELEASE FUNDS → PAYOUT SELLER + REFERRAL COMMISSION
+===================================================== */
 exports.releaseOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -235,6 +234,9 @@ exports.releaseOrder = async (req, res) => {
         },
       }
     );
+
+    // 🔥 CALCUL DES COMMISSIONS DE PARRAINAGE
+    await ReferralCommissionService.handleOrderCompleted(order._id);
 
     return res.status(200).json({
       success: true,
