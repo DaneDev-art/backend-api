@@ -9,60 +9,103 @@ class ReferralCommissionService {
 
   /* ======================================================
      🔹 ORDER COMPLETED → SELLER COMMISSION
+     👉 appelé UNIQUEMENT quand status = COMPLETED
   ====================================================== */
-  static async handleOrderCompleted(orderId) {
-    if (!mongoose.Types.ObjectId.isValid(orderId)) return;
+  static async handleOrderCompleted(order) {
+    try {
+      // ===== VALIDATION =====
+      if (!order || !order._id) {
+        console.warn("⚠️ ReferralCommission: order invalide");
+        return;
+      }
 
-    const order = await Order.findById(orderId)
-      .populate("seller")
-      .lean();
+      if (order.status !== "COMPLETED") {
+        console.warn(
+          `⚠️ ReferralCommission: order ${order._id} status=${order.status}`
+        );
+        return;
+      }
 
-    if (!order || order.status !== "COMPLETED") return;
+      // ===== LOAD SELLER =====
+      const seller = await Seller.findById(order.seller).lean();
+      if (!seller || !seller.user) {
+        console.warn(
+          `⚠️ ReferralCommission: seller introuvable pour order ${order._id}`
+        );
+        return;
+      }
 
-    // 🔹 Seller → User
-    const sellerUserId = order.seller?.user;
-    if (!sellerUserId) return;
+      const sellerUserId = seller.user;
 
-    // 🔹 Le seller est-il parrainé ?
-    const referral = await Referral.findOne({
-      referred: sellerUserId,
-      status: "ACTIVE",
-    }).lean();
+      // ===== CHECK REFERRAL =====
+      const referral = await Referral.findOne({
+        referred: sellerUserId,
+        status: "ACTIVE",
+      }).lean();
 
-    if (!referral) return;
+      if (!referral) {
+        return; // vendeur non parrainé → normal
+      }
 
-    // 🔒 Anti-duplication
-    const exists = await ReferralCommission.exists({
-      referrer: referral.referrer,
-      sourceId: order._id,
-      sourceType: "ORDER",
-    });
-    if (exists) return;
+      // ===== ANTI-DUPLICATION =====
+      const exists = await ReferralCommission.exists({
+        referrer: referral.referrer,
+        sourceId: order._id,
+        sourceType: "ORDER",
+      });
 
-    const percentage = 1.5;
-    const baseAmount = order.totalAmount;
-    const commissionAmount = Math.floor(
-      baseAmount * percentage / 100
-    );
+      if (exists) {
+        console.warn(
+          `⚠️ ReferralCommission: déjà créée pour order ${order._id}`
+        );
+        return;
+      }
 
-    if (commissionAmount <= 0) return;
+      // ===== CALCUL COMMISSION =====
+      const percentage = 1.5;
 
-    await ReferralCommission.create({
-      referrer: referral.referrer,
-      referred: sellerUserId,
-      sourceId: order._id,
-      sourceType: "ORDER",
-      amount: commissionAmount,
-      percentage,
-      commissionType: "SELLER_SALE",
-      status: "AVAILABLE",
-      availableAt: new Date(),
-    });
+      // 🔥 BASE = netAmount (PAS totalAmount)
+      const baseAmount = order.netAmount;
+      if (!baseAmount || baseAmount <= 0) {
+        console.warn(
+          `⚠️ ReferralCommission: baseAmount invalide pour order ${order._id}`
+        );
+        return;
+      }
+
+      const commissionAmount = Math.floor(
+        (baseAmount * percentage) / 100
+      );
+
+      if (commissionAmount <= 0) return;
+
+      // ===== CREATE COMMISSION =====
+      await ReferralCommission.create({
+        referrer: referral.referrer,
+        referred: sellerUserId,
+        sourceId: order._id,
+        sourceType: "ORDER",
+        amount: commissionAmount,
+        percentage,
+        commissionType: "SELLER_SALE",
+        status: "AVAILABLE",
+        availableAt: new Date(),
+      });
+
+      console.log(
+        `✅ ReferralCommission créée | order=${order._id} | amount=${commissionAmount}`
+      );
+    } catch (err) {
+      console.error(
+        "❌ ReferralCommission.handleOrderCompleted:",
+        err
+      );
+    }
   }
 
   /* ======================================================
-     🔹 BUYER / DELIVERY GAIN COMMISSION (50%)
-     👉 appelé lors de la création du gain
+     🔹 BUYER / USER GAIN COMMISSION (50%)
+     👉 appelé lors de la création d'un gain utilisateur
   ====================================================== */
   static async handleUserGain({
     userId,
@@ -70,38 +113,45 @@ class ReferralCommissionService {
     sourceId,
     sourceType = "USER_GAIN",
   }) {
-    if (!gainAmount || gainAmount <= 0) return;
+    try {
+      if (!userId || !gainAmount || gainAmount <= 0) return;
 
-    const referral = await Referral.findOne({
-      referred: userId,
-      status: "ACTIVE",
-    }).lean();
+      const referral = await Referral.findOne({
+        referred: userId,
+        status: "ACTIVE",
+      }).lean();
 
-    if (!referral) return;
+      if (!referral) return;
 
-    // 🔒 Anti-doublon
-    const exists = await ReferralCommission.exists({
-      referrer: referral.referrer,
-      sourceId,
-      sourceType,
-    });
-    if (exists) return;
+      // ===== ANTI-DUPLICATION =====
+      const exists = await ReferralCommission.exists({
+        referrer: referral.referrer,
+        sourceId,
+        sourceType,
+      });
+      if (exists) return;
 
-    const percentage = 50;
-    const commissionAmount = Math.floor(gainAmount * 0.5);
-    if (commissionAmount <= 0) return;
+      const percentage = 50;
+      const commissionAmount = Math.floor(gainAmount * 0.5);
+      if (commissionAmount <= 0) return;
 
-    await ReferralCommission.create({
-      referrer: referral.referrer,
-      referred: userId,
-      sourceId,
-      sourceType,
-      amount: commissionAmount,
-      percentage,
-      commissionType: "USER_EARNING",
-      status: "AVAILABLE",
-      availableAt: new Date(),
-    });
+      await ReferralCommission.create({
+        referrer: referral.referrer,
+        referred: userId,
+        sourceId,
+        sourceType,
+        amount: commissionAmount,
+        percentage,
+        commissionType: "USER_EARNING",
+        status: "AVAILABLE",
+        availableAt: new Date(),
+      });
+    } catch (err) {
+      console.error(
+        "❌ ReferralCommission.handleUserGain:",
+        err
+      );
+    }
   }
 }
 

@@ -1,15 +1,12 @@
 const mongoose = require("mongoose");
 
-// ==========================================
-// 🔹 Schéma des commissions de parrainage
-// ==========================================
 const referralCommissionSchema = new mongoose.Schema(
   {
     referrer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true, // index pour requêtes rapides par parrain
+      index: true,
     },
 
     referred: {
@@ -21,8 +18,7 @@ const referralCommissionSchema = new mongoose.Schema(
     sourceId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
-      index: true, // index pour rechercher par source (order, gain...)
-      // Exemple: orderId, deliveryId, payoutId...
+      index: true,
     },
 
     sourceType: {
@@ -52,29 +48,29 @@ const referralCommissionSchema = new mongoose.Schema(
       type: String,
       enum: ["PENDING", "AVAILABLE", "PAID", "CANCELLED"],
       default: "PENDING",
-      index: true, // index pour recherches rapides sur le statut
+      index: true,
     },
 
     availableAt: {
-      type: Date, // date à partir de laquelle la commission peut être libérée
-      default: Date.now,
+      type: Date,
     },
   },
   { timestamps: true }
 );
 
-// ==========================================
-// 🔍 Index composé pour éviter doublons
-// referrer + sourceId + sourceType
-// ==========================================
+// 🔒 Anti-duplication
 referralCommissionSchema.index(
   { referrer: 1, sourceId: 1, sourceType: 1 },
   { unique: true }
 );
 
-// ==========================================
-// ✅ Export
-// ==========================================
+// 📊 Requêtes fréquentes
+referralCommissionSchema.index({
+  referrer: 1,
+  status: 1,
+  createdAt: -1,
+});
+
 module.exports = mongoose.model(
   "ReferralCommission",
   referralCommissionSchema,

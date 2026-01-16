@@ -3,7 +3,7 @@ const Order = require("../models/order.model");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const CinetPayService = require("../services/CinetPayService");
-const ReferralCommissionService = require("../services/referralCommission.service"); // <-- ajouté
+const ReferralCommissionService = require("../services/referralCommission.service");
 
 /* ======================================================
    🔹 CREATE ORDER BEFORE PAYIN
@@ -32,7 +32,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     }
 
     // ===== SELLER =====
-    const seller = await Seller.findById(sellerId).lean();
+    const seller = await Seller.findById(sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Vendeur introuvable" });
     }
@@ -43,9 +43,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     const products = await Product.find({
       _id: { $in: productIds },
       seller: sellerId,
-    })
-      .select("_id name price images imageUrl currency") // ajout de imageUrl
-      .lean();
+    }).select("_id name price images imageUrl currency");
 
     if (products.length !== items.length) {
       return res.status(400).json({
@@ -53,30 +51,29 @@ exports.createOrderBeforePayIn = async (req, res) => {
       });
     }
 
-    // map produits
+    // ===== MAP PRODUITS =====
     const productMap = {};
     for (const p of products) {
       productMap[p._id.toString()] = p;
     }
 
-    // ===== SNAPSHOT =====
+    // ===== SNAPSHOT ITEMS =====
     let productTotal = 0;
 
     const frozenItems = items.map((item) => {
       const product = productMap[item.productId];
-
       const quantity = Number(item.quantity || 1);
       const price = Number(product.price);
 
       productTotal += quantity * price;
 
       return {
-        product: product._id, // ref mongo
+        product: product._id,
         productId: product._id.toString(),
         productName: product.name,
         productImage:
-          product.images?.[0] || // priorité images[0]
-          product.imageUrl || // fallback imageUrl
+          product.images?.[0] ||
+          product.imageUrl ||
           null,
         quantity,
         price,
@@ -101,7 +98,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
 
       currency: frozenItems[0]?.currency || "XOF",
 
-      netAmount: 0, // calculé après PayIn
+      netAmount: 0,
 
       deliveryAddress,
 
@@ -120,7 +117,7 @@ exports.createOrderBeforePayIn = async (req, res) => {
     return res.status(201).json({
       success: true,
       orderId: order._id,
-      totalAmount: order.totalAmount, // alias getter
+      totalAmount: order.totalAmount,
       message: "Commande créée, prête pour paiement",
     });
   } catch (error) {
@@ -134,17 +131,15 @@ exports.createOrderBeforePayIn = async (req, res) => {
 };
 
 /* ======================================================
-   🔹 LOCK AFTER SUCCESSFUL PAYIN
+   🔹 LOCK ESCROW AFTER SUCCESSFUL PAYIN
 ===================================================== */
 exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
   const order = await Order.findById(orderId);
   if (!order) throw new Error("Commande introuvable");
 
-  // frais plateforme si besoin
   const PLATFORM_FEE_RATE = 0.04;
 
   order.netAmount = Math.floor(order.totalAmount * (1 - PLATFORM_FEE_RATE));
-
   order.status = "PAID";
 
   order.escrow.isLocked = true;
@@ -157,7 +152,6 @@ exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
   };
 
   await order.save();
-
   return order;
 };
 
@@ -173,7 +167,8 @@ exports.releaseOrder = async (req, res) => {
       return res.status(400).json({ error: "orderId invalide" });
     }
 
-    const order = await Order.findById(orderId).lean();
+    // ❌ PAS DE .lean() ICI
+    const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ error: "Commande introuvable" });
     }
@@ -185,30 +180,22 @@ exports.releaseOrder = async (req, res) => {
 
     // ===== STATUS CHECK =====
     if (order.status !== "PAID") {
-      return res.status(400).json({
-        error: "Commande non payée",
-      });
+      return res.status(400).json({ error: "Commande non payée" });
     }
 
     if (!order.escrow?.isLocked) {
-      return res.status(400).json({
-        error: "Fonds non bloqués",
-      });
+      return res.status(400).json({ error: "Fonds non bloqués" });
     }
 
     if (order.isConfirmedByClient) {
-      return res.status(400).json({
-        error: "Commande déjà confirmée",
-      });
+      return res.status(400).json({ error: "Commande déjà confirmée" });
     }
 
     if (!order.netAmount || order.netAmount <= 0) {
-      return res.status(400).json({
-        error: "Montant vendeur invalide",
-      });
+      return res.status(400).json({ error: "Montant vendeur invalide" });
     }
 
-    // ===== PAYOUT =====
+    // ===== PAYOUT SELLER =====
     const payout = await CinetPayService.createPayOutForSeller({
       sellerId: order.seller,
       amount: order.netAmount,
@@ -216,32 +203,27 @@ exports.releaseOrder = async (req, res) => {
       notifyUrl: `${process.env.PLATFORM_BASE_URL}/api/cinetpay/payout/verify`,
     });
 
-    // ===== UPDATE ORDER =====
-    await Order.updateOne(
-      { _id: orderId },
-      {
-        status: "COMPLETED",
+    // ===== UPDATE ORDER TO COMPLETED =====
+    order.status = "COMPLETED";
+    order.escrow.isLocked = false;
+    order.escrow.releasedAt = new Date();
+    order.isConfirmedByClient = true;
+    order.confirmedAt = new Date();
 
-        "escrow.isLocked": false,
-        "escrow.releasedAt": new Date(),
+    order.payoutInfo = {
+      payoutId: payout.payout_id || payout.transaction_id,
+      createdAt: new Date(),
+    };
 
-        isConfirmedByClient: true,
-        confirmedAt: new Date(),
+    await order.save();
 
-        payoutInfo: {
-          payoutId: payout.payout_id || payout.transaction_id,
-          createdAt: new Date(),
-        },
-      }
-    );
-
-    // 🔥 CALCUL DES COMMISSIONS DE PARRAINAGE
-    await ReferralCommissionService.handleOrderCompleted(order._id);
+    // 🔥 APPLY REFERRAL COMMISSION (ORDER COMPLETED)
+    await ReferralCommissionService.handleOrderCompleted(order);
 
     return res.status(200).json({
       success: true,
       message: "Commande confirmée, fonds libérés vers le vendeur",
-      orderId,
+      orderId: order._id,
       releasedAmount: order.netAmount,
       payout,
     });
