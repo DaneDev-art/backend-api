@@ -23,10 +23,17 @@ class ReferralController {
         referralCode,
       });
 
+      // 🔹 Récupération du nom du parrain
+      const referrerName =
+        referral.referrer?.fullName || referral.referrer?.email || "Utilisateur";
+
       return res.status(200).json({
         success: true,
         message: "Parrainage appliqué avec succès",
-        data: referral,
+        data: {
+          referral,
+          appliedByName: referrerName, // 🔹 nouveau champ
+        },
       });
     } catch (error) {
       next(error);
@@ -54,10 +61,7 @@ class ReferralController {
 
       // Normalisation Flutter
       const referrals = referralsRaw.map((r) => ({
-        name:
-          r.referred?.fullName ||
-          r.referred?.email ||
-          "Utilisateur",
+        name: r.referred?.fullName || r.referred?.email || "Utilisateur",
         commissionEarned: r.commissionEarned || 0,
         createdAt: r.referred?.createdAt || r.createdAt,
       }));
@@ -68,8 +72,7 @@ class ReferralController {
           myReferralCode: user.referralCode || "",
           referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
           totalReferrals: user.referralStats?.totalReferrals || 0,
-          totalCommissionEarned:
-            user.referralStats?.totalCommissionEarned || 0,
+          totalCommissionEarned: user.referralStats?.totalCommissionEarned || 0,
           referrals,
         },
       });
@@ -93,11 +96,19 @@ class ReferralController {
         });
       }
 
+      // 🔹 Si l'utilisateur a été parrainé, récupérer le nom du parrain
+      let appliedByName = "";
+      if (user.referredBy) {
+        const referrer = await User.findById(user.referredBy).lean();
+        appliedByName = referrer?.fullName || referrer?.email || "Utilisateur";
+      }
+
       return res.status(200).json({
         success: true,
         data: {
           referralCode: user.referralCode || "",
           referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
+          appliedByName, // 🔹 nouveau champ
         },
       });
     } catch (error) {
