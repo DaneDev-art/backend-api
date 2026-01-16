@@ -23,7 +23,7 @@ class ReferralController {
         referralCode,
       });
 
-      return res.status(201).json({
+      return res.status(200).json({
         success: true,
         message: "Parrainage appliqué avec succès",
         data: referral,

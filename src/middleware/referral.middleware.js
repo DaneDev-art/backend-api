@@ -1,3 +1,5 @@
+// src/middleware/referral.middleware.js
+
 const User = require("../models/user.model");
 
 /**

@@ -108,6 +108,7 @@ app.use("/api/wallet", walletRoutes);
 // 🔗 Referral routes
 const referralRoutes = require("./routes/referral.routes");
 app.use("/api/referral", referralRoutes);
+app.use("/api/referrals", referralRoutes); 
 
 // =======================
 // 🔹 Page d’accueil
