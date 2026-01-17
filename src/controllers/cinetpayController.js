@@ -1,13 +1,18 @@
 // =============================================
 // controllers/cinetpayController.js
-// PRODUCTION READY — SYNTAX FIXED
+// PRODUCTION READY — FINAL & COMMISSION SAFE
 // =============================================
 
 const mongoose = require("mongoose");
 const CinetPayService = require("../services/CinetPayService");
+
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
+const Order = require("../models/Order");
+
+// 🔥 FINALISATION CENTRALISÉE (COMMISSION INCLUSE)
+const { finalizeOrder } = require("../services/orderFinalize.service");
 
 const BASE_URL =
   process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
@@ -148,6 +153,7 @@ module.exports = {
 
   /* ======================================================
      🟡 VERIFY PAYIN (API + REDIRECT SAFE)
+     🔥 FINALISE ORDER + COMMISSION
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
@@ -162,6 +168,28 @@ module.exports = {
 
       const result = await CinetPayService.verifyPayIn(transactionId);
 
+      /* ======================================================
+         ✅ PAIEMENT ACCEPTÉ → FINALISATION COMMANDE
+      ====================================================== */
+      if (result?.status === "ACCEPTED") {
+        const order = await Order.findOne({
+          cinetpayTransactionId: transactionId,
+        });
+
+        if (!order) {
+          console.error(
+            "❌ Order introuvable pour transaction:",
+            transactionId
+          );
+        } else {
+          // 🔥 FINALISATION UNIQUE & IDÉMPOTENTE
+          await finalizeOrder(order._id, "CINETPAY");
+        }
+      }
+
+      /* ======================================================
+         🔁 REDIRECT FRONTEND (GET)
+      ====================================================== */
       if (req.method === "GET") {
         const status = result?.status || "PENDING";
 
