@@ -8,7 +8,7 @@ const ReferralCommission = require("../models/ReferralCommission");
 class ReferralCommissionService {
 
   /* ======================================================
-     🔹 ORDER COMPLETED → SELLER COMMISSION
+     🔹 ORDER COMPLETED → SELLER + PARRAIN NIVEAU 2
      👉 appelé UNIQUEMENT quand status = COMPLETED
   ====================================================== */
   static async handleOrderCompleted(order) {
@@ -20,86 +20,93 @@ class ReferralCommissionService {
       }
 
       if (order.status !== "COMPLETED") {
-        console.warn(
-          `⚠️ ReferralCommission: order ${order._id} status=${order.status}`
-        );
+        console.warn(`⚠️ ReferralCommission: order ${order._id} status=${order.status}`);
         return;
       }
 
       // ===== LOAD SELLER =====
       const seller = await Seller.findById(order.seller).lean();
       if (!seller || !seller.user) {
-        console.warn(
-          `⚠️ ReferralCommission: seller introuvable pour order ${order._id}`
-        );
+        console.warn(`⚠️ ReferralCommission: seller introuvable pour order ${order._id}`);
         return;
       }
 
       const sellerUserId = seller.user;
 
-      // ===== CHECK REFERRAL =====
-      const referral = await Referral.findOne({
+      // ===== CHECK REFERRAL (niveau 1) =====
+      const referralLevel1 = await Referral.findOne({
         referred: sellerUserId,
         status: "ACTIVE",
       }).lean();
 
-      if (!referral) {
-        return; // vendeur non parrainé → normal
-      }
+      if (!referralLevel1) return; // vendeur non parrainé → normal
 
       // ===== ANTI-DUPLICATION =====
-      const exists = await ReferralCommission.exists({
-        referrer: referral.referrer,
+      const existsLevel1 = await ReferralCommission.exists({
+        referrer: referralLevel1.referrer,
         sourceId: order._id,
         sourceType: "ORDER",
       });
 
-      if (exists) {
-        console.warn(
-          `⚠️ ReferralCommission: déjà créée pour order ${order._id}`
-        );
+      if (existsLevel1) {
+        console.warn(`⚠️ ReferralCommission: déjà créée pour order ${order._id}`);
         return;
       }
 
-      // ===== CALCUL COMMISSION =====
-      const percentage = 1.5;
-
-      // 🔥 BASE = netAmount (PAS totalAmount)
+      // ===== CALCUL COMMISSION NIVEAU 1 =====
+      const percentageLevel1 = 1.5;
       const baseAmount = order.netAmount;
+
       if (!baseAmount || baseAmount <= 0) {
-        console.warn(
-          `⚠️ ReferralCommission: baseAmount invalide pour order ${order._id}`
-        );
+        console.warn(`⚠️ ReferralCommission: baseAmount invalide pour order ${order._id}`);
         return;
       }
 
-      const commissionAmount = Math.floor(
-        (baseAmount * percentage) / 100
-      );
+      const commissionLevel1 = Math.floor((baseAmount * percentageLevel1) / 100);
+      if (commissionLevel1 <= 0) return;
 
-      if (commissionAmount <= 0) return;
-
-      // ===== CREATE COMMISSION =====
+      // ===== CREATE COMMISSION NIVEAU 1 =====
       await ReferralCommission.create({
-        referrer: referral.referrer,
+        referrer: referralLevel1.referrer,
         referred: sellerUserId,
         sourceId: order._id,
         sourceType: "ORDER",
-        amount: commissionAmount,
-        percentage,
+        amount: commissionLevel1,
+        percentage: percentageLevel1,
         commissionType: "SELLER_SALE",
         status: "AVAILABLE",
         availableAt: new Date(),
       });
 
-      console.log(
-        `✅ ReferralCommission créée | order=${order._id} | amount=${commissionAmount}`
-      );
+      console.log(`✅ ReferralCommission N1 créée | order=${order._id} | amount=${commissionLevel1}`);
+
+      // ===== CHECK REFERRAL NIVEAU 2 =====
+      const referralLevel2 = await Referral.findOne({
+        referred: referralLevel1.referrer,
+        status: "ACTIVE",
+      }).lean();
+
+      if (referralLevel2) {
+        const commissionLevel2 = Math.floor(commissionLevel1 * 0.5);
+        if (commissionLevel2 > 0) {
+          await ReferralCommission.create({
+            referrer: referralLevel2.referrer,
+            referred: referralLevel1.referrer,
+            sourceId: order._id,
+            sourceType: "ORDER",
+            amount: commissionLevel2,
+            percentage: 50,
+            commissionType: "SELLER_SALE_LEVEL2",
+            status: "AVAILABLE",
+            availableAt: new Date(),
+          });
+
+          console.log(`✅ ReferralCommission N2 créée | order=${order._id} | amount=${commissionLevel2}`);
+        }
+      }
+
     } catch (err) {
-      console.error(
-        "❌ ReferralCommission.handleOrderCompleted:",
-        err
-      );
+      console.error("❌ ReferralCommission.handleOrderCompleted:", err);
     }
   }
 
@@ -147,10 +154,7 @@ class ReferralCommissionService {
         availableAt: new Date(),
       });
     } catch (err) {
-      console.error(
-        "❌ ReferralCommission.handleUserGain:",
-        err
-      );
+      console.error("❌ ReferralCommission.handleUserGain:", err);
     }
   }
 }
