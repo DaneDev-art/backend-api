@@ -9,7 +9,7 @@ const CinetPayService = require("../services/CinetPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
-const Order = require("../models/Order");
+const Order = require("../models/order.model");
 
 // 🔥 FINALISATION CENTRALISÉE (COMMISSION INCLUSE)
 const { finalizeOrder } = require("../services/orderFinalize.service");
