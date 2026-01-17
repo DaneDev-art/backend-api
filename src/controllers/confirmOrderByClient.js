@@ -2,8 +2,11 @@ const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 const Seller = require("../models/Seller");
+const ReferralCommissionService = require("./referralCommission.service"); // 🔹 import ajouté
 
 async function confirmOrderByClient(orderId, clientId) {
+  console.log(`🔹 [ConfirmOrder] Début confirmation | orderId=${orderId} | clientId=${clientId}`);
+
   if (!mongoose.Types.ObjectId.isValid(orderId)) {
     throw new Error("orderId invalide");
   }
@@ -18,6 +21,7 @@ async function confirmOrderByClient(orderId, clientId) {
   if (!order) {
     throw new Error("Commande introuvable");
   }
+  console.log(`🔹 [ConfirmOrder] Order trouvé | status=${order.status} | isConfirmedByClient=${order.isConfirmedByClient}`);
 
   // ==============================
   // 🔹 Vérification client
@@ -38,6 +42,7 @@ async function confirmOrderByClient(orderId, clientId) {
   }
 
   if (order.isConfirmedByClient) {
+    console.log("⚠️ [ConfirmOrder] Commande déjà confirmée");
     return { success: true, message: "Commande déjà confirmée", orderId };
   }
 
@@ -50,9 +55,12 @@ async function confirmOrderByClient(orderId, clientId) {
   }
 
   const netAmount = Number(payinTx.netAmount || 0);
+  console.log(`🔹 [ConfirmOrder] Déblocage montant net pour seller | netAmount=${netAmount}`);
+  
   seller.balance_locked = (seller.balance_locked || 0) - netAmount;
   seller.balance_available = (seller.balance_available || 0) + netAmount;
   await seller.save();
+  console.log(`✅ [ConfirmOrder] Seller mis à jour | balance_locked=${seller.balance_locked} | balance_available=${seller.balance_available}`);
 
   // ==============================
   // 🔹 Mise à jour commande
@@ -61,6 +69,18 @@ async function confirmOrderByClient(orderId, clientId) {
   order.confirmedAt = new Date();
   order.status = "COMPLETED";
   await order.save();
+  console.log(`✅ [ConfirmOrder] Order status passé à COMPLETED`);
+
+  // ==============================
+  // 🔹 🔥 Génération de la commission de parrainage
+  // ==============================
+  try {
+    console.log(`🔹 [ConfirmOrder] Appel ReferralCommissionService.handleOrderCompleted`);
+    await ReferralCommissionService.handleOrderCompleted(order);
+    console.log(`✅ [ConfirmOrder] Commission de parrainage traitée`);
+  } catch (err) {
+    console.error("❌ [ConfirmOrder] Erreur génération commission :", err);
+  }
 
   return {
     success: true,
