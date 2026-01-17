@@ -68,6 +68,7 @@ async function confirmOrderByClient(orderId, clientId) {
   order.isConfirmedByClient = true;
   order.confirmedAt = new Date();
   order.status = "COMPLETED";
+  order.netAmount = netAmount; 
   await order.save();
   console.log(`✅ [ConfirmOrder] Order status passé à COMPLETED`);
 
