@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 const Seller = require("../models/Seller");
-const ReferralCommissionService = require("./referralCommission.service"); // 🔹 import ajouté
+const ReferralCommissionService = require("../services/referralCommission.service"); // 🔹 import ajouté
 
 async function confirmOrderByClient(orderId, clientId) {
   console.log(`🔹 [ConfirmOrder] Début confirmation | orderId=${orderId} | clientId=${clientId}`);
