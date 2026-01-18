@@ -24,6 +24,20 @@ class ReferralCommissionService {
         return;
       }
 
+      // =====================================================
+      // 🔹 SÉCURITÉ NET AMOUNT (AJOUT IMPORTANT)
+      // =====================================================
+      let baseAmount = order.netAmount;
+
+      if ((!baseAmount || baseAmount <= 0) && order.payinTransaction) {
+        baseAmount = Number(order.payinTransaction.netAmount || 0);
+      }
+
+      if (!baseAmount || baseAmount <= 0) {
+        console.warn(`⚠️ ReferralCommission: baseAmount invalide pour order ${order._id}`);
+        return;
+      }
+
       // ===== LOAD SELLER =====
       const seller = await Seller.findById(order.seller).lean();
       if (!seller || !seller.user) {
@@ -55,13 +69,6 @@ class ReferralCommissionService {
 
       // ===== CALCUL COMMISSION NIVEAU 1 =====
       const percentageLevel1 = 1.5;
-      const baseAmount = order.netAmount;
-
-      if (!baseAmount || baseAmount <= 0) {
-        console.warn(`⚠️ ReferralCommission: baseAmount invalide pour order ${order._id}`);
-        return;
-      }
-
       const commissionLevel1 = Math.floor((baseAmount * percentageLevel1) / 100);
       if (commissionLevel1 <= 0) return;
 
@@ -78,7 +85,9 @@ class ReferralCommissionService {
         availableAt: new Date(),
       });
 
-      console.log(`✅ ReferralCommission N1 créée | order=${order._id} | amount=${commissionLevel1}`);
+      console.log(
+        `✅ ReferralCommission N1 créée | order=${order._id} | amount=${commissionLevel1}`
+      );
 
       // ===== CHECK REFERRAL NIVEAU 2 =====
       const referralLevel2 = await Referral.findOne({
@@ -101,7 +110,9 @@ class ReferralCommissionService {
             availableAt: new Date(),
           });
 
-          console.log(`✅ ReferralCommission N2 créée | order=${order._id} | amount=${commissionLevel2}`);
+          console.log(
+            `✅ ReferralCommission N2 créée | order=${order._id} | amount=${commissionLevel2}`
+          );
         }
       }
 

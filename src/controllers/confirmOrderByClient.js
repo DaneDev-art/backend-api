@@ -54,9 +54,13 @@ async function confirmOrderByClient(orderId, clientId) {
     throw new Error("Vendeur introuvable");
   }
 
-  const netAmount = Number(payinTx.netAmount || 0);
+  // 🔹 Sécurité : prendre netAmount depuis payinTransaction si absent dans order
+  const netAmount = Number(order.netAmount || payinTx.netAmount || 0);
+  if (netAmount <= 0) {
+    throw new Error("Montant net invalide pour le vendeur");
+  }
+
   console.log(`🔹 [ConfirmOrder] Déblocage montant net pour seller | netAmount=${netAmount}`);
-  
   seller.balance_locked = (seller.balance_locked || 0) - netAmount;
   seller.balance_available = (seller.balance_available || 0) + netAmount;
   await seller.save();
@@ -68,9 +72,9 @@ async function confirmOrderByClient(orderId, clientId) {
   order.isConfirmedByClient = true;
   order.confirmedAt = new Date();
   order.status = "COMPLETED";
-  order.netAmount = netAmount; 
+  order.netAmount = netAmount; // assure la cohérence
   await order.save();
-  console.log(`✅ [ConfirmOrder] Order status passé à COMPLETED`);
+  console.log(`✅ [ConfirmOrder] Order status passé à COMPLETED | netAmount=${order.netAmount}`);
 
   // ==============================
   // 🔹 🔥 Génération de la commission de parrainage
