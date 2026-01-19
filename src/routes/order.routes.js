@@ -8,7 +8,11 @@ const Order = require("../models/order.model");
 const Seller = require("../models/Seller");
 const PayinTransaction = require("../models/PayinTransaction");
 
-const BASE_URL = process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
+// 🔥 LOGIQUE MÉTIER UNIQUE (la même que le script test)
+const confirmOrderByClient = require("../controllers/confirmOrderByClient");
+
+const BASE_URL =
+  process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
 
 /* ======================================================
    🔹 Fonction utilitaire pour URLs images absolues
@@ -16,14 +20,12 @@ const BASE_URL = process.env.BASE_URL || "https://backend-api-m0tf.onrender.com"
 function getProductImageUrl(item) {
   let img = item.productImage || null;
 
-  // Si snapshot vide, prendre première image du produit
   if ((!img || img.trim() === "") && item.product) {
     if (Array.isArray(item.product.images) && item.product.images.length > 0) {
       img = item.product.images[0];
     }
   }
 
-  // Si l’URL n’est pas absolue, ajouter BASE_URL
   if (img && !img.startsWith("http")) {
     img = `${BASE_URL.replace(/\/$/, "")}/${img.replace(/^\/+/, "")}`;
   }
@@ -175,7 +177,8 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 
     const isClient = order.client.toString() === req.user._id.toString();
     const seller = await Seller.findOne({ user: req.user._id });
-    const isSeller = seller && order.seller.toString() === seller._id.toString();
+    const isSeller =
+      seller && order.seller.toString() === seller._id.toString();
 
     if (!isClient && !isSeller) {
       return res.status(403).json({
@@ -225,107 +228,30 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 });
 
 /* ======================================================
-   4️⃣ Confirmation client — ESCROW
+   4️⃣ CONFIRMATION CLIENT — LOGIQUE UNIQUE
    POST /api/orders/:orderId/confirm
+   ✅ IDENTIQUE AU SCRIPT DE TEST
 ====================================================== */
 router.post("/:orderId/confirm", verifyToken, async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    const order = await Order.findById(req.params.orderId).session(session);
+    const { orderId } = req.params;
+    const clientId = req.user._id;
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        error: "Commande introuvable",
-      });
-    }
-
-    // 🔐 sécurité — seul le client propriétaire
-    if (order.client.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        error: "Accès non autorisé — client propriétaire requis",
-      });
-    }
-
-    if (order.isConfirmedByClient) {
-      return res.status(400).json({
-        success: false,
-        error: "Commande déjà confirmée",
-      });
-    }
-
-    // 👉 workflow autorisé
-    const allowedStatuses = ["PAID", "DELIVERED"];
-    if (!allowedStatuses.includes(order.status)) {
-      return res.status(400).json({
-        success: false,
-        error: "Confirmation impossible — la commande doit être payée ou livrée",
-      });
-    }
-
-    // 💳 vérification PayIn éligible
-    const transaction = await PayinTransaction.findOne({
-      _id: order.payinTransaction,
-      status: "SUCCESS",
-      sellerCredited: true,
-    }).session(session);
-
-    if (!transaction) {
-      return res.status(400).json({
-        success: false,
-        error: "Transaction invalide ou non éligible au release",
-      });
-    }
-
-    // 🏪 récupération vendeur
-    const seller = await Seller.findById(order.seller).session(session);
-    if (!seller) {
-      return res.status(404).json({
-        success: false,
-        error: "Vendeur introuvable",
-      });
-    }
-
-    const amount = Number(transaction.netAmount || 0);
-
-    // 💰 RELEASE DES FONDS
-    seller.balance_locked = Math.max(0, (seller.balance_locked || 0) - amount);
-    seller.balance_available = (seller.balance_available || 0) + amount;
-    await seller.save({ session });
-
-    // 📦 MISE À JOUR COMMANDE SANS VALIDATION MONGOOSE
-    await Order.updateOne(
-      { _id: order._id },
-      {
-        $set: {
-          isConfirmedByClient: true,
-          status: "COMPLETED",
-          confirmedAt: new Date(),
-          "escrow.isLocked": false,
-          "escrow.releasedAt": new Date(),
-        },
-      },
-      { session }
+    console.log(
+      `🔔 [ROUTE] Confirmation commande | orderId=${orderId} | clientId=${clientId}`
     );
 
-    await session.commitTransaction();
+    // 🔥 APPEL DIRECT À LA LOGIQUE MÉTIER TESTÉE
+    const result = await confirmOrderByClient(orderId, clientId);
 
-    return res.status(200).json({
-      success: true,
-      message: "Commande confirmée et fonds libérés",
-      releasedAmount: amount,
-    });
-  } catch (err) {
-    await session.abortTransaction();
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("❌ POST /orders/:orderId/confirm:", error);
+
     return res.status(400).json({
       success: false,
-      error: err.message,
+      message: error.message || "Erreur confirmation commande",
     });
-  } finally {
-    session.endSession();
   }
 });
 
