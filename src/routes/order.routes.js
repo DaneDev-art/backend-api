@@ -51,19 +51,14 @@ router.get("/me", verifyToken, async (req, res) => {
 
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
-
       sellerName: o.seller?.name || "Vendeur inconnu",
-
       totalAmount: o.totalAmount || 0,
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
-
       payinTransactionId: o.payinTransaction || null,
-
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -74,7 +69,6 @@ router.get("/me", verifyToken, async (req, res) => {
         quantity: i.quantity,
         price: i.price,
       })),
-
       createdAt: o.createdAt,
     }));
 
@@ -117,17 +111,13 @@ router.get("/seller", verifyToken, async (req, res) => {
 
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
-
       sellerName: seller.name,
-
       totalAmount: o.totalAmount || 0,
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
-
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -138,7 +128,6 @@ router.get("/seller", verifyToken, async (req, res) => {
         quantity: i.quantity,
         price: i.price,
       })),
-
       createdAt: o.createdAt,
     }));
 
@@ -191,19 +180,14 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       success: true,
       order: {
         _id: order._id,
-
         sellerName: order.seller?.name || "Vendeur inconnu",
-
         totalAmount: order.totalAmount || 0,
         netAmount: order.netAmount || 0,
         shippingFee: order.shippingFee || 0,
         deliveryAddress: order.deliveryAddress || "Adresse inconnue",
-
         status: order.status,
         isConfirmedByClient: order.isConfirmedByClient || false,
-
         payinTransactionId: order.payinTransaction || null,
-
         items: order.items.map((i) => ({
           product: {
             _id: i.product?._id || i.productId,
@@ -214,7 +198,6 @@ router.get("/:orderId", verifyToken, async (req, res) => {
           quantity: i.quantity,
           price: i.price,
         })),
-
         createdAt: order.createdAt,
       },
     });
@@ -244,7 +227,11 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     // 🔥 APPEL DIRECT À LA LOGIQUE MÉTIER TESTÉE
     const result = await confirmOrderByClient(orderId, clientId);
 
-    return res.status(200).json(result);
+    // 🔹 AJOUT NETAMOUNT POUR FLUTTER
+    return res.status(200).json({
+      ...result,
+      netAmount: result.releasedAmount || 0, // ← clé supplémentaire pour Flutter
+    });
   } catch (error) {
     console.error("❌ POST /orders/:orderId/confirm:", error);
 
