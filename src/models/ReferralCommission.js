@@ -38,9 +38,10 @@ const referralCommissionSchema = new mongoose.Schema(
       required: true,
     },
 
+    // 🔹 Ajout SELLER_SALE_LEVEL2 pour le parrain du parrain
     commissionType: {
       type: String,
-      enum: ["SELLER_SALE", "USER_EARNING"],
+      enum: ["SELLER_SALE", "SELLER_SALE_LEVEL2", "USER_EARNING"],
       required: true,
     },
 
@@ -58,13 +59,13 @@ const referralCommissionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🔒 Anti-duplication
+// 🔒 Anti-duplication : referrer + sourceId + sourceType
 referralCommissionSchema.index(
   { referrer: 1, sourceId: 1, sourceType: 1 },
   { unique: true }
 );
 
-// 📊 Requêtes fréquentes
+// 📊 Requêtes fréquentes : referrer + status + recent
 referralCommissionSchema.index({
   referrer: 1,
   status: 1,
