@@ -1,3 +1,8 @@
+// =============================================
+// models/PayinTransaction.js
+// ESCROW • MULTI-PROVIDER • PRODUCTION READY
+// =============================================
+
 const mongoose = require("mongoose");
 
 const PayinTransactionSchema = new mongoose.Schema(
@@ -39,10 +44,13 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    /* ======================================================
+       📱 OPÉRATEUR MOBILE (CHOISI PAR CLIENT)
+    ====================================================== */
     operator: {
       type: String,
-      enum: ["TM", "TG"],
-      default: null,
+      enum: ["MTN", "MOOV", "ORANGE", "WAVE"],
+      required: true,
       index: true,
     },
 
@@ -50,14 +58,14 @@ const PayinTransactionSchema = new mongoose.Schema(
        💰 MONTANTS
     ====================================================== */
     amount: {
-      type: Number,
-      required: true, // total payé par le client
+      type: Number, // total payé par le client
+      required: true,
       min: 0,
     },
 
     netAmount: {
-      type: Number,
-      required: true, // montant net vendeur (bloqué en ESCROW)
+      type: Number, // montant net vendeur (bloqué en ESCROW)
+      required: true,
       min: 0,
     },
 
@@ -82,14 +90,14 @@ const PayinTransactionSchema = new mongoose.Schema(
        🔗 IDENTIFIANTS TRANSACTION
     ====================================================== */
     transaction_id: {
-      type: String, // ID interne (transref / UUID)
+      type: String, // ID interne (UUID / PAYIN_xxx)
       required: true,
       unique: true,
       index: true,
     },
 
     provider_transaction_id: {
-      type: String, // ID renvoyé par le provider (si dispo)
+      type: String, // ID retourné par CINETPAY / QOSPAY
       default: null,
       index: true,
     },
@@ -119,7 +127,7 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🔹 spécifique CinetPay (conservé pour compatibilité)
+    // 🔹 spécifique CinetPay (audit)
     cinetpay_status: {
       type: String,
       default: null,
@@ -132,7 +140,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     /* ======================================================
        🔐 ESCROW
-       💡 Fonds bloqués tant que client non confirmé
+       💡 Fonds bloqués jusqu’à confirmation client
     ====================================================== */
     sellerCredited: {
       type: Boolean,
@@ -146,7 +154,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       👤 SNAPSHOT CLIENT (AUDIT)
+       👤 SNAPSHOT CLIENT (AUDIT / PREUVE)
     ====================================================== */
     customer: {
       email: { type: String, default: null },
@@ -177,7 +185,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 );
 
 /* ======================================================
-   🔹 INDEXES (PRODUCTION)
+   🔹 INDEXES (PERF & QUERIES)
 ====================================================== */
 PayinTransactionSchema.index({ order: 1 });
 PayinTransactionSchema.index({ seller: 1, createdAt: -1 });
@@ -186,4 +194,7 @@ PayinTransactionSchema.index({ provider: 1, status: 1, createdAt: -1 });
 PayinTransactionSchema.index({ transaction_id: 1 });
 PayinTransactionSchema.index({ provider_transaction_id: 1 });
 
-module.exports = mongoose.model("PayinTransaction", PayinTransactionSchema);
+module.exports = mongoose.model(
+  "PayinTransaction",
+  PayinTransactionSchema
+);

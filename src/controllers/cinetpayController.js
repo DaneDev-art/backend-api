@@ -35,24 +35,38 @@ module.exports = {
         returnUrl,
         notifyUrl,
         items,
+        provider,
+        operator,
       } = req.body;
 
+      /* ================= AUTH ================= */
       const clientId = req.user?.id || req.user?._id;
       if (!clientId) {
         return res.status(401).json({ error: "Utilisateur non authentifié" });
       }
 
+      /* ================= VALIDATION ================= */
       if (!sellerId) {
         return res.status(400).json({ error: "sellerId requis" });
       }
 
-      const resolvedProductPrice =
-        productPrice !== undefined ? productPrice : amount;
+      const validProviders = ["CINETPAY", "QOSPAY"];
+      if (!provider || !validProviders.includes(provider)) {
+        return res.status(400).json({
+          error: "provider requis (CINETPAY ou QOSPAY)",
+        });
+      }
 
+      const validOperators = ["MTN", "MOOV", "ORANGE", "WAVE"];
+      if (!operator || !validOperators.includes(operator)) {
+        return res.status(400).json({
+          error: "operator requis (MTN, MOOV, ORANGE, WAVE...)",
+        });
+      }
+
+      const resolvedProductPrice = productPrice ?? amount;
       if (!resolvedProductPrice || Number(resolvedProductPrice) <= 0) {
-        return res
-          .status(400)
-          .json({ error: "amount ou productPrice invalide" });
+        return res.status(400).json({ error: "amount ou productPrice invalide" });
       }
 
       if (!Array.isArray(items) || items.length === 0) {
@@ -81,28 +95,19 @@ module.exports = {
       /* ======================================================
          🔎 FETCH PRODUITS
       ====================================================== */
-      const productIds = items.map(
-        (i) => new mongoose.Types.ObjectId(i.productId)
-      );
+      const productIds = items.map((i) => new mongoose.Types.ObjectId(i.productId));
 
-      const products = await Product.find({
-        _id: { $in: productIds },
-      });
+      const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== items.length) {
-        return res.status(404).json({
-          error: "Un ou plusieurs produits introuvables",
-        });
+        return res.status(404).json({ error: "Un ou plusieurs produits introuvables" });
       }
 
       /* ======================================================
          🛡️ ITEMS SAFE
       ====================================================== */
       const safeItems = items.map((item) => {
-        const product = products.find(
-          (p) => p._id.toString() === item.productId
-        );
-
+        const product = products.find((p) => p._id.toString() === item.productId);
         return {
           productId: product._id.toString(),
           productName: product.name,
@@ -127,6 +132,8 @@ module.exports = {
       const result = await CinetPayService.createPayIn({
         sellerId,
         clientId,
+        provider,
+        operator,
         items: safeItems,
         productPrice: Number(resolvedProductPrice),
         shippingFee: Number(shippingFee) || 0,
@@ -135,10 +142,8 @@ module.exports = {
         buyerPhone: req.user?.phone || null,
         description:
           description || `Paiement vers ${seller.name || "vendeur"}`,
-        returnUrl:
-          returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
-        notifyUrl:
-          notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        returnUrl: returnUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
+        notifyUrl: notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`,
       });
 
       return res.status(201).json(result);
@@ -192,12 +197,10 @@ module.exports = {
       ====================================================== */
       if (req.method === "GET") {
         const status = result?.status || "PENDING";
-
         const redirectUrl =
           `${process.env.FRONTEND_URL}/payin/result` +
           `?transaction_id=${transactionId}` +
           `&status=${status}`;
-
         return res.redirect(302, redirectUrl);
       }
 
