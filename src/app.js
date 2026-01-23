@@ -110,6 +110,15 @@ const referralRoutes = require("./routes/referral.routes");
 app.use("/api/referral", referralRoutes);
 app.use("/api/referrals", referralRoutes); 
 
+// src/app.js
+
+// QOSPay webhook
+app.use("/api/webhooks/qospay", require("./routes/webhooks/qospay.webhook"));
+
+// CinetPay webhook
+app.use("/api/webhooks/cinetpay", require("./routes/webhooks/cinetpay.webhook"));
+
+
 // =======================
 // 🔹 Page d’accueil
 // =======================

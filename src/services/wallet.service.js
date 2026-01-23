@@ -1,17 +1,9 @@
+const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const WalletTransaction = require("../models/WalletTransaction");
 
 class WalletService {
-  /**
-   * 🔹 Créditer le wallet d'un utilisateur
-   * @param {Object} params
-   * @param {String} params.userId - ID de l'utilisateur
-   * @param {Number} params.amount - Montant à créditer
-   * @param {String} params.type - Type de transaction (ex: REFERRAL_COMMISSION)
-   * @param {ObjectId} [params.referenceId] - ID source (order, referral...)
-   * @param {String} [params.referenceType] - Type de source (ORDER, REFERRAL...)
-   * @param {Object} [params.meta] - Données additionnelles
-   */
+
   static async credit({
     userId,
     amount,
@@ -22,39 +14,56 @@ class WalletService {
   }) {
     if (amount <= 0) throw new Error("Montant invalide");
 
-    const user = await User.findById(userId);
-    if (!user) throw new Error("Utilisateur introuvable");
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    const balanceBefore = user.balance_available;
-    const balanceAfter = balanceBefore + amount;
+    try {
+      const user = await User.findById(userId).session(session);
+      if (!user) throw new Error("Utilisateur introuvable");
 
-    user.balance_available = balanceAfter;
-    await user.save();
+      // 🔁 IDEMPOTENCE
+      if (referenceId && referenceType) {
+        const exists = await WalletTransaction.findOne({
+          user: userId,
+          referenceId,
+          referenceType,
+        }).session(session);
 
-    await WalletTransaction.create({
-      user: userId,
-      amount,
-      balanceBefore,
-      balanceAfter,
-      type,
-      referenceId,
-      referenceType,
-      meta,
-    });
+        if (exists) {
+          await session.commitTransaction();
+          session.endSession();
+          return user.balance_available;
+        }
+      }
 
-    return balanceAfter;
+      const balanceBefore = user.balance_available || 0;
+      const balanceAfter = balanceBefore + amount;
+
+      user.balance_available = balanceAfter;
+      await user.save({ session });
+
+      await WalletTransaction.create([{
+        user: userId,
+        amount,
+        balanceBefore,
+        balanceAfter,
+        type,
+        referenceId,
+        referenceType,
+        meta,
+      }], { session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return balanceAfter;
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
   }
 
-  /**
-   * 🔹 Débiter le wallet d'un utilisateur
-   * @param {Object} params
-   * @param {String} params.userId - ID de l'utilisateur
-   * @param {Number} params.amount - Montant à débiter
-   * @param {String} params.type - Type de transaction (ex: WITHDRAWAL)
-   * @param {ObjectId} [params.referenceId] - ID source
-   * @param {String} [params.referenceType] - Type de source
-   * @param {Object} [params.meta] - Données additionnelles
-   */
   static async debit({
     userId,
     amount,
@@ -65,36 +74,60 @@ class WalletService {
   }) {
     if (amount <= 0) throw new Error("Montant invalide");
 
-    const user = await User.findById(userId);
-    if (!user) throw new Error("Utilisateur introuvable");
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    if (user.balance_available < amount) {
-      throw new Error("Solde insuffisant");
+    try {
+      const user = await User.findById(userId).session(session);
+      if (!user) throw new Error("Utilisateur introuvable");
+
+      // 🔁 IDEMPOTENCE
+      if (referenceId && referenceType) {
+        const exists = await WalletTransaction.findOne({
+          user: userId,
+          referenceId,
+          referenceType,
+        }).session(session);
+
+        if (exists) {
+          await session.commitTransaction();
+          session.endSession();
+          return user.balance_available;
+        }
+      }
+
+      if ((user.balance_available || 0) < amount) {
+        throw new Error("Solde insuffisant");
+      }
+
+      const balanceBefore = user.balance_available;
+      const balanceAfter = balanceBefore - amount;
+
+      user.balance_available = balanceAfter;
+      await user.save({ session });
+
+      await WalletTransaction.create([{
+        user: userId,
+        amount: -amount,
+        balanceBefore,
+        balanceAfter,
+        type,
+        referenceId,
+        referenceType,
+        meta,
+      }], { session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return balanceAfter;
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
     }
-
-    const balanceBefore = user.balance_available;
-    const balanceAfter = balanceBefore - amount;
-
-    user.balance_available = balanceAfter;
-    await user.save();
-
-    await WalletTransaction.create({
-      user: userId,
-      amount: -amount,
-      balanceBefore,
-      balanceAfter,
-      type,
-      referenceId,
-      referenceType,
-      meta,
-    });
-
-    return balanceAfter;
   }
 
-  /**
-   * 🔹 Historique wallet pour un utilisateur
-   */
   static async getTransactions(userId, limit = 50, skip = 0) {
     return WalletTransaction.find({ user: userId })
       .sort({ createdAt: -1 })

@@ -30,6 +30,23 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
+       🏦 FOURNISSEUR DE PAIEMENT
+    ====================================================== */
+    provider: {
+      type: String,
+      enum: ["CINETPAY", "QOSPAY"],
+      required: true,
+      index: true,
+    },
+
+    operator: {
+      type: String,
+      enum: ["TM", "TG"],
+      default: null,
+      index: true,
+    },
+
+    /* ======================================================
        💰 MONTANTS
     ====================================================== */
     amount: {
@@ -40,7 +57,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     netAmount: {
       type: Number,
-      required: true, // montant net vendeur (bloqué)
+      required: true, // montant net vendeur (bloqué en ESCROW)
       min: 0,
     },
 
@@ -58,15 +75,22 @@ const PayinTransactionSchema = new mongoose.Schema(
     currency: {
       type: String,
       default: "XOF",
+      index: true,
     },
 
     /* ======================================================
-       🔗 IDENTIFIANTS CINETPAY
+       🔗 IDENTIFIANTS TRANSACTION
     ====================================================== */
     transaction_id: {
-      type: String,
+      type: String, // ID interne (transref / UUID)
       required: true,
       unique: true,
+      index: true,
+    },
+
+    provider_transaction_id: {
+      type: String, // ID renvoyé par le provider (si dispo)
+      default: null,
       index: true,
     },
 
@@ -95,6 +119,7 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // 🔹 spécifique CinetPay (conservé pour compatibilité)
     cinetpay_status: {
       type: String,
       default: null,
@@ -157,7 +182,8 @@ const PayinTransactionSchema = new mongoose.Schema(
 PayinTransactionSchema.index({ order: 1 });
 PayinTransactionSchema.index({ seller: 1, createdAt: -1 });
 PayinTransactionSchema.index({ client: 1, createdAt: -1 });
-PayinTransactionSchema.index({ status: 1, createdAt: -1 });
+PayinTransactionSchema.index({ provider: 1, status: 1, createdAt: -1 });
 PayinTransactionSchema.index({ transaction_id: 1 });
+PayinTransactionSchema.index({ provider_transaction_id: 1 });
 
 module.exports = mongoose.model("PayinTransaction", PayinTransactionSchema);
