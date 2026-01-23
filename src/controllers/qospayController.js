@@ -10,11 +10,11 @@ const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
 const Order = require("../models/order.model");
+const PayinTransaction = require("../models/PayinTransaction");
 
 const { finalizeOrder } = require("../services/orderFinalize.service");
 
-const BASE_URL =
-  process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
+const BASE_URL = process.env.PLATFORM_BASE_URL || "https://backend-api-m0tf.onrender.com";
 
 module.exports = {
   /* ======================================================
@@ -22,55 +22,28 @@ module.exports = {
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
-      const {
-        productPrice,
-        amount,
-        shippingFee = 0,
-        currency = "XOF",
-        description,
-        sellerId,
-        operator, // "tm" | "tg"
-        items,
-      } = req.body;
+      const { sellerId, operator, items, productPrice, shippingFee = 0, description } = req.body;
 
       const clientId = req.user?.id || req.user?._id;
-      if (!clientId) {
-        return res.status(401).json({ error: "Utilisateur non authentifié" });
-      }
-
-      if (!sellerId || !operator) {
-        return res.status(400).json({ error: "sellerId et operator requis" });
-      }
-
-      const resolvedProductPrice =
-        productPrice !== undefined ? productPrice : amount;
-
-      if (!resolvedProductPrice || Number(resolvedProductPrice) <= 0) {
-        return res.status(400).json({ error: "Montant invalide" });
-      }
+      if (!clientId) return res.status(401).json({ error: "Utilisateur non authentifié" });
+      if (!sellerId) return res.status(400).json({ error: "sellerId requis" });
+      if (!items || !Array.isArray(items) || items.length === 0)
+        return res.status(400).json({ error: "Items requis" });
 
       /* ======================================================
          🔎 PRODUITS
       ====================================================== */
-      const productIds = items.map(
-        (i) => new mongoose.Types.ObjectId(i.productId)
-      );
-
+      const productIds = items.map(i => new mongoose.Types.ObjectId(i.productId));
       const products = await Product.find({ _id: { $in: productIds } });
-      if (products.length !== items.length) {
-        return res.status(404).json({ error: "Produit introuvable" });
-      }
+      if (products.length !== items.length) return res.status(404).json({ error: "Produit introuvable" });
 
-      const safeItems = items.map((item) => {
-        const product = products.find(
-          (p) => p._id.toString() === item.productId
-        );
-
+      const safeItems = items.map(item => {
+        const product = products.find(p => p._id.toString() === item.productId);
         return {
           productId: product._id.toString(),
           productName: product.name,
           price: Number(product.price),
-          quantity: item.quantity,
+          quantity: item.quantity || 1,
         };
       });
 
@@ -79,29 +52,48 @@ module.exports = {
       ====================================================== */
       let seller = await Seller.findById(sellerId);
       if (!seller) seller = await User.findById(sellerId);
+      if (!seller) return res.status(404).json({ error: "Vendeur introuvable" });
 
-      if (!seller) {
-        return res.status(404).json({ error: "Vendeur introuvable" });
-      }
+      /* ======================================================
+         ⚡ CRÉATION DE L'ORDRE
+      ====================================================== */
+      const order = await Order.create({
+        seller: seller._id,
+        client: clientId,
+        items: safeItems,
+        totalAmount: Number(productPrice) + Number(shippingFee),
+        netAmount: Number(productPrice), // montant net estimé, ajusté après PayIn
+        shippingFee: Number(shippingFee),
+        currency: "XOF",
+        status: "PAYMENT_PENDING",
+      });
 
       /* ======================================================
          🚀 QOSPAY PAYIN
       ====================================================== */
-      const result = await QosPayService.createPayIn({
-        sellerId,
-        clientId,
-        items: safeItems,
-        productPrice: Number(resolvedProductPrice),
-        shippingFee: Number(shippingFee),
-        currency,
+      const payInResult = await QosPayService.createPayIn({
+        orderId: order._id,
+        amount: Number(productPrice) + Number(shippingFee),
         buyerPhone: req.user?.phone,
         operator,
-        description:
-          description || `Paiement vers ${seller.name || "vendeur"}`,
-        notifyUrl: `${BASE_URL}/api/qospay/payin/verify`,
       });
 
-      return res.status(201).json(result);
+      // 🔗 Mise à jour de l'Order avec PayinTransaction et netAmount réel
+      if (payInResult?.payinTransactionId) {
+        order.payinTransaction = payInResult.payinTransactionId;
+        order.netAmount = payInResult.netAmount || order.netAmount;
+        order.platformFee = payInResult.totalFees || 0;
+        await order.save();
+      }
+
+      return res.status(201).json({
+        transaction_id: payInResult.transactionId || payInResult.payinTransactionId,
+        payment_url: payInResult.payment_url || null,
+        netAmount: order.netAmount,
+        totalFees: order.platformFee || 0,
+        provider: payInResult.provider || "QOSPAY",
+        success: payInResult.success,
+      });
     } catch (err) {
       console.error("❌ QOSPAY createPayIn:", err);
       return res.status(500).json({ error: err.message });
@@ -109,27 +101,20 @@ module.exports = {
   },
 
   /* ======================================================
-     🟡 VERIFY PAYIN (CALLBACK)
+     🔁 VERIFY PAYIN
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
-      const transactionId =
-        req.body?.externalTransactionId ||
-        req.query?.externalTransactionId;
-
-      if (!transactionId) {
-        return res.status(400).json({ error: "transactionId requis" });
-      }
+      const transactionId = req.body?.transaction_id || req.query?.transaction_id;
+      if (!transactionId) return res.status(400).json({ error: "transaction_id requis" });
 
       const result = await QosPayService.verifyPayIn(transactionId);
 
-      if (result?.status === "SUCCESS") {
-        const order = await Order.findOne({
-          qospayTransactionId: transactionId,
-        });
-
-        if (order) {
-          await finalizeOrder(order._id, "QOSPAY");
+      // ⚡ Finalize order si paiement confirmé
+      if (result.status === "SUCCESS") {
+        const payinTx = await PayinTransaction.findOne({ transaction_id: transactionId });
+        if (payinTx && payinTx.order) {
+          await finalizeOrder(payinTx.order, "QOSPAY");
         }
       }
 
@@ -146,19 +131,13 @@ module.exports = {
   createPayOut: async (req, res) => {
     try {
       const { sellerId, amount, operator } = req.body;
+      if (!sellerId || Number(amount) <= 0) return res.status(400).json({ error: "Données invalides" });
 
-      if (!sellerId || !operator || Number(amount) <= 0) {
-        return res.status(400).json({ error: "Données invalides" });
-      }
-
-      const result = await QosPayService.createPayOutForSeller({
-        sellerId,
-        amount,
-        operator,
-      });
+      const result = await QosPayService.createPayOutForSeller({ sellerId, amount, operator });
 
       return res.status(201).json(result);
     } catch (err) {
+      console.error("❌ QOSPAY createPayOut:", err.message);
       return res.status(500).json({ error: err.message });
     }
   },
@@ -168,6 +147,10 @@ module.exports = {
   ====================================================== */
   handleWebhook: async (req, res) => {
     try {
+      if (!QosPayService.handleWebhook) {
+        return res.status(501).json({ error: "Webhook non implémenté" });
+      }
+
       const result = await QosPayService.handleWebhook(req.body);
       return res.status(200).json({ success: true, result });
     } catch (err) {

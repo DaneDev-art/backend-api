@@ -58,7 +58,7 @@ router.get("/me", verifyToken, async (req, res) => {
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
-      payinTransactionId: o.payinTransaction || null,
+      payinTransactionId: o.qospayTransactionId || o.payinTransaction || null,
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -118,6 +118,7 @@ router.get("/seller", verifyToken, async (req, res) => {
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
       status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
+      payinTransactionId: o.qospayTransactionId || o.payinTransaction || null,
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -187,7 +188,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
         deliveryAddress: order.deliveryAddress || "Adresse inconnue",
         status: order.status,
         isConfirmedByClient: order.isConfirmedByClient || false,
-        payinTransactionId: order.payinTransaction || null,
+        payinTransactionId: order.qospayTransactionId || order.payinTransaction || null,
         items: order.items.map((i) => ({
           product: {
             _id: i.product?._id || i.productId,

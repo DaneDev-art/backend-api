@@ -2,11 +2,14 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/qospayController");
 
-router.post("/payin", controller.createPayIn);
+// 📥 PayIn
+router.post("/payin/create", controller.createPayIn);
 router.post("/payin/verify", controller.verifyPayIn);
 
-router.post("/payout", controller.createPayOut);
+// 📤 PayOut
+router.post("/payout/create", controller.createPayOut);
 
+// 🔔 Webhook
 router.post("/webhook", controller.handleWebhook);
 
 module.exports = router;
