@@ -40,10 +40,7 @@ class QosPayService {
     if (operator && ["TM", "TG"].includes(operator.toUpperCase())) {
       return operator.toUpperCase();
     }
-
-    if (!phone) {
-      throw new Error("CANNOT_RESOLVE_OPERATOR_NO_PHONE");
-    }
+    if (!phone) throw new Error("CANNOT_RESOLVE_OPERATOR_NO_PHONE");
 
     const p = normalizePhone(phone);
 
@@ -51,6 +48,16 @@ class QosPayService {
     if (p.startsWith("22891")) return "TG";
 
     return "TM"; // fallback
+  }
+
+  /* ======================================================
+     🔹 GET CLIENT_ID FOR OPERATOR
+  ====================================================== */
+  static getClientId(op) {
+    if (op === "TM") return QOSPAY.TM.CLIENT_ID;
+    if (op === "TG") return QOSPAY.TG.CLIENT_ID;
+    if (op === "CARD") return QOSPAY.CARD.CLIENT_ID;
+    throw new Error("INVALID_OPERATOR_FOR_CLIENT_ID");
   }
 
   /* ======================================================
@@ -66,6 +73,7 @@ class QosPayService {
 
     const op = this.resolveOperator(operator, phone);
     const transref = this.generateTransactionRef("PAY");
+    const clientId = this.getClientId(op);
 
     const url = op === "TM" ? QOSPAY.TM.REQUEST : QOSPAY.TG.REQUEST;
 
@@ -73,11 +81,10 @@ class QosPayService {
       msisdn: phone,
       amount: String(amount),
       transref,
-      clientid: QOSPAY.CLIENT_ID,
+      clientid: clientId,
     };
 
     const response = await axios.post(url, payload, { timeout: 20000 });
-
     const status = (response?.data?.status || "PENDING").toUpperCase();
 
     if (!["PENDING", "SUCCESS"].includes(status)) {
@@ -87,7 +94,7 @@ class QosPayService {
     const payin = await PayinTransaction.create({
       order: order._id,
       seller: order.seller._id,
-      client: order.client._id, // buyer | seller | delivery
+      client: order.client._id,
       provider: "QOSPAY",
       operator: op,
       amount: Number(amount),
@@ -133,14 +140,13 @@ class QosPayService {
       };
     }
 
-    const url = transaction.operator === "TM" ? QOSPAY.TM.STATUS : QOSPAY.TG.STATUS;
+    const op = transaction.operator;
+    const clientId = this.getClientId(op);
+    const url = op === "TM" ? QOSPAY.TM.STATUS : QOSPAY.TG.STATUS;
 
     const response = await axios.post(
       url,
-      {
-        transref: transactionId,
-        clientid: QOSPAY.CLIENT_ID,
-      },
+      { transref: transactionId, clientid: clientId },
       { timeout: 15000 }
     );
 
@@ -167,6 +173,7 @@ class QosPayService {
     const phone = normalizePhone(seller.phone);
     const op = this.resolveOperator(operator, phone);
     const transref = this.generateTransactionRef("WD");
+    const clientId = this.getClientId(op);
 
     const url = op === "TM" ? QOSPAY.TM.DEPOSIT : QOSPAY.TG.DEPOSIT;
 
@@ -174,11 +181,10 @@ class QosPayService {
       msisdn: phone,
       amount: String(amount),
       transref,
-      clientid: QOSPAY.CLIENT_ID,
+      clientid: clientId,
     };
 
     const response = await axios.post(url, payload, { timeout: 20000 });
-
     const status = (response?.data?.status || "PENDING").toUpperCase();
 
     await PayoutTransaction.create({
