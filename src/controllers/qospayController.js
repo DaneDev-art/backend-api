@@ -5,7 +5,7 @@
 // =============================================
 
 const mongoose = require("mongoose");
-const QosPayService = require("../services/QosPayService");
+const QosPayService = require("../services/QosPayService"); // ✅ CommonJS
 
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
