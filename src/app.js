@@ -16,6 +16,9 @@ const corsOptions = require("./middleware/cors.middleware");
 // 🔹 GitHub App
 const { getGithubClient } = require("./githubClient");
 
+// 🔹 QOSPAY routes
+const qospayRoutes = require("./routes/qospay.routes");
+
 // Charger variables d'environnement
 dotenv.config();
 const app = express();
@@ -55,6 +58,13 @@ app.use(express.urlencoded({ extended: true }));
 // Server-to-server → AUCUNE restriction CORS
 app.use("/api/cinetpay", cors({ origin: true }));
 app.use("/api/cinetpay", require("./routes/cinetpayRoutes"));
+
+// ==================================================
+// 💳 QOSPAY — AVANT LE CORS GLOBAL (CRITIQUE)
+// ==================================================
+// Server-to-server → AUCUNE restriction CORS
+app.use("/api/qospay", cors({ origin: true }));
+app.use("/api/qospay", qospayRoutes);
 
 // =======================
 // 🌐 CORS GLOBAL (Frontend uniquement)
@@ -101,23 +111,27 @@ app.use(
 const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
-//Wallet routes
+// 💰 Wallet
 const walletRoutes = require("./routes/wallet.routes");
 app.use("/api/wallet", walletRoutes);
 
-// 🔗 Referral routes
+// 🔗 Referral
 const referralRoutes = require("./routes/referral.routes");
 app.use("/api/referral", referralRoutes);
-app.use("/api/referrals", referralRoutes); 
+app.use("/api/referrals", referralRoutes);
 
-// src/app.js
+// ==================================================
+// 🔔 WEBHOOKS (QOSPAY & CINETPAY)
+// ==================================================
 
 // QOSPay webhook
 app.use("/api/webhooks/qospay", require("./routes/webhooks/qospay.webhook"));
 
 // CinetPay webhook
-app.use("/api/webhooks/cinetpay", require("./routes/webhooks/cinetpay.webhook"));
-
+app.use(
+  "/api/webhooks/cinetpay",
+  require("./routes/webhooks/cinetpay.webhook")
+);
 
 // =======================
 // 🔹 Page d’accueil

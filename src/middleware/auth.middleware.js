@@ -11,35 +11,49 @@ const verifyToken = (req, res, next) => {
     req.headers.authorization || req.headers.Authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res
-      .status(401)
-      .json({ message: "Authentification requise" });
+    return res.status(401).json({
+      success: false,
+      error: "Authentification requise",
+    });
   }
 
   const token = authHeader.split(" ")[1];
 
   if (!process.env.JWT_SECRET) {
     console.error("❌ JWT_SECRET manquant dans l'environnement");
-    return res
-      .status(500)
-      .json({ message: "Erreur serveur" });
+    return res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
   }
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
     if (!payload?.id && !payload?._id) {
-      return res
-        .status(401)
-        .json({ message: "Token invalide" });
+      return res.status(401).json({
+        success: false,
+        error: "Token invalide",
+      });
     }
 
-    // ✅ Injection utilisateur normalisée
+    // ======================================================
+    // ✅ Injection utilisateur NORMALISÉE
+    // ======================================================
     req.user = {
       _id: payload.id || payload._id,
       id: payload.id || payload._id,
       role: payload.role?.toLowerCase() || null,
       email: payload.email || null,
+
+      // 🔥 IMPORTANT POUR QOSPAY
+      phone:
+        payload.phone ||
+        payload.fullNumber ||
+        payload.phoneNumber ||
+        null,
+
+      prefix: payload.prefix || null,
     };
 
     req.role = req.user.role;
@@ -47,9 +61,10 @@ const verifyToken = (req, res, next) => {
     next();
   } catch (err) {
     console.error("❌ JWT error:", err.message);
-    return res
-      .status(401)
-      .json({ message: "Session expirée ou invalide" });
+    return res.status(401).json({
+      success: false,
+      error: "Session expirée ou invalide",
+    });
   }
 };
 
@@ -65,9 +80,10 @@ const verifyAdmin = (req, res, next) => {
   ]);
 
   if (!req.role || !adminRoles.has(req.role)) {
-    return res
-      .status(403)
-      .json({ message: "Accès administrateur requis" });
+    return res.status(403).json({
+      success: false,
+      error: "Accès administrateur requis",
+    });
   }
 
   next();
@@ -82,9 +98,10 @@ const verifyRole = (roles = []) => {
 
   return (req, res, next) => {
     if (!req.role || !allowed.has(req.role)) {
-      return res
-        .status(403)
-        .json({ message: "Accès refusé" });
+      return res.status(403).json({
+        success: false,
+        error: "Accès refusé",
+      });
     }
     next();
   };
