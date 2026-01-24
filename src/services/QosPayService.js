@@ -1,4 +1,9 @@
+// =============================================
 // services/QosPayService.js
+// QOSPAY REAL (TM / TG)
+// ESCROW SAFE — PROD READY
+// =============================================
+
 import axios from "axios";
 import crypto from "crypto";
 
@@ -10,23 +15,40 @@ import Seller from "../models/Seller.js";
 import { QOSPAY } from "../config/qospay.js";
 
 class QosPayService {
-  // 🔹 Génère un identifiant de transaction unique
+  /* ======================================================
+     🔹 TRANSACTION REF
+  ====================================================== */
   static generateTransactionRef(prefix = "QOS") {
     return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   }
 
-  // 🔹 Détermine automatiquement l'opérateur si AUTO
+  /* ======================================================
+     🔹 RESOLVE OPERATOR (TM / TG)
+     👉 AUTO autorisé ici, PAS côté API
+  ====================================================== */
   static resolveOperator(operator, phone) {
-    if (operator && operator.toUpperCase() !== "AUTO") return operator.toUpperCase();
-    if (phone?.startsWith("+228") || phone?.startsWith("228")) return "TM"; // Togocel
-    return "TG"; // Moov TG par défaut
+    if (operator && ["TM", "TG"].includes(operator.toUpperCase())) {
+      return operator.toUpperCase();
+    }
+
+    if (!phone) {
+      throw new Error("CANNOT_RESOLVE_OPERATOR_NO_PHONE");
+    }
+
+    // 🇹🇬 Règles QOSPAY Togo
+    if (phone.startsWith("22890") || phone.startsWith("+22890")) return "TM";
+    if (phone.startsWith("22891") || phone.startsWith("+22891")) return "TG";
+
+    // fallback sécurisé
+    return "TM";
   }
 
   /* ======================================================
-     🟢 PAYIN - MARKETPLACE (ESCROW)
+     🟢 PAYIN (ESCROW)
   ====================================================== */
-  static async createPayIn({ orderId, amount, buyerPhone, operator = "AUTO" }) {
+  static async createPayIn({ orderId, amount, buyerPhone, operator }) {
     if (!orderId) throw new Error("ORDER_ID_REQUIRED");
+    if (!buyerPhone) throw new Error("BUYER_PHONE_REQUIRED");
 
     const order = await Order.findById(orderId).populate("seller client");
     if (!order) throw new Error("ORDER_NOT_FOUND");
@@ -34,8 +56,10 @@ class QosPayService {
     const op = this.resolveOperator(operator, buyerPhone);
     const transref = this.generateTransactionRef("PAY");
 
-    // 🔹 URL QOSPAY selon opérateur
-    const url = op === "TM" ? QOSPAY.TM.REQUEST : QOSPAY.TG.REQUEST;
+    const url =
+      op === "TM"
+        ? QOSPAY.TM.REQUEST
+        : QOSPAY.TG.REQUEST;
 
     const payload = {
       msisdn: buyerPhone,
@@ -45,13 +69,12 @@ class QosPayService {
     };
 
     const response = await axios.post(url, payload, { timeout: 20000 });
-    const status = response?.data?.status?.toUpperCase();
+    const status = response?.data?.status?.toUpperCase() || "PENDING";
 
     if (!["PENDING", "SUCCESS"].includes(status)) {
       throw new Error("QOSPAY_PAYIN_REJECTED");
     }
 
-    // 🔐 Création PayinTransaction
     const payin = await PayinTransaction.create({
       order: order._id,
       seller: order.seller._id,
@@ -61,23 +84,19 @@ class QosPayService {
       amount: Number(amount),
       currency: order.currency || "XOF",
       transaction_id: transref,
-      status: status === "SUCCESS" ? "SUCCESS" : "PENDING",
+      status,
       raw_response: response.data,
     });
 
-    // 🔗 Lien Order <-> Payin
     order.payinTransaction = payin._id;
     order.status = "PAYMENT_PENDING";
     await order.save();
-
-    // 🔹 Lien de paiement pour Flutter
-    const paymentUrl = `${QOSPAY.BASE_URL}/pay?transref=${transref}&operator=${op}`;
 
     return {
       success: true,
       transaction_id: transref,
       payinTransactionId: payin._id,
-      payment_url: paymentUrl,
+      payment_url: null, // ⚠️ QOSPAY = validation USSD / SIM Toolkit
       netAmount: Number(amount),
       totalFees: 0,
       provider: "QOSPAY",
@@ -97,26 +116,35 @@ class QosPayService {
 
     if (transaction.status === "SUCCESS") {
       return {
-        transaction_id: transaction.transaction_id,
+        transaction_id: transactionId,
         status: "SUCCESS",
-        message: "Paiement confirmé",
         provider: "QOSPAY",
         success: true,
       };
     }
 
-    const url = transaction.operator === "TM" ? QOSPAY.TM.STATUS : QOSPAY.TG.STATUS;
+    const url =
+      transaction.operator === "TM"
+        ? QOSPAY.TM.STATUS
+        : QOSPAY.TG.STATUS;
+
     const response = await axios.post(
       url,
-      { transref: transaction.transaction_id, clientid: QOSPAY.CLIENT_ID },
+      {
+        transref: transactionId,
+        clientid: QOSPAY.CLIENT_ID,
+      },
       { timeout: 15000 }
     );
 
     const status = response?.data?.status?.toUpperCase() || "PENDING";
-    transaction.status = ["SUCCESS", "FAILED"].includes(status) ? status : "PENDING";
+
+    transaction.status = ["SUCCESS", "FAILED"].includes(status)
+      ? status
+      : "PENDING";
+
     await transaction.save();
 
-    // 🔐 Si paiement confirmé → lock escrow et PAID
     if (status === "SUCCESS" && transaction.order) {
       const order = await Order.findById(transaction.order._id);
       if (order) {
@@ -127,26 +155,34 @@ class QosPayService {
     }
 
     return {
-      transaction_id: transaction.transaction_id,
+      transaction_id: transactionId,
       status,
-      message: status === "SUCCESS" ? "Paiement confirmé" : "Paiement en attente",
       provider: "QOSPAY",
       success: status === "SUCCESS",
     };
   }
 
   /* ======================================================
-     🔵 PAYOUT - RETRAIT VENDEUR
+     🔵 PAYOUT SELLER
   ====================================================== */
-  static async createPayOutForSeller({ sellerId, amount, operator = "AUTO" }) {
+  static async createPayOutForSeller({ sellerId, amount, operator }) {
     const seller = await Seller.findById(sellerId);
     if (!seller) throw new Error("SELLER_NOT_FOUND");
 
     const op = this.resolveOperator(operator, seller.phone);
     const transref = this.generateTransactionRef("WD");
 
-    const url = op === "TM" ? QOSPAY.TM.DEPOSIT : QOSPAY.TG.DEPOSIT;
-    const payload = { msisdn: seller.phone, amount: String(amount), transref, clientid: QOSPAY.CLIENT_ID };
+    const url =
+      op === "TM"
+        ? QOSPAY.TM.DEPOSIT
+        : QOSPAY.TG.DEPOSIT;
+
+    const payload = {
+      msisdn: seller.phone,
+      amount: String(amount),
+      transref,
+      clientid: QOSPAY.CLIENT_ID,
+    };
 
     const response = await axios.post(url, payload, { timeout: 20000 });
     const status = response?.data?.status?.toUpperCase() || "PENDING";
@@ -154,11 +190,11 @@ class QosPayService {
     await PayoutTransaction.create({
       seller: seller._id,
       sellerId: seller._id,
+      provider: "QOSPAY",
+      operator: op,
       amount: Number(amount),
       currency: "XOF",
       client_transaction_id: transref,
-      sent_amount: Number(amount),
-      prefix: seller.prefix,
       phone: seller.phone,
       status,
       raw_response: response.data,

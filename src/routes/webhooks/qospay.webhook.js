@@ -1,46 +1,71 @@
+// =============================================
 // routes/webhooks/qospay.webhook.js
+// QOSPAY PAYOUT WEBHOOK — PROD SAFE
+// =============================================
+
 const express = require("express");
 const router = express.Router();
 const PayoutWebhookService = require("../../services/payoutWebhook.service");
+const PayoutTransaction = require("../../models/PayoutTransaction");
 
-// Middleware JSON déjà dans app.js
-// router.use(express.json());
+// Middleware JSON déjà global dans app.js
 
 router.post("/payout", async (req, res) => {
   console.log("📥 QOSPay webhook reçu :", req.body);
 
-  const { client_transaction_id, transaction_id, status } = req.body;
+  const rawStatus = req.body?.status;
+  const status = String(rawStatus || "").toUpperCase();
 
-  if (!client_transaction_id || !transaction_id || !status) {
-    console.warn("⚠️ Données manquantes dans le webhook QOSPay", req.body);
-    return res.status(200).json({ ok: false, message: "Données manquantes" });
+  const payoutRef =
+    req.body?.client_transaction_id ||
+    req.body?.transref ||
+    req.body?.transaction_id;
+
+  const providerTxId = req.body?.transaction_id || null;
+
+  if (!payoutRef || !status) {
+    console.warn("⚠️ Webhook QOSPay incomplet", req.body);
+    return res.status(200).json({ ok: false, message: "Payload incomplet" });
   }
 
   try {
-    if (status === "SUCCESS") {
-      await PayoutWebhookService.handleSuccess({
-        payoutId: client_transaction_id,
-        providerTxId: transaction_id
-      });
-      console.log(`✅ QOSPay paiement SUCCESS traité: ${client_transaction_id}`);
-    } else {
-      await PayoutWebhookService.handleFailure({
-        payoutId: client_transaction_id,
-        providerTxId: transaction_id,
-        reason: status
-      });
-      console.log(`❌ QOSPay paiement échoué: ${client_transaction_id}, status: ${status}`);
+    const payout = await PayoutTransaction.findOne({
+      client_transaction_id: payoutRef,
+      provider: "QOSPAY",
+    });
+
+    if (!payout) {
+      console.warn(`⚠️ Payout introuvable : ${payoutRef}`);
+      return res.status(200).json({ ok: true });
     }
 
-    // Toujours renvoyer 200 pour éviter les retries
-    res.status(200).json({ ok: true, message: "Webhook reçu" });
+    // 🔒 Idempotence
+    if (["SUCCESS", "FAILED"].includes(payout.status)) {
+      console.log(`ℹ️ Webhook déjà traité : ${payoutRef}`);
+      return res.status(200).json({ ok: true });
+    }
 
+    if (status === "SUCCESS") {
+      await PayoutWebhookService.handleSuccess({
+        payoutId: payoutRef,
+        providerTxId,
+      });
+      console.log(`✅ QOSPay PAYOUT SUCCESS : ${payoutRef}`);
+    } else {
+      await PayoutWebhookService.handleFailure({
+        payoutId: payoutRef,
+        providerTxId,
+        reason: status,
+      });
+      console.log(`❌ QOSPay PAYOUT FAILED : ${payoutRef} (${status})`);
+    }
+
+    return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("❌ Erreur lors du traitement QOSPay webhook :", err);
-    res.status(200).json({
+    console.error("❌ Erreur webhook QOSPay :", err);
+    return res.status(200).json({
       ok: false,
-      message: "Erreur interne lors du traitement",
-      error: err.message
+      message: "Erreur interne",
     });
   }
 });
