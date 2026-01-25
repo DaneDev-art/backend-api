@@ -1,4 +1,8 @@
-// src/models/PayoutTransaction.js
+// =============================================
+// models/PayoutTransaction.js
+// ESCROW • MULTI-PROVIDER • PRODUCTION READY (FIXED)
+// =============================================
+
 const mongoose = require("mongoose");
 
 const PayoutTransactionSchema = new mongoose.Schema(
@@ -14,7 +18,7 @@ const PayoutTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       💳 PROVIDER
+       🏦 PROVIDER
     ====================================================== */
     provider: {
       type: String,
@@ -27,14 +31,14 @@ const PayoutTransactionSchema = new mongoose.Schema(
        💰 MONTANTS
     ====================================================== */
     amount: {
-      type: Number,
-      required: true, // montant débité du wallet vendeur
+      type: Number, // montant débité du wallet vendeur
+      required: true,
       min: 0,
     },
 
     sent_amount: {
-      type: Number,
-      default: 0, // montant réellement envoyé (après frais)
+      type: Number, // montant réellement envoyé au vendeur
+      required: true,
       min: 0,
     },
 
@@ -47,30 +51,31 @@ const PayoutTransactionSchema = new mongoose.Schema(
     currency: {
       type: String,
       default: "XOF",
+      index: true,
     },
 
     /* ======================================================
        🔗 IDENTIFIANTS TRANSACTION
     ====================================================== */
     transaction_id: {
-      type: String,
-      required: true, // ID interne (client_transaction_id)
+      type: String, // ID interne (WD_xxx)
+      required: true,
       unique: true,
       index: true,
     },
 
     provider_transaction_id: {
-      type: String,
-      default: null, // ID retourné par CINETPAY / QOSPAY
+      type: String, // ID retourné par QOSPAY / CINETPAY
+      default: null,
       index: true,
     },
 
     /* ======================================================
-       🔔 WEBHOOK (IDEMPOTENCE)
+       🔔 WEBHOOK / IDEMPOTENCE
     ====================================================== */
     webhook_received: {
       type: Boolean,
-      default: false, // empêche double traitement webhook
+      default: false,
       index: true,
     },
 
@@ -82,20 +87,28 @@ const PayoutTransactionSchema = new mongoose.Schema(
     /* ======================================================
        📱 DESTINATAIRE
     ====================================================== */
-    prefix: {
-      type: String,
-      required: true,
-    },
-
     phone: {
       type: String,
       required: true,
+      index: true,
     },
 
     operator: {
       type: String,
-      enum: ["TM", "TG"],
+      enum: [
+        // QOSPAY
+        "TM",
+        "TG",
+        "CARD",
+
+        // CINETPAY / futur
+        "MTN",
+        "MOOV",
+        "ORANGE",
+        "WAVE",
+      ],
       required: true,
+      index: true,
     },
 
     /* ======================================================
@@ -115,7 +128,7 @@ const PayoutTransactionSchema = new mongoose.Schema(
 
     raw_response: {
       type: Object,
-      default: null, // payload provider / webhook
+      default: null,
     },
   },
   {
@@ -130,6 +143,8 @@ PayoutTransactionSchema.index({ seller: 1, createdAt: -1 });
 PayoutTransactionSchema.index({ status: 1, createdAt: -1 });
 PayoutTransactionSchema.index({ provider: 1, createdAt: -1 });
 PayoutTransactionSchema.index({ webhook_received: 1 });
+PayoutTransactionSchema.index({ transaction_id: 1 });
+PayoutTransactionSchema.index({ provider_transaction_id: 1 });
 
 module.exports = mongoose.model(
   "PayoutTransaction",

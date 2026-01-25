@@ -1,8 +1,12 @@
+// ==========================================
+// services/confirmOrderByClient.service.js
+// ==========================================
+
 const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 const Seller = require("../models/Seller");
-const ReferralCommissionService = require("../services/referralCommission.service");
+const { finalizeOrder } = require("./orderFinalize.service");
 
 async function confirmOrderByClient(orderId, clientId) {
   const session = await mongoose.startSession();
@@ -35,7 +39,7 @@ async function confirmOrderByClient(orderId, clientId) {
       throw new Error("Paiement non validé");
     }
 
-    // 🔒 IDEMPOTENCE ESCROW
+    // 🔒 IDEMPOTENCE WALLET
     if (payinTx.sellerCredited === true) {
       console.log("⚠️ [ConfirmOrder] Fonds déjà débloqués");
       await session.commitTransaction();
@@ -51,39 +55,39 @@ async function confirmOrderByClient(orderId, clientId) {
     if (!seller) throw new Error("Vendeur introuvable");
 
     const netAmount = Number(order.netAmount || payinTx.netAmount);
-    if (netAmount <= 0) {
+    if (!netAmount || netAmount <= 0) {
       throw new Error("Montant net invalide");
     }
 
-    // 🔓 DÉBLOCAGE ESCROW
-    seller.balance_locked = (seller.balance_locked || 0) - netAmount;
-    seller.balance_available = (seller.balance_available || 0) + netAmount;
+    // 🔓 DÉBLOCAGE ESCROW WALLET
+    seller.balance_locked = Math.max(
+      0,
+      (seller.balance_locked || 0) - netAmount
+    );
+    seller.balance_available =
+      (seller.balance_available || 0) + netAmount;
+
     await seller.save({ session });
 
-    // 🔐 VERROUILLAGE PAYIN
+    // 🔐 MARQUER PAYIN CRÉDITÉ
     payinTx.sellerCredited = true;
     payinTx.creditedAt = new Date();
     await payinTx.save({ session });
 
-    // 📦 MISE À JOUR COMMANDE
+    // 📦 CONFIRMATION CLIENT (PAS DE COMPLETED ICI)
     order.isConfirmedByClient = true;
     order.confirmedAt = new Date();
-    order.status = "COMPLETED";
     await order.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
-    // 🔥 COMMISSION (hors transaction DB)
-    try {
-      await ReferralCommissionService.handleOrderCompleted(order);
-    } catch (err) {
-      console.error("❌ Erreur commission parrainage :", err);
-    }
+    // ✅ FINALISATION UNIQUE (status + commissions)
+    await finalizeOrder(order._id, "CLIENT_CONFIRMATION");
 
     return {
       success: true,
-      message: "Commande confirmée, fonds débloqués",
+      message: "Commande confirmée et finalisée",
       orderId: order._id,
       netAmount,
     };

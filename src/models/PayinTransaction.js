@@ -1,6 +1,6 @@
 // =============================================
 // models/PayinTransaction.js
-// ESCROW • MULTI-PROVIDER • PRODUCTION READY
+// ESCROW • MULTI-PROVIDER • PRODUCTION READY (FIXED)
 // =============================================
 
 const mongoose = require("mongoose");
@@ -45,11 +45,23 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📱 OPÉRATEUR MOBILE (CHOISI PAR CLIENT)
+       📱 OPÉRATEUR MOBILE / CANAL
+       ✅ COMPATIBLE QOSPAY + CINETPAY
     ====================================================== */
     operator: {
       type: String,
-      enum: ["MTN", "MOOV", "ORANGE", "WAVE"],
+      enum: [
+        // QOSPAY
+        "TM",
+        "TG",
+        "CARD",
+
+        // CINETPAY (legacy / futur)
+        "MTN",
+        "MOOV",
+        "ORANGE",
+        "WAVE",
+      ],
       required: true,
       index: true,
     },
@@ -64,7 +76,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     netAmount: {
-      type: Number, // montant net vendeur (bloqué en ESCROW)
+      type: Number, // montant net vendeur (ESCROW)
       required: true,
       min: 0,
     },
@@ -90,14 +102,14 @@ const PayinTransactionSchema = new mongoose.Schema(
        🔗 IDENTIFIANTS TRANSACTION
     ====================================================== */
     transaction_id: {
-      type: String, // ID interne (UUID / PAYIN_xxx)
+      type: String, // ID interne
       required: true,
       unique: true,
       index: true,
     },
 
     provider_transaction_id: {
-      type: String, // ID retourné par CINETPAY / QOSPAY
+      type: String, // ID QOSPAY / CINETPAY
       default: null,
       index: true,
     },
@@ -127,7 +139,6 @@ const PayinTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🔹 spécifique CinetPay (audit)
     cinetpay_status: {
       type: String,
       default: null,
@@ -140,7 +151,6 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     /* ======================================================
        🔐 ESCROW
-       💡 Fonds bloqués jusqu’à confirmation client
     ====================================================== */
     sellerCredited: {
       type: Boolean,
@@ -154,7 +164,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       👤 SNAPSHOT CLIENT (AUDIT / PREUVE)
+       👤 SNAPSHOT CLIENT (AUDIT)
     ====================================================== */
     customer: {
       email: { type: String, default: null },
@@ -185,7 +195,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 );
 
 /* ======================================================
-   🔹 INDEXES (PERF & QUERIES)
+   🔹 INDEXES
 ====================================================== */
 PayinTransactionSchema.index({ order: 1 });
 PayinTransactionSchema.index({ seller: 1, createdAt: -1 });

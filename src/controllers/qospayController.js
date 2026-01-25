@@ -5,7 +5,7 @@
 // =============================================
 
 const mongoose = require("mongoose");
-const QosPayService = require("../services/QosPayService"); // ✅ CommonJS
+const QosPayService = require("../services/QosPayService");
 
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
@@ -13,11 +13,9 @@ const Product = require("../models/Product");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 
-const { finalizeOrder } = require("../services/orderFinalize.service");
-
 module.exports = {
   /* ======================================================
-     🟢 CREATE PAYIN (ANY AUTH USER)
+     🟢 CREATE PAYIN
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
@@ -25,12 +23,11 @@ module.exports = {
         sellerId,
         operator = "AUTO",
         items,
-        productPrice,
         shippingFee = 0,
       } = req.body;
 
       /* ======================================================
-         🔐 AUTH USER (ANY ROLE)
+         🔐 AUTH USER
       ====================================================== */
       const clientId = req.user?.id || req.user?._id;
       if (!clientId) {
@@ -40,21 +37,16 @@ module.exports = {
         });
       }
 
-      /* ======================================================
-         👤 LOAD REAL USER FROM DB
-      ====================================================== */
-      const client = await User.findById(clientId).select("phone role");
-      if (!client || !client.phone) {
+      const client = await User.findById(clientId).select("phone");
+      if (!client?.phone) {
         return res.status(400).json({
           success: false,
-          error: "Numéro de téléphone utilisateur requis",
+          error: "Téléphone utilisateur requis",
         });
       }
 
-      const buyerPhone = normalizePhone(client.phone);
-
       /* ======================================================
-         🔎 BASIC VALIDATIONS
+         🔎 VALIDATIONS
       ====================================================== */
       if (!sellerId) {
         return res.status(400).json({
@@ -63,23 +55,21 @@ module.exports = {
         });
       }
 
-      if (!items || !Array.isArray(items) || items.length === 0) {
+      if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
           success: false,
-          error: "Items requis",
+          error: "Items invalides",
         });
       }
 
       /* ======================================================
-         🔎 LOAD PRODUCTS (SAFE)
+         🔎 LOAD PRODUCTS (SECURE)
       ====================================================== */
       const productIds = items.map(
         (i) => new mongoose.Types.ObjectId(i.productId)
       );
 
-      const products = await Product.find({
-        _id: { $in: productIds },
-      });
+      const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== items.length) {
         return res.status(404).json({
@@ -88,25 +78,31 @@ module.exports = {
         });
       }
 
+      let totalProducts = 0;
+
       const safeItems = items.map((item) => {
         const product = products.find(
           (p) => p._id.toString() === item.productId
         );
 
+        const qty = Number(item.quantity) || 1;
+        const lineTotal = product.price * qty;
+        totalProducts += lineTotal;
+
         return {
           productId: product._id.toString(),
           productName: product.name,
-          price: Number(product.price),
-          quantity: Number(item.quantity) || 1,
+          price: product.price,
+          quantity: qty,
         };
       });
 
-      /* ======================================================
-         👤 SELLER (USER OR SELLER MODEL)
-      ====================================================== */
-      let seller = await Seller.findById(sellerId);
-      if (!seller) seller = await User.findById(sellerId);
+      const totalAmount = totalProducts + Number(shippingFee || 0);
 
+      /* ======================================================
+         👤 SELLER
+      ====================================================== */
+      const seller = await Seller.findById(sellerId);
       if (!seller) {
         return res.status(404).json({
           success: false,
@@ -117,15 +113,12 @@ module.exports = {
       /* ======================================================
          📦 CREATE ORDER (ESCROW)
       ====================================================== */
-      const totalAmount =
-        Number(productPrice) + Number(shippingFee || 0);
-
       const order = await Order.create({
         seller: seller._id,
         client: clientId,
         items: safeItems,
         totalAmount,
-        netAmount: Number(productPrice),
+        netAmount: totalProducts,
         shippingFee: Number(shippingFee || 0),
         currency: "XOF",
         status: "PAYMENT_PENDING",
@@ -137,17 +130,12 @@ module.exports = {
       const payInResult = await QosPayService.createPayIn({
         orderId: order._id,
         amount: totalAmount,
-        buyerPhone, // ✅ USER PHONE (ANY ROLE)
-        operator,   // AUTO | TM | TG
+        buyerPhone: client.phone,
+        operator: operator === "AUTO" ? null : operator,
       });
 
-      /* ======================================================
-         🔗 LINK PAYIN ↔ ORDER
-      ====================================================== */
       if (payInResult?.payinTransactionId) {
         order.payinTransaction = payInResult.payinTransactionId;
-        order.netAmount = payInResult.netAmount ?? order.netAmount;
-        order.platformFee = payInResult.totalFees ?? 0;
         await order.save();
       }
 
@@ -155,9 +143,7 @@ module.exports = {
         success: true,
         provider: "QOSPAY",
         transaction_id: payInResult.transaction_id,
-        payment_url: payInResult.payment_url,
-        netAmount: order.netAmount,
-        totalFees: order.platformFee || 0,
+        totalAmount,
       });
     } catch (err) {
       console.error("❌ QOSPAY createPayIn:", err);
@@ -185,20 +171,6 @@ module.exports = {
 
       const result = await QosPayService.verifyPayIn(transactionId);
 
-      /* ======================================================
-         🔐 FINALIZE ORDER (IDEMPOTENT)
-      ====================================================== */
-      if (result.status === "SUCCESS") {
-        const payinTx = await PayinTransaction.findOne({
-          transaction_id: transactionId,
-          sellerCredited: { $ne: true },
-        });
-
-        if (payinTx?.order) {
-          await finalizeOrder(payinTx.order, "QOSPAY");
-        }
-      }
-
       return res.status(200).json({
         success: true,
         ...result,
@@ -213,7 +185,7 @@ module.exports = {
   },
 
   /* ======================================================
-     🔵 CREATE PAYOUT (SELLER)
+     🔵 CREATE PAYOUT SELLER
   ====================================================== */
   createPayOut: async (req, res) => {
     try {
@@ -229,7 +201,7 @@ module.exports = {
       const result = await QosPayService.createPayOutForSeller({
         sellerId,
         amount: Number(amount),
-        operator,
+        operator: operator === "AUTO" ? null : operator,
       });
 
       return res.status(201).json({
@@ -238,33 +210,6 @@ module.exports = {
       });
     } catch (err) {
       console.error("❌ QOSPAY createPayOut:", err.message);
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-  },
-
-  /* ======================================================
-     🔔 WEBHOOK QOSPAY (OPTIONNEL)
-  ====================================================== */
-  handleWebhook: async (req, res) => {
-    try {
-      if (!QosPayService.handleWebhook) {
-        return res.status(501).json({
-          success: false,
-          error: "Webhook non implémenté",
-        });
-      }
-
-      const result = await QosPayService.handleWebhook(req.body);
-
-      return res.status(200).json({
-        success: true,
-        result,
-      });
-    } catch (err) {
-      console.error("❌ QOSPAY webhook:", err.message);
       return res.status(500).json({
         success: false,
         error: err.message,

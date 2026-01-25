@@ -25,6 +25,7 @@ async function finalizeOrder(orderId, source = "SYSTEM") {
   // ===== METTRE A JOUR STATUS =====
   order.status = "COMPLETED";
   order.confirmedAt = new Date();
+  order.escrow = order.escrow || {};
   order.escrow.isLocked = false;
   order.escrow.releasedAt = new Date();
 
