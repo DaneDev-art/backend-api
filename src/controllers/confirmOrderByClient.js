@@ -6,8 +6,18 @@ const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 const Seller = require("../models/Seller");
-const { finalizeOrder } = require("./orderFinalize.service");
+const { finalizeOrder } = require("../services/orderFinalize.service"); // ⚡ chemin corrigé
 
+/**
+ * Confirme une commande par le client
+ * - Débloque le wallet du vendeur
+ * - Marque le paiement comme crédité
+ * - Déclenche la finalisation de l'ordre
+ *
+ * @param {string} orderId - ID de la commande
+ * @param {string} clientId - ID du client
+ * @returns {Promise<Object>} - résultat de la confirmation
+ */
 async function confirmOrderByClient(orderId, clientId) {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -15,6 +25,7 @@ async function confirmOrderByClient(orderId, clientId) {
   try {
     console.log(`🔹 [ConfirmOrder] orderId=${orderId} | clientId=${clientId}`);
 
+    // ✅ Validation des IDs
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
       throw new Error("orderId invalide");
     }
@@ -22,12 +33,14 @@ async function confirmOrderByClient(orderId, clientId) {
       throw new Error("clientId invalide");
     }
 
+    // ✅ Récupération de la commande avec transaction de paiement
     const order = await Order.findById(orderId)
       .populate("payinTransaction")
       .session(session);
 
     if (!order) throw new Error("Commande introuvable");
 
+    // ✅ Vérification que le client est bien propriétaire de la commande
     if (order.client.toString() !== clientId.toString()) {
       throw new Error("Non autorisé à confirmer cette commande");
     }
@@ -39,7 +52,7 @@ async function confirmOrderByClient(orderId, clientId) {
       throw new Error("Paiement non validé");
     }
 
-    // 🔒 IDEMPOTENCE WALLET
+    // 🔒 Idempotence : si déjà débloqué, on ne fait rien
     if (payinTx.sellerCredited === true) {
       console.log("⚠️ [ConfirmOrder] Fonds déjà débloqués");
       await session.commitTransaction();
@@ -51,6 +64,7 @@ async function confirmOrderByClient(orderId, clientId) {
       };
     }
 
+    // ✅ Déblocage du wallet du vendeur
     const seller = await Seller.findById(order.seller).session(session);
     if (!seller) throw new Error("Vendeur introuvable");
 
@@ -59,22 +73,16 @@ async function confirmOrderByClient(orderId, clientId) {
       throw new Error("Montant net invalide");
     }
 
-    // 🔓 DÉBLOCAGE ESCROW WALLET
-    seller.balance_locked = Math.max(
-      0,
-      (seller.balance_locked || 0) - netAmount
-    );
-    seller.balance_available =
-      (seller.balance_available || 0) + netAmount;
-
+    seller.balance_locked = Math.max(0, (seller.balance_locked || 0) - netAmount);
+    seller.balance_available = (seller.balance_available || 0) + netAmount;
     await seller.save({ session });
 
-    // 🔐 MARQUER PAYIN CRÉDITÉ
+    // ✅ Marquer le paiement comme crédité
     payinTx.sellerCredited = true;
     payinTx.creditedAt = new Date();
     await payinTx.save({ session });
 
-    // 📦 CONFIRMATION CLIENT (PAS DE COMPLETED ICI)
+    // ✅ Marquer la commande comme confirmée par le client
     order.isConfirmedByClient = true;
     order.confirmedAt = new Date();
     await order.save({ session });
@@ -82,7 +90,7 @@ async function confirmOrderByClient(orderId, clientId) {
     await session.commitTransaction();
     session.endSession();
 
-    // ✅ FINALISATION UNIQUE (status + commissions)
+    // ✅ Finalisation unique (status + commissions)
     await finalizeOrder(order._id, "CLIENT_CONFIRMATION");
 
     return {

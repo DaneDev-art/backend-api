@@ -24,57 +24,55 @@ function normalizePhone(phone) {
   return p;
 }
 
-class QosPayService {
-  /* ======================================================
-     🔹 TRANSACTION REF
-  ====================================================== */
-  static generateTransactionRef(prefix = "QOS") {
-    return `${prefix}_${Date.now()}_${crypto
-      .randomBytes(4)
-      .toString("hex")}`;
+/* ======================================================
+   🔹 TRANSACTION REF
+====================================================== */
+function generateTransactionRef(prefix = "QOS") {
+  return `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+}
+
+/* ======================================================
+   🔹 RESOLVE OPERATOR (TM / TG / CARD)
+====================================================== */
+function resolveOperator(operator, phone) {
+  if (operator && ["TM", "TG", "CARD"].includes(operator.toUpperCase())) {
+    return operator.toUpperCase();
   }
 
-  /* ======================================================
-     🔹 RESOLVE OPERATOR (TM / TG / CARD)
-  ====================================================== */
-  static resolveOperator(operator, phone) {
-    if (operator && ["TM", "TG", "CARD"].includes(operator.toUpperCase())) {
-      return operator.toUpperCase();
-    }
+  const p = normalizePhone(phone);
+  if (p.startsWith("22890")) return "TM";
+  if (p.startsWith("22891")) return "TG";
 
-    const p = normalizePhone(phone);
-    if (p.startsWith("22890")) return "TM";
-    if (p.startsWith("22891")) return "TG";
+  throw new Error("UNSUPPORTED_OPERATOR");
+}
 
-    throw new Error("UNSUPPORTED_OPERATOR");
+/* ======================================================
+   🔐 AXIOS AUTH CONFIG (QOSIC REAL)
+====================================================== */
+function getAxiosConfig(op) {
+  const cfg = QOSPAY[op];
+
+  if (!cfg?.USERNAME || !cfg?.PASSWORD) {
+    throw new Error(`QOSPAY_AUTH_NOT_DEFINED_FOR_${op}`);
   }
 
-  /* ======================================================
-     🔐 AXIOS AUTH CONFIG (QOSIC REAL)
-  ====================================================== */
-  static getAxiosConfig(op) {
-    const cfg = QOSPAY[op];
+  return {
+    timeout: 20000,
+    auth: {
+      username: cfg.USERNAME,
+      password: cfg.PASSWORD,
+    },
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+}
 
-    if (!cfg?.USERNAME || !cfg?.PASSWORD) {
-      throw new Error(`QOSPAY_AUTH_NOT_DEFINED_FOR_${op}`);
-    }
-
-    return {
-      timeout: 20000,
-      auth: {
-        username: cfg.USERNAME, // QSUSRxxxx
-        password: cfg.PASSWORD, // password operator
-      },
-      headers: {
-        "Content-Type": "application/json",
-      },
-    };
-  }
-
+module.exports = {
   /* ======================================================
      🟢 PAYIN (ESCROW)
   ====================================================== */
-  static async createPayIn({ orderId, amount, buyerPhone, operator }) {
+  createPayIn: async ({ orderId, amount, buyerPhone, operator }) => {
     if (!orderId) throw new Error("ORDER_ID_REQUIRED");
     if (!buyerPhone) throw new Error("BUYER_PHONE_REQUIRED");
 
@@ -98,8 +96,8 @@ class QosPayService {
       };
     }
 
-    const op = this.resolveOperator(operator, phone);
-    const transref = this.generateTransactionRef("PAY");
+    const op = resolveOperator(operator, phone);
+    const transref = generateTransactionRef("PAY");
 
     const payload = {
       msisdn: phone,
@@ -110,7 +108,7 @@ class QosPayService {
     const response = await axios.post(
       QOSPAY[op].REQUEST,
       payload,
-      this.getAxiosConfig(op)
+      getAxiosConfig(op)
     );
 
     const code = response?.data?.responsecode;
@@ -134,8 +132,7 @@ class QosPayService {
     });
 
     order.payinTransaction = payin._id;
-    order.status =
-      status === "FAILED" ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
+    order.status = status === "FAILED" ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
 
     await order.save();
 
@@ -145,12 +142,12 @@ class QosPayService {
       payinTransactionId: payin._id,
       provider: "QOSPAY",
     };
-  }
+  },
 
   /* ======================================================
      🔁 VERIFY PAYIN
   ====================================================== */
-  static async verifyPayIn(transactionId) {
+  verifyPayIn: async (transactionId) => {
     const tx = await PayinTransaction.findOne({
       transaction_id: transactionId,
     });
@@ -171,7 +168,7 @@ class QosPayService {
     const response = await axios.post(
       QOSPAY[op].STATUS,
       { transref: transactionId },
-      this.getAxiosConfig(op)
+      getAxiosConfig(op)
     );
 
     const code = response?.data?.responsecode;
@@ -190,23 +187,23 @@ class QosPayService {
       success: status === "SUCCESS",
       provider: "QOSPAY",
     };
-  }
+  },
 
   /* ======================================================
      🔵 PAYOUT SELLER (DEPOSIT)
   ====================================================== */
-  static async createPayOutForSeller({ sellerId, amount, operator }) {
+  createPayOutForSeller: async ({ sellerId, amount, operator }) => {
     const seller = await Seller.findById(sellerId);
     if (!seller?.phone) throw new Error("SELLER_PHONE_REQUIRED");
 
     const phone = normalizePhone(seller.phone);
-    const op = this.resolveOperator(operator, phone);
+    const op = resolveOperator(operator, phone);
 
     if (op === "CARD") {
       throw new Error("CARD_PAYOUT_NOT_SUPPORTED");
     }
 
-    const transref = this.generateTransactionRef("WD");
+    const transref = generateTransactionRef("WD");
 
     const payload = {
       msisdn: phone,
@@ -217,7 +214,7 @@ class QosPayService {
     const response = await axios.post(
       QOSPAY[op].DEPOSIT,
       payload,
-      this.getAxiosConfig(op)
+      getAxiosConfig(op)
     );
 
     const code = response?.data?.responsecode;
@@ -246,7 +243,5 @@ class QosPayService {
       status,
       provider: "QOSPAY",
     };
-  }
-}
-
-module.exports = QosPayService;
+  },
+};

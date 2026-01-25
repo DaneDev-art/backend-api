@@ -13,22 +13,18 @@ const Product = require("../models/Product");
 const Order = require("../models/order.model");
 const PayinTransaction = require("../models/PayinTransaction");
 
+// ⚠️ LOG pour vérifier les exports du service
+console.log("QosPayService exports:", QosPayService);
+
 module.exports = {
   /* ======================================================
      🟢 CREATE PAYIN
   ====================================================== */
   createPayIn: async (req, res) => {
     try {
-      const {
-        sellerId,
-        operator = "AUTO",
-        items,
-        shippingFee = 0,
-      } = req.body;
+      const { sellerId, operator = "AUTO", items, shippingFee = 0 } = req.body;
 
-      /* ======================================================
-         🔐 AUTH USER
-      ====================================================== */
+      // 🔐 AUTH USER
       const clientId = req.user?.id || req.user?._id;
       if (!clientId) {
         return res.status(401).json({
@@ -45,9 +41,7 @@ module.exports = {
         });
       }
 
-      /* ======================================================
-         🔎 VALIDATIONS
-      ====================================================== */
+      // 🔎 VALIDATIONS
       if (!sellerId) {
         return res.status(400).json({
           success: false,
@@ -62,13 +56,8 @@ module.exports = {
         });
       }
 
-      /* ======================================================
-         🔎 LOAD PRODUCTS (SECURE)
-      ====================================================== */
-      const productIds = items.map(
-        (i) => new mongoose.Types.ObjectId(i.productId)
-      );
-
+      // 🔎 LOAD PRODUCTS (SECURE)
+      const productIds = items.map((i) => new mongoose.Types.ObjectId(i.productId));
       const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== items.length) {
@@ -81,10 +70,7 @@ module.exports = {
       let totalProducts = 0;
 
       const safeItems = items.map((item) => {
-        const product = products.find(
-          (p) => p._id.toString() === item.productId
-        );
-
+        const product = products.find((p) => p._id.toString() === item.productId);
         const qty = Number(item.quantity) || 1;
         const lineTotal = product.price * qty;
         totalProducts += lineTotal;
@@ -99,9 +85,7 @@ module.exports = {
 
       const totalAmount = totalProducts + Number(shippingFee || 0);
 
-      /* ======================================================
-         👤 SELLER
-      ====================================================== */
+      // 👤 SELLER
       const seller = await Seller.findById(sellerId);
       if (!seller) {
         return res.status(404).json({
@@ -110,9 +94,7 @@ module.exports = {
         });
       }
 
-      /* ======================================================
-         📦 CREATE ORDER (ESCROW)
-      ====================================================== */
+      // 📦 CREATE ORDER (ESCROW)
       const order = await Order.create({
         seller: seller._id,
         client: clientId,
@@ -124,9 +106,11 @@ module.exports = {
         status: "PAYMENT_PENDING",
       });
 
-      /* ======================================================
-         🚀 QOSPAY PAYIN
-      ====================================================== */
+      // 🚀 QOSPAY PAYIN
+      if (!QosPayService.createPayIn) {
+        throw new Error("QosPayService.createPayIn is undefined !");
+      }
+
       const payInResult = await QosPayService.createPayIn({
         orderId: order._id,
         amount: totalAmount,
@@ -159,14 +143,17 @@ module.exports = {
   ====================================================== */
   verifyPayIn: async (req, res) => {
     try {
-      const transactionId =
-        req.body?.transaction_id || req.query?.transaction_id;
+      const transactionId = req.body?.transaction_id || req.query?.transaction_id;
 
       if (!transactionId) {
         return res.status(400).json({
           success: false,
           error: "transaction_id requis",
         });
+      }
+
+      if (!QosPayService.verifyPayIn) {
+        throw new Error("QosPayService.verifyPayIn is undefined !");
       }
 
       const result = await QosPayService.verifyPayIn(transactionId);
@@ -198,6 +185,10 @@ module.exports = {
         });
       }
 
+      if (!QosPayService.createPayOutForSeller) {
+        throw new Error("QosPayService.createPayOutForSeller is undefined !");
+      }
+
       const result = await QosPayService.createPayOutForSeller({
         sellerId,
         amount: Number(amount),
@@ -216,4 +207,20 @@ module.exports = {
       });
     }
   },
+
+  /* ======================================================
+     🔔 HANDLE WEBHOOK (OPTIONNEL)
+  ====================================================== */
+  handleWebhook: async (req, res) => {
+    try {
+      console.log("Webhook reçu:", req.body);
+      return res.status(200).send("OK");
+    } catch (err) {
+      console.error("❌ QOSPAY webhook:", err.message);
+      return res.status(500).send("ERROR");
+    }
+  },
 };
+
+// ⚠️ LOG final pour vérifier exports du controller
+console.log("QosPayController exports:", module.exports);

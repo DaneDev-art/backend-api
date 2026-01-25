@@ -1,20 +1,27 @@
+// =============================================
+// routes/qospay.routes.js
+// QOSPAY ROUTES — TM / TG / CARD
+// PRODUCTION READY
+// =============================================
+
 const express = require("express");
 const router = express.Router();
+
 const controller = require("../controllers/qospayController");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// ======================================================
-// 🟢 PAYIN
-// ======================================================
+/* ======================================================
+   🟢 PAYIN
+====================================================== */
 
-// Création PayIn (USSD / SIM Toolkit)
+// ➜ Création PayIn (USSD / SIM Toolkit)
 router.post(
   "/payin/create",
-  verifyToken,              // 🔐 utilisateur obligatoire
-  controller.createPayIn
+  verifyToken,               // 🔐 utilisateur authentifié obligatoire
+  controller.createPayIn     // ✅ fonction valide
 );
 
-// Vérification PayIn (polling Flutter + Postman)
+// ➜ Vérification PayIn (polling Flutter / Postman)
 router.post(
   "/payin/verify",
   verifyToken,
@@ -27,25 +34,26 @@ router.get(
   controller.verifyPayIn
 );
 
-// ======================================================
-// 🔵 PAYOUT
-// ======================================================
+/* ======================================================
+   🔵 PAYOUT (SELLER)
+====================================================== */
 
-// Retrait vendeur
+// ➜ Retrait vendeur (Mobile Money)
 router.post(
   "/payout/create",
   verifyToken,
   controller.createPayOut
 );
 
-// ======================================================
-// 🔔 WEBHOOK QOSPAY
-// ======================================================
+/* ======================================================
+   🔔 WEBHOOK QOSPAY (OPTIONNEL)
+   ⚠️ QOSIC n’envoie pas toujours de webhook fiable
+   ⚠️ Pas de JWT ici
+====================================================== */
 
-// ⚠️ Webhook = PAS de JWT
 router.post(
   "/webhook/qospay",
-  controller.handleWebhook
+  controller.handleWebhook   // ✅ toujours défini (stub safe)
 );
 
 module.exports = router;
