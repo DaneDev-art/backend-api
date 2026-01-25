@@ -15,15 +15,6 @@ const PayinTransaction = require("../models/PayinTransaction");
 
 const { finalizeOrder } = require("../services/orderFinalize.service");
 
-/* ======================================================
-   📞 NORMALIZE PHONE (TG / TM)
-====================================================== */
-function normalizePhone(phone) {
-  let p = String(phone).replace(/\s+/g, "");
-  if (!p.startsWith("228")) p = "228" + p;
-  return p;
-}
-
 module.exports = {
   /* ======================================================
      🟢 CREATE PAYIN (ANY AUTH USER)
