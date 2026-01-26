@@ -197,48 +197,78 @@ module.exports = {
 
   /* ======================================================
      🔁 VERIFY PAYIN
-  ====================================================== */
-  verifyPayIn: async (transactionId) => {
-    const tx = await PayinTransaction.findOne({
-      transaction_id: transactionId,
-    });
+====================================================== */
+verifyPayIn: async (transactionId) => {
+  const tx = await PayinTransaction.findOne({
+    transaction_id: transactionId,
+  });
 
-    if (!tx) throw new Error("TRANSACTION_NOT_FOUND");
+  if (!tx) throw new Error("TRANSACTION_NOT_FOUND");
 
-    if (tx.status === "SUCCESS") {
-      return {
-        transaction_id: transactionId,
-        status: "SUCCESS",
-        success: true,
-        provider: "QOSPAY",
-      };
-    }
-
-    const op = tx.operator;
-
-    const response = await axios.post(
-      QOSPAY[op].STATUS,
-      { transref: transactionId },
-      getAxiosConfig(op)
-    );
-
-    const code = response?.data?.responsecode;
-
-    let status = "PENDING";
-    if (code === "00") status = "SUCCESS";
-    if (code && !["00", "01"].includes(code)) status = "FAILED";
-
-    tx.status = status;
-    tx.raw_response = response.data;
-    await tx.save();
-
+  // 🔁 Idempotence : déjà SUCCESS → on renvoie
+  if (tx.status === "SUCCESS") {
     return {
       transaction_id: transactionId,
-      status,
-      success: status === "SUCCESS",
+      status: "SUCCESS",
+      success: true,
       provider: "QOSPAY",
     };
-  },
+  }
+
+  const op = tx.operator;
+
+  const response = await axios.post(
+    QOSPAY[op].STATUS,
+    { transref: transactionId },
+    getAxiosConfig(op)
+  );
+
+  const code = response?.data?.responsecode;
+
+  let status = "PENDING";
+  if (code === "00") status = "SUCCESS";
+  if (code && !["00", "01"].includes(code)) status = "FAILED";
+
+  // 🔄 Mise à jour transaction
+  tx.status = status;
+  tx.raw_response = response.data;
+  await tx.save();
+
+  /* ======================================================
+     ✅ SI PAIEMENT CONFIRMÉ → MAJ COMMANDE + ESCROW
+  ====================================================== */
+  if (status === "SUCCESS") {
+    const order = await Order.findById(tx.order);
+
+    if (order && order.status !== "PAID") {
+      // ✅ Marquer la commande comme payée
+      order.status = "PAID";
+      order.paidAt = new Date();
+      await order.save();
+
+      // 🔒 Créditer le solde verrouillé du vendeur
+      const seller = await Seller.findById(order.seller);
+      if (seller) {
+        const netAmount = Number(order.netAmount || tx.netAmount);
+
+        if (netAmount > 0) {
+          seller.balance_locked =
+            (seller.balance_locked || 0) + netAmount;
+
+          await seller.save();
+        }
+      }
+    }
+  }
+
+  return {
+    transaction_id: transactionId,
+    status,
+    success: status === "SUCCESS",
+    provider: "QOSPAY",
+  };
+},
+
 
   /* ======================================================
      🔵 PAYOUT SELLER (DEPOSIT)
