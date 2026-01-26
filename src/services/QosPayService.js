@@ -1,7 +1,7 @@
 // =============================================
 // services/QosPayService.js
 // QOSPAY REAL (TM / TG / CARD)
-// BASIC AUTH — PROD READY (FINAL CLEAN + FIX STATUS PAID + FEES + COMMISSIONS)
+// PROD READY – ESCROW SAFE + STATUS FIX + FEES + COMMISSIONS
 // =============================================
 
 const axios = require("axios");
@@ -88,7 +88,11 @@ function getAxiosConfig(op) {
   };
 }
 
+// ============================================
+// MODULE EXPORT
+// ============================================
 module.exports = {
+
   // ========================= PAYIN =========================
   createPayIn: async ({
     orderId,
@@ -103,25 +107,26 @@ module.exports = {
     returnUrl,
     notifyUrl
   }) => {
+
     if (!orderId) throw new Error("ORDER_ID_REQUIRED");
     if (!buyerPhone) throw new Error("BUYER_PHONE_REQUIRED");
+    if (!mongoose.Types.ObjectId.isValid(sellerId)) throw new Error("sellerId invalide");
+    if (!mongoose.Types.ObjectId.isValid(clientId)) throw new Error("clientId invalide");
 
     const phone = normalizePhone(buyerPhone);
 
-    // 🔹 Vérification vendeur
-    console.log("Payload sellerId:", sellerId);
+    // 🔹 récupérer vendeur
     const seller = await Seller.findById(sellerId).lean();
-    console.log("Seller found:", seller);
     if (!seller) throw new Error("Vendeur introuvable");
 
-    // 🔹 Vérification produits
+    // 🔹 récupérer produits
     const productIds = items.map(i => i.productId);
     const products = await Product.find({ _id: { $in: productIds } }).lean();
-    console.log("Products found:", products.map(p => p._id.toString()));
     if (products.length !== items.length) throw new Error("Certains produits sont introuvables");
 
     for (const p of products) {
-      if (p.seller.toString() !== sellerId.toString()) throw new Error(`Produit ${p._id} n'appartient pas au vendeur`);
+      if (p.seller.toString() !== sellerId.toString())
+        throw new Error(`Produit ${p._id} n'appartient pas au vendeur`);
     }
 
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
@@ -141,13 +146,12 @@ module.exports = {
     });
 
     const totalAmount = Math.round(productTotal + shippingFee);
-
     const { totalFees, netToSeller, breakdown } = calculateFees(productTotal, shippingFee);
     const netAmount = Math.round(netToSeller);
 
     const transaction_id = generateTransactionRef("PAYIN");
 
-    // 🔹 Création order
+    // 🔹 créer order
     const order = await Order.create({
       client: clientId,
       seller: seller._id,
@@ -158,7 +162,7 @@ module.exports = {
       status: "PAYMENT_PENDING",
     });
 
-    // 🔹 Création transaction payin
+    // 🔹 créer transaction payin
     const tx = await PayinTransaction.create({
       transaction_id,
       order: order._id,
@@ -173,30 +177,24 @@ module.exports = {
       currency,
       status: "PENDING",
       sellerCredited: false,
-      customer: {
-        email: "",
-        phone_number: phone,
-        address: "",
-      },
+      customer: { email: "", phone_number: phone, address: "" },
     });
 
     order.payinTransaction = tx._id;
     await order.save();
 
-    // 🔹 Appel API QOSPAY
+    // 🔹 appel QOSPAY
     const op = resolveOperator(operator, phone);
     const payload = { msisdn: phone, amount: String(totalAmount), transref: transaction_id, clientid: QOSPAY[op].CLIENT_ID };
 
-    let response;
     try {
-      response = await axios.post(QOSPAY[op].REQUEST, payload, getAxiosConfig(op));
+      const response = await axios.post(QOSPAY[op].REQUEST, payload, getAxiosConfig(op));
+      tx.raw_response = response.data;
+      await tx.save();
     } catch (err) {
       console.error("❌ QOSPAY Axios Error:", err.message);
       return { success: false, error: "Erreur lors du payin", transaction_id, orderId: order._id };
     }
-
-    tx.raw_response = response.data;
-    await tx.save();
 
     return { success: true, transaction_id, orderId: order._id };
   },
@@ -214,11 +212,7 @@ module.exports = {
 
     let response;
     try {
-      response = await axios.post(
-        QOSPAY[tx.operator].STATUS,
-        { transref: transactionId },
-        getAxiosConfig(tx.operator)
-      );
+      response = await axios.post(QOSPAY[tx.operator].STATUS, { transref: transactionId }, getAxiosConfig(tx.operator));
     } catch (err) {
       console.error("❌ QOSPAY verifyPayIn Axios Error:", err.message);
       return { success: false, message: "Impossible de vérifier le paiement", transaction_id, status: tx.status };
@@ -237,7 +231,11 @@ module.exports = {
       if (!order) throw new Error("Commande associée introuvable");
 
       if (!tx.sellerCredited) {
-        await Seller.updateOne({ _id: tx.seller }, { $inc: { balance_locked: Number(tx.netAmount || 0) } });
+        const result = await Seller.updateOne(
+          { _id: tx.seller },
+          { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+        );
+        if (result.matchedCount === 0) throw new Error("Vendeur introuvable");
         tx.sellerCredited = true;
       }
 
@@ -267,10 +265,13 @@ module.exports = {
     return { success: false, message: "Paiement en attente – vérifier à nouveau", transaction_id, status, retry: true };
   },
 
-  // ========================= PAYOUT =========================
+  // ========================= PAYOUT SAFE =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
-    const seller = await Seller.findById(sellerId);
-    if (!seller?.phone) throw new Error("SELLER_PHONE_REQUIRED");
+    if (!mongoose.Types.ObjectId.isValid(sellerId)) throw new Error("sellerId invalide");
+    if (typeof amount !== "number" || amount <= 0) throw new Error("amount invalide");
+
+    const seller = await Seller.findById(sellerId).lean();
+    if (!seller || !seller.phone) throw new Error("SELLER_PHONE_REQUIRED");
 
     const phone = normalizePhone(seller.phone);
     const op = resolveOperator(operator, phone);
@@ -278,36 +279,38 @@ module.exports = {
 
     const transref = generateTransactionRef("WD");
     const payoutFees = roundCFA(amount * FEES.payoutQosPay);
+    const sentAmount = roundCFA(amount - payoutFees);
 
     const payload = { msisdn: phone, amount: String(amount), transref, clientid: QOSPAY[op].CLIENT_ID };
 
     let response;
+    let status = "PENDING";
+
     try {
       response = await axios.post(QOSPAY[op].DEPOSIT, payload, getAxiosConfig(op));
+      const code = response?.data?.responsecode;
+      if (code === "00") status = "SUCCESS";
+      else if (code && !["00","01"].includes(code)) status = "FAILED";
     } catch (err) {
       console.error("❌ QOSPAY createPayOut Axios Error:", err.message);
-      return { success: false, status: "FAILED", transaction_id: transref };
+      status = "FAILED";
     }
-
-    let status = "PENDING";
-    const code = response?.data?.responsecode;
-    if (code === "00") status = "SUCCESS";
-    else if (code && !["00","01"].includes(code)) status = "FAILED";
 
     await PayoutTransaction.create({
       seller: seller._id,
       provider: "QOSPAY",
       operator: op,
       amount: Number(amount),
-      sent_amount: Number(amount) - payoutFees,
+      sent_amount: sentAmount,
       fees: payoutFees,
       currency: "XOF",
       transaction_id: transref,
       phone,
       status,
-      raw_response: response.data,
+      raw_response: response?.data || null,
     });
 
     return { success: status === "SUCCESS", transaction_id: transref, status, provider: "QOSPAY" };
   },
+
 };
