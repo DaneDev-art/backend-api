@@ -8,7 +8,13 @@ const { verifyToken } = require("../middleware/auth.middleware");
 // 💰 WALLET ROUTES
 // ============================
 
+// 🔹 Solde wallet
 router.get("/balance", verifyToken, WalletController.getBalance);
+
+// 🔹 Historique transactions
 router.get("/transactions", verifyToken, WalletController.getTransactions);
+
+// 🔹 Payout vendeur (withdraw)
+router.post("/payout", verifyToken, WalletController.payout);
 
 module.exports = router;
