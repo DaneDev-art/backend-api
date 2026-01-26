@@ -77,79 +77,111 @@ function getAxiosConfig(op) {
 
 module.exports = {
   /* ======================================================
-     🟢 PAYIN (ESCROW)
-  ====================================================== */
-  createPayIn: async ({ orderId, amount, buyerPhone, operator }) => {
-    if (!orderId) throw new Error("ORDER_ID_REQUIRED");
-    if (!buyerPhone) throw new Error("BUYER_PHONE_REQUIRED");
+   🟢 PAYIN (ESCROW) SAFE
+====================================================== */
+createPayIn: async ({ orderId, amount, buyerPhone, operator }) => {
+  if (!orderId) throw new Error("ORDER_ID_REQUIRED");
+  if (!buyerPhone) throw new Error("BUYER_PHONE_REQUIRED");
 
-    const phone = normalizePhone(buyerPhone);
+  const phone = normalizePhone(buyerPhone);
 
-    const order = await Order.findById(orderId).populate("seller client");
-    if (!order) throw new Error("ORDER_NOT_FOUND");
+  const order = await Order.findById(orderId).populate("seller client");
+  if (!order) throw new Error("ORDER_NOT_FOUND");
 
-    // 🔒 IDEMPOTENCE
-    const existing = await PayinTransaction.findOne({
-      order: orderId,
-      status: { $in: ["PENDING", "SUCCESS"] },
-    });
+  // 🔒 IDEMPOTENCE
+  const existing = await PayinTransaction.findOne({
+    order: orderId,
+    status: { $in: ["PENDING", "SUCCESS"] },
+  });
 
-    if (existing) {
-      return {
-        success: true,
-        transaction_id: existing.transaction_id,
-        payinTransactionId: existing._id,
-        provider: "QOSPAY",
-      };
-    }
-
-    const op = resolveOperator(operator, phone);
-    const transref = generateTransactionRef("PAY");
-
-    const payload = {
-      msisdn: phone,
-      amount: String(amount),
-      transref,
+  if (existing) {
+    return {
+      success: true,
+      transaction_id: existing.transaction_id,
+      payinTransactionId: existing._id,
+      provider: "QOSPAY",
     };
+  }
 
-    const response = await axios.post(
+  // 🔹 Résolution opérateur safe
+  let op;
+  try {
+    op = resolveOperator(operator, phone);
+  } catch (err) {
+    return {
+      success: false,
+      error: "Numéro non supporté ou opérateur invalide",
+      operatorDetected: null,
+      transaction_id: null,
+    };
+  }
+
+  // 🔹 Vérification config QOSPAY
+  if (!QOSPAY[op] || !QOSPAY[op].USERNAME || !QOSPAY[op].PASSWORD) {
+    return {
+      success: false,
+      error: `Configuration QOSPAY manquante pour l'opérateur ${op}`,
+      operatorDetected: op,
+      transaction_id: null,
+    };
+  }
+
+  const transref = generateTransactionRef("PAY");
+
+  const payload = {
+    msisdn: phone,
+    amount: String(amount),
+    transref,
+  };
+
+  let response;
+  try {
+    response = await axios.post(
       QOSPAY[op].REQUEST,
       payload,
       getAxiosConfig(op)
     );
-
-    const code = response?.data?.responsecode;
-
-    let status = "PENDING";
-    if (code === "00") status = "SUCCESS";
-    if (code && !["00", "01"].includes(code)) status = "FAILED";
-
-    const payin = await PayinTransaction.create({
-      order: order._id,
-      seller: order.seller._id,
-      client: order.client._id,
-      provider: "QOSPAY",
-      operator: op,
-      amount: Number(amount),
-      netAmount: Number(order.netAmount),
-      currency: order.currency || "XOF",
-      transaction_id: transref,
-      status,
-      raw_response: response.data,
-    });
-
-    order.payinTransaction = payin._id;
-    order.status = status === "FAILED" ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
-
-    await order.save();
-
+  } catch (err) {
+    console.error("❌ QOSPAY Axios Error:", err.message);
     return {
-      success: status !== "FAILED",
+      success: false,
+      error: "Erreur lors de l'appel QOSPAY",
+      operatorDetected: op,
       transaction_id: transref,
-      payinTransactionId: payin._id,
-      provider: "QOSPAY",
     };
-  },
+  }
+
+  const code = response?.data?.responsecode;
+  let status = "PENDING";
+  if (code === "00") status = "SUCCESS";
+  if (code && !["00", "01"].includes(code)) status = "FAILED";
+
+  const payin = await PayinTransaction.create({
+    order: order._id,
+    seller: order.seller._id,
+    client: order.client._id,
+    provider: "QOSPAY",
+    operator: op,
+    amount: Number(amount),
+    netAmount: Number(order.netAmount),
+    currency: order.currency || "XOF",
+    transaction_id: transref,
+    status,
+    raw_response: response.data,
+  });
+
+  order.payinTransaction = payin._id;
+  order.status = status === "FAILED" ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
+  await order.save();
+
+  return {
+    success: status !== "FAILED",
+    transaction_id: transref,
+    payinTransactionId: payin._id,
+    operatorDetected: op,
+    provider: "QOSPAY",
+  };
+}
 
   /* ======================================================
      🔁 VERIFY PAYIN
