@@ -33,6 +33,8 @@ function generateTransactionRef(prefix = "QOS") {
 
 /* ======================================================
    🔹 RESOLVE OPERATOR (TM / TG / CARD)
+   - Togocel : 70, 71, 72, 73, 90, 91, 92, 93 → TM
+   - Moov   : 78, 79, 96, 97, 98, 99       → TG
 ====================================================== */
 function resolveOperator(operator, phone) {
   if (operator && ["TM", "TG", "CARD"].includes(operator.toUpperCase())) {
@@ -40,8 +42,13 @@ function resolveOperator(operator, phone) {
   }
 
   const p = normalizePhone(phone);
-  if (p.startsWith("22890")) return "TM";
-  if (p.startsWith("22891")) return "TG";
+  const prefix = p.slice(3, 5); // extrait les deux chiffres après 228
+
+  const togocelPrefixes = ["70", "71", "72", "73", "90", "91", "92", "93"];
+  const moovPrefixes = ["78", "79", "96", "97", "98", "99"];
+
+  if (togocelPrefixes.includes(prefix)) return "TM"; // Togocel → TM
+  if (moovPrefixes.includes(prefix)) return "TG";     // Moov   → TG
 
   throw new Error("UNSUPPORTED_OPERATOR");
 }
