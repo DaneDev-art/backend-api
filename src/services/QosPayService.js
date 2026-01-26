@@ -181,7 +181,7 @@ createPayIn: async ({ orderId, amount, buyerPhone, operator }) => {
     operatorDetected: op,
     provider: "QOSPAY",
   };
-}
+},
 
   /* ======================================================
      🔁 VERIFY PAYIN
