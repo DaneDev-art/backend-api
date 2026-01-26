@@ -199,71 +199,140 @@ module.exports = {
     return { success: true, transaction_id, orderId: order._id };
   },
 
-  // ========================= VERIFY PAYIN =========================
-  verifyPayIn: async (transactionId) => {
-    if (!transactionId) throw new Error("transaction_id est requis");
+  // ========================= VERIFY PAYIN — QOSPAY =========================
+verifyPayIn: async (transactionId) => {
+  if (!transactionId) throw new Error("transaction_id est requis");
 
-    const tx = await PayinTransaction.findOne({ transaction_id: transactionId });
-    if (!tx) return { success: false, message: "Transaction introuvable", transaction_id };
+  const tx = await PayinTransaction.findOne({ transaction_id: transactionId });
+  if (!tx) {
+    return { success: false, message: "Transaction introuvable", transaction_id: transactionId };
+  }
 
-    if (tx.status === "SUCCESS" && tx.sellerCredited) {
-      return { success: true, message: "Transaction déjà traitée", transaction_id, status: tx.status };
+  // =========================
+  // IDEMPOTENCE HARD
+  // =========================
+  if (tx.status === "SUCCESS" && tx.sellerCredited === true) {
+    return {
+      success: true,
+      message: "Transaction déjà traitée",
+      transaction_id: transactionId,
+      status: tx.status,
+    };
+  }
+
+  // =========================
+  // CALL QOSPAY STATUS
+  // =========================
+  let response;
+  try {
+    response = await axios.post(
+      QOSPAY[tx.operator].STATUS,
+      { transref: transactionId },
+      getAxiosConfig(tx.operator)
+    );
+  } catch (err) {
+    console.error("❌ QOSPAY verifyPayIn Axios Error:", err.message);
+    return {
+      success: false,
+      message: "Impossible de vérifier le paiement",
+      transaction_id: transactionId,
+      status: tx.status,
+    };
+  }
+
+  const raw = response?.data || {};
+  const code = String(raw.responsecode || raw.code || "").toUpperCase();
+  const remoteStatus = String(raw.status || "").toUpperCase();
+
+  let status = "PENDING";
+  if (["00", "SUCCESS", "PAID"].includes(code) || ["SUCCESS", "PAID"].includes(remoteStatus)) {
+    status = "SUCCESS";
+  } else if (code && !["01"].includes(code)) {
+    status = "FAILED";
+  }
+
+  tx.qospay_status = status;
+  tx.raw_response = raw;
+
+  // =========================
+  // SUCCESS PAYIN
+  // =========================
+  if (status === "SUCCESS") {
+    // 🔎 ORDER (BON LIEN)
+    const order = await Order.findOne({ payinTransaction: tx._id });
+    if (!order) {
+      throw new Error("Commande associée introuvable");
     }
 
-    let response;
-    try {
-      response = await axios.post(QOSPAY[tx.operator].STATUS, { transref: transactionId }, getAxiosConfig(tx.operator));
-    } catch (err) {
-      console.error("❌ QOSPAY verifyPayIn Axios Error:", err.message);
-      return { success: false, message: "Impossible de vérifier le paiement", transaction_id, status: tx.status };
-    }
+    // ======================
+    // CREDIT SELLER (ESCROW)
+    // ======================
+    if (!tx.sellerCredited) {
+      const result = await Seller.updateOne(
+        { _id: tx.seller },
+        { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+      );
 
-    const code = response?.data?.responsecode;
-    let status = "PENDING";
-    if (code === "00") status = "SUCCESS";
-    else if (code && !["00","01"].includes(code)) status = "FAILED";
-
-    tx.qospay_status = status;
-    tx.raw_response = response.data;
-
-    if (status === "SUCCESS") {
-      const order = await Order.findById(tx.order);
-      if (!order) throw new Error("Commande associée introuvable");
-
-      if (!tx.sellerCredited) {
-        const result = await Seller.updateOne(
-          { _id: tx.seller },
-          { $inc: { balance_locked: Number(tx.netAmount || 0) } }
-        );
-        if (result.matchedCount === 0) throw new Error("Vendeur introuvable");
-        tx.sellerCredited = true;
+      if (result.matchedCount === 0) {
+        throw new Error("Vendeur introuvable");
       }
 
-      if (order.status !== "PAID") {
-        order.status = "PAID";
-        order.paidAt = new Date();
-        await order.save();
-      }
-
-      tx.status = "SUCCESS";
-      tx.verifiedAt = new Date();
-      await tx.save();
-
-      return { success: true, message: "Paiement confirmé – fonds bloqués en escrow", transaction_id, orderId: order._id, status: "SUCCESS" };
+      tx.sellerCredited = true;
     }
 
-    if (["FAILED","CANCELLED","CANCELED","REFUSED"].includes(status)) {
-      tx.status = "FAILED";
-      tx.verifiedAt = new Date();
-      await tx.save();
-      return { success: false, message: `Paiement ${status.toLowerCase()}`, transaction_id, status };
+    // ======================
+    // FINAL STATES
+    // ======================
+    tx.status = "SUCCESS";
+    tx.verifiedAt = new Date();
+
+    if (order.status !== "PAID") {
+      order.status = "PAID";
+      order.paidAt = new Date();
+      await order.save();
     }
 
-    // PENDING retry
-    tx.lastCheckedAt = new Date();
     await tx.save();
-    return { success: false, message: "Paiement en attente – vérifier à nouveau", transaction_id, status, retry: true };
-  },
+
+    return {
+      success: true,
+      message: "Paiement confirmé – fonds bloqués en escrow",
+      transaction_id: transactionId,
+      orderId: order._id,
+      status: "SUCCESS",
+    };
+  }
+
+  // =========================
+  // FAILURE
+  // =========================
+  if (status === "FAILED") {
+    tx.status = "FAILED";
+    tx.verifiedAt = new Date();
+    await tx.save();
+
+    return {
+      success: false,
+      message: "Paiement échoué",
+      transaction_id: transactionId,
+      status,
+    };
+  }
+
+  // =========================
+  // PENDING
+  // =========================
+  tx.lastCheckedAt = new Date();
+  await tx.save();
+
+  return {
+    success: false,
+    message: "Paiement en attente – vérifier à nouveau",
+    transaction_id: transactionId,
+    status,
+    retry: true,
+  };
+},
 
   // ========================= PAYOUT SAFE =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
