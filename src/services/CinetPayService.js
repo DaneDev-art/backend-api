@@ -62,28 +62,30 @@ const CINETPAY_PAYIN_URL =
 
 // =================== FRAIS ===================
 const FEES = {
-  payinCinetPay: 0.035,   // 3,5% sur le prix du produit
-  payoutCinetPay: 0.015,  // 1,5% sur le prix du produit
-  appFlutter: 0.02,       // 2% sur le prix du produit
+  payinCinetPay: 0.03,           // 3% sur le prix du produit
+  payoutCinetPay: 0.015,          // 1% sur le prix du produit
+  appFlutter: 0.05,               // 5% sur le prix du produit
+  commissionsParrainage: 0.015,   // 1,5% sur le prix du produit
 };
 
-/**
- * Calcul des frais uniquement sur le prix du produit
- * @param {number} productPrice - prix du produit
- * @param {number} shippingFee - frais d’envoi éventuels par le vendeur
- * @returns {object} { totalFees, netToSeller }
- */
+// 🔹 utilitaire arrondi
+function roundCFA(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+// 🔹 calcul frais
 function calculateFees(productPrice, shippingFee = 0) {
   const payinFee = roundCFA(productPrice * FEES.payinCinetPay);
   const payoutFee = roundCFA(productPrice * FEES.payoutCinetPay);
   const flutterFee = roundCFA(productPrice * FEES.appFlutter);
+  const commissionFee = roundCFA(productPrice * FEES.commissionsParrainage);
 
-  const totalFees = roundCFA(payinFee + payoutFee + flutterFee);
+  const totalFees = roundCFA(payinFee + payoutFee + flutterFee + commissionFee);
 
   // montant net que le vendeur reçoit = prix produit - total frais + frais expédition
   const netToSeller = roundCFA(productPrice - totalFees + (shippingFee || 0));
 
-  return { totalFees, netToSeller, breakdown: { payinFee, payoutFee, flutterFee } };
+  return { totalFees, netToSeller, breakdown: { payinFee, payoutFee, flutterFee, commissionFee } };
 }
 
 // 🔹 utilitaire arrondi
