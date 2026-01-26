@@ -1,7 +1,7 @@
 // =============================================
 // services/QosPayService.js
 // QOSPAY REAL (TM / TG / CARD)
-// BASIC AUTH — PROD READY (FINAL CLEAN)
+// BASIC AUTH — PROD READY (FINAL CLEAN + FIX STATUS PAID)
 // =============================================
 
 const axios = require("axios");
@@ -63,13 +63,8 @@ function getAxiosConfig(op) {
 
   return {
     timeout: 20000,
-    auth: {
-      username: cfg.USERNAME,
-      password: cfg.PASSWORD,
-    },
-    headers: {
-      "Content-Type": "application/json",
-    },
+    auth: { username: cfg.USERNAME, password: cfg.PASSWORD },
+    headers: { "Content-Type": "application/json" },
   };
 }
 
@@ -91,61 +86,38 @@ module.exports = {
       order: orderId,
       status: { $in: ["PENDING", "SUCCESS"] },
     });
-
-    if (existing) {
+    if (existing)
       return {
         success: true,
         transaction_id: existing.transaction_id,
         payinTransactionId: existing._id,
         provider: "QOSPAY",
       };
-    }
 
     // 🔹 Resolve operator
     let op;
     try {
       op = resolveOperator(operator, phone);
     } catch {
-      return {
-        success: false,
-        error: "Numéro non supporté ou opérateur invalide",
-        operatorDetected: null,
-      };
+      return { success: false, error: "Numéro non supporté ou opérateur invalide", operatorDetected: null };
     }
 
     // 🔹 Config check
     if (!QOSPAY[op]?.USERNAME || !QOSPAY[op]?.PASSWORD || !QOSPAY[op]?.CLIENT_ID) {
-      return {
-        success: false,
-        error: `Configuration QOSPAY incomplète pour ${op}`,
-        operatorDetected: op,
-      };
+      return { success: false, error: `Configuration QOSPAY incomplète pour ${op}`, operatorDetected: op };
     }
 
     const transref = generateTransactionRef("PAY");
 
-    // ⭐ PAYLOAD QOSIC COMPLET (clé du push USSD)
-    const payload = {
-      msisdn: phone,
-      amount: String(amount),
-      transref,
-      clientid: QOSPAY[op].CLIENT_ID,
-    };
+    const payload = { msisdn: phone, amount: String(amount), transref, clientid: QOSPAY[op].CLIENT_ID };
 
     let response;
     try {
       response = await axios.post(QOSPAY[op].REQUEST, payload, getAxiosConfig(op));
     } catch (err) {
       console.error("❌ QOSPAY Axios Error:", err.message);
-      return {
-        success: false,
-        error: "Erreur lors de l'appel QOSPAY",
-        operatorDetected: op,
-        transaction_id: transref,
-      };
+      return { success: false, error: "Erreur lors de l'appel QOSPAY", operatorDetected: op, transaction_id: transref };
     }
-
-    console.log("✅ QOSPAY PAYIN SENT", { operator: op, phone, clientid: QOSPAY[op].CLIENT_ID, response: response.data });
 
     const code = response?.data?.responsecode;
     let status = "PENDING";
@@ -170,30 +142,18 @@ module.exports = {
     order.status = status === "FAILED" ? "PAYMENT_FAILED" : "PAYMENT_PENDING";
     await order.save();
 
-    return {
-      success: status !== "FAILED",
-      transaction_id: transref,
-      payinTransactionId: payin._id,
-      operatorDetected: op,
-      provider: "QOSPAY",
-    };
+    return { success: status !== "FAILED", transaction_id: transref, payinTransactionId: payin._id, operatorDetected: op, provider: "QOSPAY" };
   },
 
   /* ======================================================
-     🔁 VERIFY PAYIN
+     🔁 VERIFY PAYIN (FIX STATUS PAID)
   ====================================================== */
   verifyPayIn: async (transactionId) => {
     const tx = await PayinTransaction.findOne({ transaction_id: transactionId });
     if (!tx) throw new Error("TRANSACTION_NOT_FOUND");
 
-    // 🔁 Idempotence : déjà SUCCESS → on renvoie
     if (tx.status === "SUCCESS") {
-      return {
-        transaction_id,
-        status: "SUCCESS",
-        success: true,
-        provider: "QOSPAY",
-      };
+      return { transaction_id: transactionId, status: "SUCCESS", success: true, provider: "QOSPAY" };
     }
 
     const op = tx.operator;
@@ -202,12 +162,7 @@ module.exports = {
       response = await axios.post(QOSPAY[op].STATUS, { transref: transactionId }, getAxiosConfig(op));
     } catch (err) {
       console.error("❌ QOSPAY verifyPayIn Axios Error:", err.message);
-      return {
-        success: false,
-        message: "Impossible de vérifier le paiement",
-        transaction_id,
-        status: tx.status,
-      };
+      return { success: false, message: "Impossible de vérifier le paiement", transaction_id, status: tx.status };
     }
 
     const code = response?.data?.responsecode;
@@ -220,34 +175,30 @@ module.exports = {
     tx.verifiedAt = new Date();
     await tx.save();
 
-    // ======================================================
-    // ✅ Si paiement confirmé → MAJ COMMANDE + ESCROW
-    // ======================================================
+    // 🔹 LOGIQUE DE CINETPAY POUR ESCROW
     if (status === "SUCCESS") {
-      const order = await Order.findById(tx.order);
-
+      const order = await Order.findOne({ payinTransaction: tx._id });
       if (order && order.status !== "PAID") {
         order.status = "PAID";
         order.paidAt = new Date();
         await order.save();
 
-        const seller = await Seller.findById(order.seller);
-        if (seller) {
-          const netAmount = Number(order.netAmount || tx.netAmount);
-          if (netAmount > 0) {
-            seller.balance_locked = (seller.balance_locked || 0) + netAmount;
-            await seller.save();
+        if (!tx.sellerCredited) {
+          const seller = await Seller.findById(order.seller);
+          if (seller) {
+            const netAmount = Number(order.netAmount || tx.netAmount);
+            if (netAmount > 0) {
+              seller.balance_locked = (seller.balance_locked || 0) + netAmount;
+              await seller.save();
+            }
           }
+          tx.sellerCredited = true;
         }
       }
+      await tx.save();
     }
 
-    return {
-      transaction_id,
-      status,
-      success: status === "SUCCESS",
-      provider: "QOSPAY",
-    };
+    return { transaction_id: transactionId, status, success: status === "SUCCESS", provider: "QOSPAY" };
   },
 
   /* ======================================================
@@ -264,12 +215,7 @@ module.exports = {
 
     const transref = generateTransactionRef("WD");
 
-    const payload = {
-      msisdn: phone,
-      amount: String(amount),
-      transref,
-      clientid: QOSPAY[op].CLIENT_ID,
-    };
+    const payload = { msisdn: phone, amount: String(amount), transref, clientid: QOSPAY[op].CLIENT_ID };
 
     let response;
     try {
@@ -298,11 +244,6 @@ module.exports = {
       raw_response: response.data,
     });
 
-    return {
-      success: status === "SUCCESS",
-      transaction_id: transref,
-      status,
-      provider: "QOSPAY",
-    };
+    return { success: status === "SUCCESS", transaction_id: transref, status, provider: "QOSPAY" };
   },
 };
