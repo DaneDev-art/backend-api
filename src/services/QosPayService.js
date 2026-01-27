@@ -219,7 +219,7 @@ verifyPayIn: async (transactionId) => {
     throw new Error("transaction_id requis");
   }
 
-  const MAX_RETRIES = 10;          // ≈ 2–3 minutes max
+  const MAX_RETRIES = 10;          // ≈ 2–3 minutes
   const RETRY_INTERVAL_MS = 15000; // info frontend
 
   const tx = await PayinTransaction.findOne({
@@ -245,7 +245,7 @@ verifyPayIn: async (transactionId) => {
   // ⏱️ INIT RETRY
   tx.retryCount = tx.retryCount || 0;
 
-  // ⛔ TIMEOUT FINAL
+  // ⛔ TIMEOUT FINAL (SEULE CAUSE DE FAILED AUTO)
   if (tx.retryCount >= MAX_RETRIES) {
     tx.status = "FAILED";
     tx.failureReason = "PAYMENT_TIMEOUT";
@@ -261,13 +261,33 @@ verifyPayIn: async (transactionId) => {
   }
 
   // =========================
-  // CALL QOSPAY STATUS
+  // CALL QOSPAY STATUS (🔥 clientid OBLIGATOIRE)
   // =========================
-  const response = await axios.post(
-    QOSPAY[tx.operator].STATUS,
-    { transref: transactionId },
-    getAxiosConfig(tx.operator)
-  );
+  let response;
+  try {
+    response = await axios.post(
+      QOSPAY[tx.operator].STATUS,
+      {
+        transref: transactionId,
+        clientid: QOSPAY[tx.operator].CLIENT_ID, // 🔥 FIX CRITIQUE
+      },
+      getAxiosConfig(tx.operator)
+    );
+  } catch (err) {
+    // ❗ ERREUR API = PENDING
+    tx.retryCount += 1;
+    tx.lastCheckedAt = new Date();
+    await tx.save();
+
+    return {
+      success: false,
+      transaction_id: transactionId,
+      status: "PENDING",
+      retry: true,
+      retryIn: RETRY_INTERVAL_MS,
+      reason: "QOSPAY_UNREACHABLE",
+    };
+  }
 
   const raw = response?.data || {};
   const code = String(raw.responsecode || "").trim();
@@ -279,22 +299,23 @@ verifyPayIn: async (transactionId) => {
 
   let status = "PENDING";
 
+  // =========================
+  // STATUS NORMALIZATION
+  // =========================
   if (
     code === "00" ||
     remoteStatus === "SUCCESS" ||
     remoteStatus === "PAID"
   ) {
     status = "SUCCESS";
-  } else if (code && code !== "01") {
-    status = "FAILED";
+  } else if (code === "01" || code === "-2" || !code) {
+    status = "PENDING"; // 🔥 JAMAIS FAILED
   }
 
-  // =====================================================
-  // 🔥 FALLBACK QOSPAY — USSD CONFIRMÉ MAIS STATUS EN RETARD
-  // (CAS RÉEL QOSPAY TG / TM)
-  // =====================================================
-  if (status === "PENDING" && code === "01") {
-    // 👉 ON NE MARQUE PAS FAILED
+  // =========================
+  // 🟡 PENDING
+  // =========================
+  if (status === "PENDING") {
     tx.status = "PENDING";
     await tx.save();
 
@@ -308,7 +329,7 @@ verifyPayIn: async (transactionId) => {
   }
 
   // =========================
-  // ✅ SUCCESS (FINAL)
+  // ✅ SUCCESS FINAL
   // =========================
   if (status === "SUCCESS") {
     const order = await Order.findById(tx.order);
@@ -355,37 +376,6 @@ verifyPayIn: async (transactionId) => {
       status: "SUCCESS",
     };
   }
-
-  // =========================
-  // ❌ FAILED
-  // =========================
-  if (status === "FAILED") {
-    tx.status = "FAILED";
-    tx.failureReason = `QOSPAY_CODE_${code}`;
-    tx.verifiedAt = new Date();
-    await tx.save();
-
-    return {
-      success: false,
-      transaction_id: transactionId,
-      status: "FAILED",
-      code,
-    };
-  }
-
-  // =========================
-  // 🟡 STILL PENDING
-  // =========================
-  tx.status = "PENDING";
-  await tx.save();
-
-  return {
-    success: false,
-    transaction_id: transactionId,
-    status: "PENDING",
-    retry: true,
-    retryIn: RETRY_INTERVAL_MS,
-  };
 },
 
   // ========================= PAYOUT =========================
