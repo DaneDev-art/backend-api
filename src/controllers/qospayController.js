@@ -1,7 +1,7 @@
 // =============================================
 // controllers/qospayController.js
-// QOSPAY (TM / TG / CARD)
-// PROD READY — ESCROW SAFE + COMMISSION SAFE
+// QOSPAY (TM / TG)
+// PROD READY — CONTROLLER CLEAN & SAFE
 // =============================================
 
 const mongoose = require("mongoose");
@@ -10,9 +10,6 @@ const QosPayService = require("../services/QosPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
-
-// 🔍 Debug export service
-console.log("QosPayService exports:", Object.keys(QosPayService));
 
 module.exports = {
 
@@ -68,7 +65,9 @@ module.exports = {
       // =========================
       // 🔎 LOAD PRODUCTS (SAFE)
       // =========================
-      const productIds = items.map(i => new mongoose.Types.ObjectId(i.productId));
+      const productIds = items.map(i =>
+        new mongoose.Types.ObjectId(i.productId)
+      );
       const products = await Product.find({ _id: { $in: productIds } });
 
       if (products.length !== items.length) {
@@ -92,14 +91,16 @@ module.exports = {
       // =========================
       // 🚀 CALL QOSPAY SERVICE
       // =========================
+      const normalizedOperator =
+        operator && operator !== "AUTO" ? operator : null;
+
       if (!QosPayService.createPayIn) {
         throw new Error("QosPayService.createPayIn est undefined");
       }
 
       const payinResult = await QosPayService.createPayIn({
-        orderId: new mongoose.Types.ObjectId(), // ID logique (order réel créé dans le service)
         buyerPhone: client.phone,
-        operator: operator === "AUTO" ? null : operator,
+        operator: normalizedOperator,
         items,
         shippingFee,
         clientId,
@@ -152,7 +153,7 @@ module.exports = {
 
       const result = await QosPayService.verifyPayIn(transactionId);
 
-      // ⚠️ IMPORTANT : on respecte le success retourné par le service
+      // ⚠️ ON NE FORCE JAMAIS LE STATUS ICI
       return res.status(200).json(result);
 
     } catch (err) {
@@ -186,6 +187,9 @@ module.exports = {
         });
       }
 
+      const normalizedOperator =
+        operator && operator !== "AUTO" ? operator : null;
+
       if (!QosPayService.createPayOutForSeller) {
         throw new Error("QosPayService.createPayOutForSeller est undefined");
       }
@@ -193,7 +197,7 @@ module.exports = {
       const result = await QosPayService.createPayOutForSeller({
         sellerId,
         amount,
-        operator: operator === "AUTO" ? null : operator,
+        operator: normalizedOperator,
       });
 
       return res.status(201).json(result);
@@ -208,18 +212,32 @@ module.exports = {
   },
 
   /* ======================================================
-     🔔 WEBHOOK (OPTIONNEL)
-  ====================================================== */
-  handleWebhook: async (req, res) => {
-    try {
-      console.log("🔔 QOSPAY Webhook reçu:", req.body);
-      return res.status(200).send("OK");
-    } catch (err) {
-      console.error("❌ QOSPAY webhook:", err.message);
-      return res.status(500).send("ERROR");
-    }
-  },
-};
+   🔔 WEBHOOK QOSPAY
+   - Pas de JWT
+   - Appelle verifyPayIn (SOURCE UNIQUE)
+====================================================== */
+handleWebhook: async (req, res) => {
+  try {
+    console.log("🔔 QOSPAY WEBHOOK REÇU:", req.body);
 
-// 🔍 Debug final export
-console.log("QosPayController exports:", Object.keys(module.exports));
+    const transactionId =
+      req.body?.transref ||
+      req.body?.transaction_id ||
+      req.body?.reference;
+
+    if (!transactionId) {
+      console.warn("⚠️ Webhook sans transaction_id");
+      return res.status(200).send("IGNORED");
+    }
+
+    // 🔥 APPEL LOGIQUE CENTRALE
+    await QosPayService.verifyPayIn(transactionId);
+
+    return res.status(200).send("OK");
+  } catch (err) {
+    console.error("❌ QOSPAY webhook error:", err.message);
+    // ⚠️ ON RÉPOND 200 POUR ÉVITER RETRY INFINI QOSPAY
+    return res.status(200).send("ERROR_HANDLED");
+  }
+ },
+};

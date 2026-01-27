@@ -213,103 +213,89 @@ module.exports = {
     };
   },
 
-  // ========================= VERIFY PAYIN =========================
-  verifyPayIn: async (transactionId) => {
-    if (!transactionId) {
-      throw new Error("transaction_id requis");
-    }
+  // ========================= VERIFY PAYIN (SMART + SAFE) =========================
+verifyPayIn: async (transactionId) => {
+  if (!transactionId) {
+    throw new Error("transaction_id requis");
+  }
 
-    const tx = await PayinTransaction.findOne({
+  const MAX_RETRIES = 10;          // ≈ 2–3 minutes max
+  const RETRY_INTERVAL_MS = 15000; // info frontend
+
+  const tx = await PayinTransaction.findOne({
+    transaction_id: transactionId,
+  });
+  if (!tx) throw new Error("Transaction introuvable");
+
+  // 🔥 GUARD ABSOLU
+  if (!tx.operator || !QOSPAY[tx.operator]) {
+    throw new Error(`OPERATEUR_QOSPAY_INVALIDE: ${tx.operator}`);
+  }
+
+  // 🔒 IDEMPOTENCE HARD
+  if (tx.status === "SUCCESS" && tx.sellerCredited) {
+    return {
+      success: true,
       transaction_id: transactionId,
-    });
-    if (!tx) throw new Error("Transaction introuvable");
+      status: "SUCCESS",
+      alreadyProcessed: true,
+    };
+  }
 
-    // 🔥 GUARD ABSOLU
-    if (!tx.operator || !QOSPAY[tx.operator]) {
-      throw new Error(`OPERATEUR_QOSPAY_INVALIDE: ${tx.operator}`);
-    }
+  // ⏱️ INIT RETRY
+  tx.retryCount = tx.retryCount || 0;
 
-    if (tx.status === "SUCCESS" && tx.sellerCredited) {
-      return {
-        success: true,
-        transaction_id: transactionId,
-        status: "SUCCESS",
-      };
-    }
+  // ⛔ TIMEOUT FINAL
+  if (tx.retryCount >= MAX_RETRIES) {
+    tx.status = "FAILED";
+    tx.failureReason = "PAYMENT_TIMEOUT";
+    tx.verifiedAt = new Date();
+    await tx.save();
 
-    const response = await axios.post(
-      QOSPAY[tx.operator].STATUS,
-      { transref: transactionId },
-      getAxiosConfig(tx.operator)
-    );
+    return {
+      success: false,
+      transaction_id: transactionId,
+      status: "FAILED",
+      reason: "TIMEOUT",
+    };
+  }
 
-    const raw = response?.data || {};
-    const code = String(raw.responsecode || "").toUpperCase();
+  // =========================
+  // CALL QOSPAY STATUS
+  // =========================
+  const response = await axios.post(
+    QOSPAY[tx.operator].STATUS,
+    { transref: transactionId },
+    getAxiosConfig(tx.operator)
+  );
 
-    let status = "PENDING";
-    if (code === "00") status = "SUCCESS";
-    else if (code && code !== "01") status = "FAILED";
+  const raw = response?.data || {};
+  const code = String(raw.responsecode || "").trim();
+  const remoteStatus = String(raw.status || "").toUpperCase();
 
-    tx.raw_response = raw;
+  tx.raw_response = raw;
+  tx.lastCheckedAt = new Date();
+  tx.retryCount += 1;
 
-    if (status === "SUCCESS") {
-      const order = await Order.findById(tx.order);
-      if (!order) throw new Error("Commande introuvable");
+  let status = "PENDING";
 
-      if (!tx.sellerCredited) {
-        await Seller.updateOne(
-          { _id: tx.seller },
-          { $inc: { balance_locked: tx.netAmount } }
-        );
+  if (
+    code === "00" ||
+    remoteStatus === "SUCCESS" ||
+    remoteStatus === "PAID"
+  ) {
+    status = "SUCCESS";
+  } else if (code && code !== "01") {
+    status = "FAILED";
+  }
 
-        const exists = await PlatformRevenue.findOne({
-          payinTransactionId: tx._id,
-        });
-
-        if (!exists && tx.fees > 0) {
-          await PlatformRevenue.create({
-            payinTransactionId: tx._id,
-            currency: tx.currency,
-            amount: tx.fees,
-            breakdown: tx.fees_breakdown,
-          });
-        }
-
-        tx.sellerCredited = true;
-      }
-
-      tx.status = "SUCCESS";
-      tx.verifiedAt = new Date();
-
-      if (order.status !== "PAID") {
-        order.status = "PAID";
-        order.paidAt = new Date();
-        await order.save();
-      }
-
-      await tx.save();
-
-      return {
-        success: true,
-        transaction_id: transactionId,
-        orderId: order._id,
-        status: "SUCCESS",
-      };
-    }
-
-    if (status === "FAILED") {
-      tx.status = "FAILED";
-      tx.verifiedAt = new Date();
-      await tx.save();
-
-      return {
-        success: false,
-        transaction_id: transactionId,
-        status: "FAILED",
-      };
-    }
-
-    tx.lastCheckedAt = new Date();
+  // =====================================================
+  // 🔥 FALLBACK QOSPAY — USSD CONFIRMÉ MAIS STATUS EN RETARD
+  // (CAS RÉEL QOSPAY TG / TM)
+  // =====================================================
+  if (status === "PENDING" && code === "01") {
+    // 👉 ON NE MARQUE PAS FAILED
+    tx.status = "PENDING";
     await tx.save();
 
     return {
@@ -317,8 +303,90 @@ module.exports = {
       transaction_id: transactionId,
       status: "PENDING",
       retry: true,
+      retryIn: RETRY_INTERVAL_MS,
     };
-  },
+  }
+
+  // =========================
+  // ✅ SUCCESS (FINAL)
+  // =========================
+  if (status === "SUCCESS") {
+    const order = await Order.findById(tx.order);
+    if (!order) throw new Error("Commande introuvable");
+
+    // 🔐 CREDIT ESCROW (IDEMPOTENT)
+    if (!tx.sellerCredited) {
+      await Seller.updateOne(
+        { _id: tx.seller },
+        { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+      );
+
+      const exists = await PlatformRevenue.findOne({
+        payinTransactionId: tx._id,
+      });
+
+      if (!exists && Number(tx.fees || 0) > 0) {
+        await PlatformRevenue.create({
+          payinTransactionId: tx._id,
+          currency: tx.currency || "XOF",
+          amount: tx.fees,
+          breakdown: tx.fees_breakdown,
+        });
+      }
+
+      tx.sellerCredited = true;
+    }
+
+    tx.status = "SUCCESS";
+    tx.verifiedAt = new Date();
+
+    if (order.status !== "PAID") {
+      order.status = "PAID";
+      order.paidAt = new Date();
+      await order.save();
+    }
+
+    await tx.save();
+
+    return {
+      success: true,
+      transaction_id: transactionId,
+      orderId: order._id,
+      status: "SUCCESS",
+    };
+  }
+
+  // =========================
+  // ❌ FAILED
+  // =========================
+  if (status === "FAILED") {
+    tx.status = "FAILED";
+    tx.failureReason = `QOSPAY_CODE_${code}`;
+    tx.verifiedAt = new Date();
+    await tx.save();
+
+    return {
+      success: false,
+      transaction_id: transactionId,
+      status: "FAILED",
+      code,
+    };
+  }
+
+  // =========================
+  // 🟡 STILL PENDING
+  // =========================
+  tx.status = "PENDING";
+  await tx.save();
+
+  return {
+    success: false,
+    transaction_id: transactionId,
+    status: "PENDING",
+    retry: true,
+    retryIn: RETRY_INTERVAL_MS,
+  };
+},
 
   // ========================= PAYOUT =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {

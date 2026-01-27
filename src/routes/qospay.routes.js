@@ -1,7 +1,7 @@
 // =============================================
 // routes/qospay.routes.js
-// QOSPAY ROUTES — TM / TG / CARD
-// PRODUCTION READY
+// QOSPAY ROUTES — TM / TG
+// PRODUCTION READY — CORS SAFE
 // =============================================
 
 const express = require("express");
@@ -14,11 +14,15 @@ const { verifyToken } = require("../middleware/auth.middleware");
    🟢 PAYIN
 ====================================================== */
 
+// 🟢 Préflight CORS (Flutter / Web)
+router.options("/payin/create", (_, res) => res.sendStatus(204));
+router.options("/payin/verify", (_, res) => res.sendStatus(204));
+
 // ➜ Création PayIn (USSD / SIM Toolkit)
 router.post(
   "/payin/create",
   verifyToken,               // 🔐 utilisateur authentifié obligatoire
-  controller.createPayIn     // ✅ fonction valide
+  controller.createPayIn     // ✅ handler valide
 );
 
 // ➜ Vérification PayIn (polling Flutter / Postman)
@@ -38,6 +42,9 @@ router.get(
    🔵 PAYOUT (SELLER)
 ====================================================== */
 
+// 🟢 Préflight CORS
+router.options("/payout/create", (_, res) => res.sendStatus(204));
+
 // ➜ Retrait vendeur (Mobile Money)
 router.post(
   "/payout/create",
@@ -46,14 +53,14 @@ router.post(
 );
 
 /* ======================================================
-   🔔 WEBHOOK QOSPAY (OPTIONNEL)
-   ⚠️ QOSIC n’envoie pas toujours de webhook fiable
-   ⚠️ Pas de JWT ici
+   🔔 WEBHOOK QOSPAY
+   ⚠️ Pas de JWT
+   ⚠️ Appelé uniquement par QOSIC
 ====================================================== */
 
 router.post(
   "/webhook/qospay",
-  controller.handleWebhook   // ✅ toujours défini (stub safe)
+  controller.handleWebhook   // ✅ stub safe
 );
 
 module.exports = router;

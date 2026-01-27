@@ -4,6 +4,7 @@
 require("dotenv").config();
 const app = require("./app");
 const mongoose = require("mongoose");
+require("./cron");
 const http = require("http");
 const { Server } = require("socket.io");
 const chalk = require("chalk");
