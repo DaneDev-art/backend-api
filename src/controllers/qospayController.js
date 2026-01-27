@@ -10,7 +10,6 @@ const QosPayService = require("../services/QosPayService");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
-const Order = require("../models/order.model");
 
 // 🔍 Debug export service
 console.log("QosPayService exports:", Object.keys(QosPayService));
@@ -98,7 +97,7 @@ module.exports = {
       }
 
       const payinResult = await QosPayService.createPayIn({
-        orderId: new mongoose.Types.ObjectId(), // ID logique, l’order réel est créé dans le service
+        orderId: new mongoose.Types.ObjectId(), // ID logique (order réel créé dans le service)
         buyerPhone: client.phone,
         operator: operator === "AUTO" ? null : operator,
         items,
@@ -153,10 +152,8 @@ module.exports = {
 
       const result = await QosPayService.verifyPayIn(transactionId);
 
-      return res.status(200).json({
-        success: true,
-        ...result,
-      });
+      // ⚠️ IMPORTANT : on respecte le success retourné par le service
+      return res.status(200).json(result);
 
     } catch (err) {
       console.error("❌ QOSPAY verifyPayIn:", err.message);
@@ -199,12 +196,7 @@ module.exports = {
         operator: operator === "AUTO" ? null : operator,
       });
 
-      return res.status(201).json({
-        success: result.success,
-        transaction_id: result.transaction_id,
-        status: result.status,
-        provider: "QOSPAY",
-      });
+      return res.status(201).json(result);
 
     } catch (err) {
       console.error("❌ QOSPAY createPayOut:", err.message);

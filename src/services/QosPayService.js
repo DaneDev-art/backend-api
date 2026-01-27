@@ -199,13 +199,19 @@ module.exports = {
     return { success: true, transaction_id, orderId: order._id };
   },
 
-  // ========================= VERIFY PAYIN — QOSPAY =========================
+  // ========================= VERIFY PAYIN — QOSPAY (ESCROW SAFE) =========================
 verifyPayIn: async (transactionId) => {
-  if (!transactionId) throw new Error("transaction_id est requis");
+  if (!transactionId) {
+    throw new Error("transaction_id est requis");
+  }
 
   const tx = await PayinTransaction.findOne({ transaction_id: transactionId });
   if (!tx) {
-    return { success: false, message: "Transaction introuvable", transaction_id: transactionId };
+    return {
+      success: false,
+      message: "Transaction introuvable",
+      transaction_id: transactionId,
+    };
   }
 
   // =========================
@@ -232,22 +238,25 @@ verifyPayIn: async (transactionId) => {
     );
   } catch (err) {
     console.error("❌ QOSPAY verifyPayIn Axios Error:", err.message);
-    return {
-      success: false,
-      message: "Impossible de vérifier le paiement",
-      transaction_id: transactionId,
-      status: tx.status,
-    };
+    throw new Error("QOSPAY unreachable");
   }
 
   const raw = response?.data || {};
-  const code = String(raw.responsecode || raw.code || "").toUpperCase();
+  const responseCode = String(raw.responsecode || raw.code || "").toUpperCase();
   const remoteStatus = String(raw.status || "").toUpperCase();
+  const paidAmount = Number(raw.amount || raw.montant || 0);
 
+  // =========================
+  // STATUS NORMALIZATION
+  // =========================
   let status = "PENDING";
-  if (["00", "SUCCESS", "PAID"].includes(code) || ["SUCCESS", "PAID"].includes(remoteStatus)) {
+
+  if (
+    ["00", "SUCCESS", "PAID"].includes(responseCode) ||
+    ["SUCCESS", "PAID"].includes(remoteStatus)
+  ) {
     status = "SUCCESS";
-  } else if (code && !["01"].includes(code)) {
+  } else if (responseCode && !["01"].includes(responseCode)) {
     status = "FAILED";
   }
 
@@ -258,7 +267,20 @@ verifyPayIn: async (transactionId) => {
   // SUCCESS PAYIN
   // =========================
   if (status === "SUCCESS") {
-    // 🔎 ORDER (BON LIEN)
+    // 🔐 SECURITY — AMOUNT CHECK
+    if (
+      paidAmount > 0 &&
+      Math.round(paidAmount) !== Math.round(Number(tx.amount))
+    ) {
+      tx.status = "FAILED";
+      tx.verifiedAt = new Date();
+      await tx.save();
+      throw new Error("Montant payé incohérent");
+    }
+
+    // ======================
+    // ORDER (OBLIGATOIRE)
+    // ======================
     const order = await Order.findOne({ payinTransaction: tx._id });
     if (!order) {
       throw new Error("Commande associée introuvable");
@@ -275,6 +297,24 @@ verifyPayIn: async (transactionId) => {
 
       if (result.matchedCount === 0) {
         throw new Error("Vendeur introuvable");
+      }
+
+      // ======================
+      // PLATFORM REVENUE (IDEMPOTENT)
+      // ======================
+      if (Number(tx.fees || 0) > 0) {
+        const exists = await PlatformRevenue.findOne({
+          payinTransactionId: tx._id,
+        });
+
+        if (!exists) {
+          await PlatformRevenue.create({
+            payinTransactionId: tx._id,
+            currency: tx.currency || "XOF",
+            amount: tx.fees,
+            breakdown: tx.fees_breakdown,
+          });
+        }
       }
 
       tx.sellerCredited = true;
