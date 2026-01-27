@@ -119,7 +119,7 @@ module.exports = {
       throw new Error("sellerId invalide");
 
     const phone = normalizePhone(buyerPhone);
-    const op = resolveOperator(operator, phone);
+    const op = resolveOperator(operator, phone); // ✅ TOUJOURS TM / TG
 
     const seller = await Seller.findById(sellerId).lean();
     if (!seller) throw new Error("Vendeur introuvable");
@@ -174,7 +174,7 @@ module.exports = {
       seller: seller._id,
       client: clientId,
       provider: "QOSPAY",
-      operator: op, // ✅ OPÉRATEUR CORRECT
+      operator: op, // ✅ FIX CRITIQUE
       amount: totalAmount,
       netAmount: Math.round(netToSeller),
       fees: totalFees,
@@ -223,6 +223,11 @@ module.exports = {
       transaction_id: transactionId,
     });
     if (!tx) throw new Error("Transaction introuvable");
+
+    // 🔥 GUARD ABSOLU
+    if (!tx.operator || !QOSPAY[tx.operator]) {
+      throw new Error(`OPERATEUR_QOSPAY_INVALIDE: ${tx.operator}`);
+    }
 
     if (tx.status === "SUCCESS" && tx.sellerCredited) {
       return {
