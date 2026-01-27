@@ -16,25 +16,33 @@ async function finalizeOrder(orderId, source = "SYSTEM") {
   const order = await Order.findById(orderId);
   if (!order) throw new Error("Order introuvable");
 
-  // ===== VERIFIER SI DEJA FINALISEE =====
-  if (order.status === "COMPLETED") {
+  // ===== INITIALISER LES FLAGS =====
+  order.escrow = order.escrow || {};
+  order.commissionReleased = order.commissionReleased || false;
+
+  // ===== METTRE A JOUR STATUS SI NECESSAIRE =====
+  if (order.status !== "COMPLETED") {
+    order.status = "COMPLETED";
+    order.confirmedAt = new Date();
+    order.escrow.isLocked = false;
+    order.escrow.releasedAt = new Date();
+
+    await order.save();
+    console.log("✅ Order finalisée depuis:", source);
+  } else {
     console.log("⚠️ Order déjà finalisée");
-    return order;
   }
 
-  // ===== METTRE A JOUR STATUS =====
-  order.status = "COMPLETED";
-  order.confirmedAt = new Date();
-  order.escrow = order.escrow || {};
-  order.escrow.isLocked = false;
-  order.escrow.releasedAt = new Date();
+  // ===== APPLIQUER COMMISSION DE PARRAINAGE SI PAS ENCORE FAITE =====
+  if (!order.commissionReleased) {
+    await ReferralCommissionService.handleOrderCompleted(order);
+    order.commissionReleased = true;
+    await order.save();
+    console.log("✅ Commission de parrainage appliquée");
+  } else {
+    console.log("⚠️ Commission déjà appliquée");
+  }
 
-  await order.save();
-
-  // ===== APPLIQUER COMMISSION DE PARRAINAGE =====
-  await ReferralCommissionService.handleOrderCompleted(order);
-
-  console.log("✅ Order finalisée depuis:", source);
   return order;
 }
 
