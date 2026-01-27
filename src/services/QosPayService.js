@@ -329,54 +329,62 @@ verifyPayIn: async (transactionId) => {
   }
 
   // =========================
-  // ✅ SUCCESS FINAL
-  // =========================
-  if (status === "SUCCESS") {
-    const order = await Order.findById(tx.order);
-    if (!order) throw new Error("Commande introuvable");
+// ✅ SUCCESS FINAL (SAFE)
+// =========================
+if (status === "SUCCESS") {
+  const order = await Order.findById(tx.order);
+  if (!order) throw new Error("Commande introuvable");
 
-    // 🔐 CREDIT ESCROW (IDEMPOTENT)
-    if (!tx.sellerCredited) {
-      await Seller.updateOne(
-        { _id: tx.seller },
-        { $inc: { balance_locked: Number(tx.netAmount || 0) } }
-      );
+  // 🔐 CREDIT ESCROW ATOMIQUE
+  const creditResult = await PayinTransaction.findOneAndUpdate(
+    {
+      _id: tx._id,
+      sellerCredited: false,
+    },
+    {
+      $set: {
+        sellerCredited: true,
+        status: "SUCCESS",
+        verifiedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
 
-      const exists = await PlatformRevenue.findOne({
+  // 👉 SEUL LE PREMIER APPEL PASSE ICI
+  if (creditResult) {
+    await Seller.updateOne(
+      { _id: tx.seller },
+      { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+    );
+
+    const exists = await PlatformRevenue.findOne({
+      payinTransactionId: tx._id,
+    });
+
+    if (!exists && Number(tx.fees || 0) > 0) {
+      await PlatformRevenue.create({
         payinTransactionId: tx._id,
+        currency: tx.currency || "XOF",
+        amount: tx.fees,
+        breakdown: tx.fees_breakdown,
       });
-
-      if (!exists && Number(tx.fees || 0) > 0) {
-        await PlatformRevenue.create({
-          payinTransactionId: tx._id,
-          currency: tx.currency || "XOF",
-          amount: tx.fees,
-          breakdown: tx.fees_breakdown,
-        });
-      }
-
-      tx.sellerCredited = true;
     }
-
-    tx.status = "SUCCESS";
-    tx.verifiedAt = new Date();
-
-    if (order.status !== "PAID") {
-      order.status = "PAID";
-      order.paidAt = new Date();
-      await order.save();
-    }
-
-    await tx.save();
-
-    return {
-      success: true,
-      transaction_id: transactionId,
-      orderId: order._id,
-      status: "SUCCESS",
-    };
   }
-},
+
+  if (order.status !== "PAID") {
+    order.status = "PAID";
+    order.paidAt = new Date();
+    await order.save();
+  }
+
+  return {
+    success: true,
+    transaction_id: transactionId,
+    orderId: order._id,
+    status: "SUCCESS",
+  };
+}
 
   // ========================= PAYOUT =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
