@@ -383,10 +383,11 @@ if (status === "SUCCESS") {
     transaction_id: transactionId,
     orderId: order._id,
     status: "SUCCESS",
-  };
-}
+    };
+   }
+  },
 
-  // ========================= PAYOUT =========================
+    // ========================= PAYOUT =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
     if (!mongoose.Types.ObjectId.isValid(sellerId))
       throw new Error("sellerId invalide");
@@ -432,3 +433,4 @@ if (status === "SUCCESS") {
     };
   },
 };
+
