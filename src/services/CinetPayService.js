@@ -455,9 +455,17 @@ CinetPayService.createPayIn = async function (payload) {
     WAVE: "WAVE",
   };
 
-  const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
+  const PAYMENT_METHOD_MAP = {
+    MTN: "MTN_MONEY",
+    MOOV: "MOOV_MONEY",
+    ORANGE: "ORANGE_MONEY",
+    WAVE: "WAVE_MONEY",
+  };
 
-  if (!cinetpayChannel) {
+  const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
+  const paymentMethod = PAYMENT_METHOD_MAP[operator];
+
+  if (!cinetpayChannel || !paymentMethod) {
     throw new Error(`Opérateur CinetPay invalide: ${operator}`);
   }
 
@@ -514,9 +522,7 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   // FEES & NET
   // ==============================
-  const { totalFees, netToSeller, breakdown } =
-    calculateFees(productTotal, 0);
-
+  const { totalFees, netToSeller, breakdown } = calculateFees(productTotal, 0);
   const netAmount = Math.round(netToSeller + shippingFeeAmount);
 
   // ==============================
@@ -525,12 +531,9 @@ CinetPayService.createPayIn = async function (payload) {
   const transaction_id = this.generateTransactionId("PAYIN");
 
   const finalReturnUrl =
-    returnUrl ||
-    `emarket://payin/result?transaction_id=${transaction_id}`;
+    returnUrl || `emarket://payin/result?transaction_id=${transaction_id}`;
 
-  const finalNotifyUrl =
-    notifyUrl ||
-    `${BASE_URL}/api/cinetpay/payin/verify`;
+  const finalNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
 
   // ==============================
   // ORDER (ESCROW)
@@ -542,7 +545,7 @@ CinetPayService.createPayIn = async function (payload) {
     totalAmount,
     netAmount,
     shippingFee: shippingFeeAmount,
-    deliveryAddress: buyerAddress || "Adresse inconnue",
+    deliveryAddress: buyerAddress || "",
     status: "PAYMENT_PENDING",
     cinetpayTransactionId: transaction_id,
     isConfirmedByClient: false,
@@ -567,8 +570,9 @@ CinetPayService.createPayIn = async function (payload) {
     sellerCredited: false,
     customer: {
       email: buyerEmail || "client@emarket.tg",
-      phone_number: buyerPhone || "",
-      address: buyerAddress || "Adresse inconnue",
+      phone_number: buyerPhone || "",       // 🔥 OBLIGATOIRE
+      phone_prefix: "228",                  // 🔥 OBLIGATOIRE pour Mobile Money
+      address: buyerAddress || "",
     },
   });
 
@@ -588,10 +592,11 @@ CinetPayService.createPayIn = async function (payload) {
     return_url: finalReturnUrl,
     notify_url: finalNotifyUrl,
     customer_email: tx.customer.email,
-    customer_phone_number: tx.customer.phone_number || buyerPhone, // 🔥 OBLIGATOIRE
+    customer_phone_number: tx.customer.phone_number, // 🔥 Obligatoire
+    customer_phone_prefix: tx.customer.phone_prefix, // 🔥 Obligatoire
     customer_address: tx.customer.address,
-    channels: ["MOBILE_MONEY"], // 🔥 CINETPAY ATTEND UN TABLEAU
-    payment_method: `${operator}_MOBILE_MONEY`, // 🔥 IMPORTANT
+    channels: ["MOBILE_MONEY"],               // 🔥 Toujours un tableau
+    payment_method: paymentMethod,            // 🔥 Correct selon opérateur
     items: frozenItems.map(i => ({
       name: i.productName,
       quantity: i.quantity,
