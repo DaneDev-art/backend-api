@@ -419,8 +419,6 @@ CinetPayService.createPayIn = async function (payload) {
     notifyUrl,
     sellerId,
     clientId,
-
-    // 🔥 OBLIGATOIRES
     provider, // CINETPAY
     operator, // MTN / MOOV / ORANGE / WAVE
   } = payload;
@@ -451,17 +449,17 @@ CinetPayService.createPayIn = async function (payload) {
   // MAPPING OPÉRATEUR CINETPAY
   // ==============================
   const CINETPAY_CHANNEL_MAP = {
-  MTN: "MTN",
-  MOOV: "MOOV",
-  ORANGE: "ORANGE",
-  WAVE: "WAVE",
-};
+    MTN: "MTN",
+    MOOV: "MOOV",
+    ORANGE: "ORANGE",
+    WAVE: "WAVE",
+  };
 
-const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
+  const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
 
-if (!cinetpayChannel) {
-  throw new Error(`Opérateur CinetPay invalide: ${operator}`);
-}
+  if (!cinetpayChannel) {
+    throw new Error(`Opérateur CinetPay invalide: ${operator}`);
+  }
 
   // ==============================
   // VENDEUR
@@ -558,10 +556,8 @@ if (!cinetpayChannel) {
     order: order._id,
     seller: seller._id,
     client: clientId,
-
     provider,
     operator,
-
     amount: totalAmount,
     netAmount,
     fees: totalFees,
@@ -583,28 +579,25 @@ if (!cinetpayChannel) {
   // PAYLOAD CINETPAY (🔥 FIX FINAL)
   // ==============================
   const cpPayload = {
-  apikey: CINETPAY_API_KEY,
-  site_id: CINETPAY_SITE_ID,
-  transaction_id,
-  amount: totalAmount,
-  currency,
-  description: description || "Paiement eMarket",
-
-  return_url: finalReturnUrl,
-  notify_url: finalNotifyUrl,
-
-  customer_email: tx.customer.email,
-  customer_phone_number: tx.customer.phone_number || buyerPhone, // 🔥 OBLIGATOIRE
-  customer_address: tx.customer.address,
-
-  channels: [cinetpayChannel], // 🔥 TABLEAU, PAS STRING
-
-  items: frozenItems.map(i => ({
-    name: i.productName,
-    quantity: i.quantity,
-    price: i.price,
-  })),
-};
+    apikey: CINETPAY_API_KEY,
+    site_id: CINETPAY_SITE_ID,
+    transaction_id,
+    amount: totalAmount,
+    currency,
+    description: description || "Paiement eMarket",
+    return_url: finalReturnUrl,
+    notify_url: finalNotifyUrl,
+    customer_email: tx.customer.email,
+    customer_phone_number: tx.customer.phone_number || buyerPhone, // 🔥 OBLIGATOIRE
+    customer_address: tx.customer.address,
+    channels: ["MOBILE_MONEY"], // 🔥 CINETPAY ATTEND UN TABLEAU
+    payment_method: `${operator}_MOBILE_MONEY`, // 🔥 IMPORTANT
+    items: frozenItems.map(i => ({
+      name: i.productName,
+      quantity: i.quantity,
+      price: i.price,
+    })),
+  };
 
   // ==============================
   // APPEL CINETPAY
