@@ -158,6 +158,15 @@ app.get("/health", (req, res) => {
 });
 
 // =======================
+// 🔹 IP du serveur (pour QOS / whitelist)
+// =======================
+app.get("/ip", (req, res) => {
+  res.json({
+    ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+  });
+});
+
+// =======================
 // 🔹 Test GitHub App au démarrage
 // =======================
 (async () => {
