@@ -391,8 +391,7 @@ CinetPayService.createSellerContact = async function(seller) {
 };
 
 /// ============================
-// PAYIN — ESCROW VERSION
-// FINAL STABLE – PANIER SAFE
+// PAYIN — ESCROW VERSION (FINAL STABLE – PANIER SAFE)
 // ============================
 
 CinetPayService.createPayIn = async function (payload) {
@@ -405,7 +404,7 @@ CinetPayService.createPayIn = async function (payload) {
   const Order = require("../models/order.model");
 
   // ==============================
-  // EXTRACTION PAYLOAD
+  // EXTRACTION PAYLOAD (PANIER INTACT)
   // ==============================
   const {
     items,
@@ -419,8 +418,6 @@ CinetPayService.createPayIn = async function (payload) {
     notifyUrl,
     sellerId,
     clientId,
-    provider, // CINETPAY
-    operator, // MTN / MOOV / ORANGE / WAVE
   } = payload;
 
   // ==============================
@@ -435,39 +432,9 @@ CinetPayService.createPayIn = async function (payload) {
   if (!mongoose.Types.ObjectId.isValid(clientId))
     throw new Error("clientId invalide");
 
-  if (!provider || provider !== "CINETPAY")
-    throw new Error("provider requis (CINETPAY)");
-
-  if (!operator)
-    throw new Error("operator requis (MTN, MOOV, ORANGE, WAVE)");
-
   const shippingFeeAmount = Number(shippingFee);
   if (!Number.isFinite(shippingFeeAmount) || shippingFeeAmount < 0)
     throw new Error("shippingFee invalide");
-
-  // ==============================
-  // MAPPING OPÉRATEUR CINETPAY
-  // ==============================
-  const CINETPAY_CHANNEL_MAP = {
-    MTN: "MTN",
-    MOOV: "MOOV",
-    ORANGE: "ORANGE",
-    WAVE: "WAVE",
-  };
-
-  const PAYMENT_METHOD_MAP = {
-    MTN: "MTN_MONEY",
-    MOOV: "MOOV_MONEY",
-    ORANGE: "ORANGE_MONEY",
-    WAVE: "WAVE_MONEY",
-  };
-
-  const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
-  const paymentMethod = PAYMENT_METHOD_MAP[operator];
-
-  if (!cinetpayChannel || !paymentMethod) {
-    throw new Error(`Opérateur CinetPay invalide: ${operator}`);
-  }
 
   // ==============================
   // VENDEUR
@@ -493,7 +460,7 @@ CinetPayService.createPayIn = async function (payload) {
   }
 
   // ==============================
-  // SNAPSHOT PANIER (FIGÉ)
+  // SNAPSHOT PANIER (INCHANGÉ)
   // ==============================
   const productMap = Object.fromEntries(
     products.map(p => [p._id.toString(), p])
@@ -522,7 +489,9 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   // FEES & NET
   // ==============================
-  const { totalFees, netToSeller, breakdown } = calculateFees(productTotal, 0);
+  const { totalFees, netToSeller, breakdown } =
+    calculateFees(productTotal, 0);
+
   const netAmount = Math.round(netToSeller + shippingFeeAmount);
 
   // ==============================
@@ -530,13 +499,19 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   const transaction_id = this.generateTransactionId("PAYIN");
 
+       // 🔗 DEEP LINK MOBILE
   const finalReturnUrl =
-    returnUrl || `emarket://payin/result?transaction_id=${transaction_id}`;
+  returnUrl ||
+  `emarket://payin/result?transaction_id=${transaction_id}`;
 
-  const finalNotifyUrl = notifyUrl || `${BASE_URL}/api/cinetpay/payin/verify`;
+      // 🔔 WEBHOOK (SERVER ↔ SERVER)
+  const finalNotifyUrl =
+  notifyUrl ||
+  `${BASE_URL}/api/cinetpay/payin/verify`;
+
 
   // ==============================
-  // ORDER (ESCROW)
+  // ORDER (SCHEMA COMPATIBLE)
   // ==============================
   const order = await Order.create({
     client: clientId,
@@ -545,22 +520,20 @@ CinetPayService.createPayIn = async function (payload) {
     totalAmount,
     netAmount,
     shippingFee: shippingFeeAmount,
-    deliveryAddress: buyerAddress || "",
-    status: "PAYMENT_PENDING",
-    cinetpayTransactionId: transaction_id,
+    deliveryAddress: buyerAddress || "Adresse inconnue",
+    status: "PAYMENT_PENDING",            // ✅ ENUM OK
+    cinetpayTransactionId: transaction_id, // ✅ REQUIRED
     isConfirmedByClient: false,
   });
 
   // ==============================
-  // PAYIN TRANSACTION
+  // PAYIN TRANSACTION (ESCROW)
   // ==============================
   const tx = await PayinTransaction.create({
     transaction_id,
     order: order._id,
     seller: seller._id,
-    client: clientId,
-    provider,
-    operator,
+    client: clientId, // ✅ FIX SCHEMA
     amount: totalAmount,
     netAmount,
     fees: totalFees,
@@ -570,9 +543,8 @@ CinetPayService.createPayIn = async function (payload) {
     sellerCredited: false,
     customer: {
       email: buyerEmail || "client@emarket.tg",
-      phone_number: buyerPhone || "",       // 🔥 OBLIGATOIRE
-      phone_prefix: "228",                  // 🔥 OBLIGATOIRE pour Mobile Money
-      address: buyerAddress || "",
+      phone_number: buyerPhone || "",
+      address: buyerAddress || "Adresse inconnue",
     },
   });
 
@@ -580,7 +552,7 @@ CinetPayService.createPayIn = async function (payload) {
   await order.save();
 
   // ==============================
-  // PAYLOAD CINETPAY (🔥 FIX FINAL)
+  // CINETPAY PAYLOAD
   // ==============================
   const cpPayload = {
     apikey: CINETPAY_API_KEY,
@@ -592,16 +564,14 @@ CinetPayService.createPayIn = async function (payload) {
     return_url: finalReturnUrl,
     notify_url: finalNotifyUrl,
     customer_email: tx.customer.email,
-    customer_phone_number: tx.customer.phone_number, // 🔥 Obligatoire
-    customer_phone_prefix: tx.customer.phone_prefix, // 🔥 Obligatoire
+    customer_phone_number: tx.customer.phone_number,
     customer_address: tx.customer.address,
-    channels: ["MOBILE_MONEY"],               // 🔥 Toujours un tableau
-    payment_method: paymentMethod,            // 🔥 Correct selon opérateur
     items: frozenItems.map(i => ({
       name: i.productName,
       quantity: i.quantity,
       price: i.price,
     })),
+    channels: "MOBILE_MONEY",
   };
 
   // ==============================
@@ -613,17 +583,13 @@ CinetPayService.createPayIn = async function (payload) {
     { timeout: 20000 }
   );
 
-  if (!resp.data || resp.data.code !== "201") {
+  if (!resp.data || resp.data.code !== "201")
     throw new Error(`CinetPay error: ${JSON.stringify(resp.data)}`);
-  }
 
   tx.paymentUrl = resp.data?.data?.payment_url || null;
   tx.raw_response = resp.data;
   await tx.save();
 
-  // ==============================
-  // FINAL RESPONSE
-  // ==============================
   return {
     success: true,
     orderId: order._id,
