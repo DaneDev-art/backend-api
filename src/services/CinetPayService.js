@@ -450,17 +450,18 @@ CinetPayService.createPayIn = async function (payload) {
   // ==============================
   // MAPPING OPÉRATEUR CINETPAY
   // ==============================
-  const CINETPAY_OPERATOR_MAP = {
-    MTN: "MTN_MOBILE_MONEY",
-    MOOV: "MOOV_MONEY",
-    ORANGE: "ORANGE_MONEY",
-    WAVE: "WAVE",
-  };
+  const CINETPAY_CHANNEL_MAP = {
+  MTN: "MTN",
+  MOOV: "MOOV",
+  ORANGE: "ORANGE",
+  WAVE: "WAVE",
+};
 
-  const cinetpayOperator = CINETPAY_OPERATOR_MAP[operator];
+const cinetpayChannel = CINETPAY_CHANNEL_MAP[operator];
 
-  if (!cinetpayOperator)
-    throw new Error(`Opérateur CinetPay invalide: ${operator}`);
+if (!cinetpayChannel) {
+  throw new Error(`Opérateur CinetPay invalide: ${operator}`);
+}
 
   // ==============================
   // VENDEUR
@@ -582,29 +583,28 @@ CinetPayService.createPayIn = async function (payload) {
   // PAYLOAD CINETPAY (🔥 FIX FINAL)
   // ==============================
   const cpPayload = {
-    apikey: CINETPAY_API_KEY,
-    site_id: CINETPAY_SITE_ID,
-    transaction_id,
-    amount: totalAmount,
-    currency,
-    description: description || "Paiement eMarket",
+  apikey: CINETPAY_API_KEY,
+  site_id: CINETPAY_SITE_ID,
+  transaction_id,
+  amount: totalAmount,
+  currency,
+  description: description || "Paiement eMarket",
 
-    return_url: finalReturnUrl,
-    notify_url: finalNotifyUrl,
+  return_url: finalReturnUrl,
+  notify_url: finalNotifyUrl,
 
-    customer_email: tx.customer.email,
-    customer_phone_number: tx.customer.phone_number,
-    customer_address: tx.customer.address,
+  customer_email: tx.customer.email,
+  customer_phone_number: tx.customer.phone_number || buyerPhone, // 🔥 OBLIGATOIRE
+  customer_address: tx.customer.address,
 
-    channels: "MOBILE_MONEY",
-    payment_method: cinetpayOperator, // 🔥 OBLIGATOIRE
+  channels: [cinetpayChannel], // 🔥 TABLEAU, PAS STRING
 
-    items: frozenItems.map(i => ({
-      name: i.productName,
-      quantity: i.quantity,
-      price: i.price,
-    })),
-  };
+  items: frozenItems.map(i => ({
+    name: i.productName,
+    quantity: i.quantity,
+    price: i.price,
+  })),
+};
 
   // ==============================
   // APPEL CINETPAY
