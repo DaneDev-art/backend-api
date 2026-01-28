@@ -420,9 +420,9 @@ CinetPayService.createPayIn = async function (payload) {
     sellerId,
     clientId,
 
-    // 🔥 OBLIGATOIRES (FIX BUG)
-    provider,
-    operator,
+    // 🔥 OBLIGATOIRES
+    provider, // CINETPAY
+    operator, // MTN / MOOV / ORANGE / WAVE
   } = payload;
 
   // ==============================
@@ -437,15 +437,30 @@ CinetPayService.createPayIn = async function (payload) {
   if (!mongoose.Types.ObjectId.isValid(clientId))
     throw new Error("clientId invalide");
 
-  if (!provider)
-    throw new Error("provider requis (CINETPAY ou QOSPAY)");
+  if (!provider || provider !== "CINETPAY")
+    throw new Error("provider requis (CINETPAY)");
 
   if (!operator)
-    throw new Error("operator requis (MTN, MOOV, ORANGE, WAVE...)");
+    throw new Error("operator requis (MTN, MOOV, ORANGE, WAVE)");
 
   const shippingFeeAmount = Number(shippingFee);
   if (!Number.isFinite(shippingFeeAmount) || shippingFeeAmount < 0)
     throw new Error("shippingFee invalide");
+
+  // ==============================
+  // MAPPING OPÉRATEUR CINETPAY
+  // ==============================
+  const CINETPAY_OPERATOR_MAP = {
+    MTN: "MTN_MOBILE_MONEY",
+    MOOV: "MOOV_MONEY",
+    ORANGE: "ORANGE_MONEY",
+    WAVE: "WAVE",
+  };
+
+  const cinetpayOperator = CINETPAY_OPERATOR_MAP[operator];
+
+  if (!cinetpayOperator)
+    throw new Error(`Opérateur CinetPay invalide: ${operator}`);
 
   // ==============================
   // VENDEUR
@@ -535,7 +550,7 @@ CinetPayService.createPayIn = async function (payload) {
   });
 
   // ==============================
-  // PAYIN TRANSACTION (FIXED)
+  // PAYIN TRANSACTION
   // ==============================
   const tx = await PayinTransaction.create({
     transaction_id,
@@ -543,7 +558,6 @@ CinetPayService.createPayIn = async function (payload) {
     seller: seller._id,
     client: clientId,
 
-    // 🔥 FIX MAJEUR
     provider,
     operator,
 
@@ -565,7 +579,7 @@ CinetPayService.createPayIn = async function (payload) {
   await order.save();
 
   // ==============================
-  // CINETPAY PAYLOAD
+  // PAYLOAD CINETPAY (🔥 FIX FINAL)
   // ==============================
   const cpPayload = {
     apikey: CINETPAY_API_KEY,
@@ -574,17 +588,22 @@ CinetPayService.createPayIn = async function (payload) {
     amount: totalAmount,
     currency,
     description: description || "Paiement eMarket",
+
     return_url: finalReturnUrl,
     notify_url: finalNotifyUrl,
+
     customer_email: tx.customer.email,
     customer_phone_number: tx.customer.phone_number,
     customer_address: tx.customer.address,
+
+    channels: "MOBILE_MONEY",
+    payment_method: cinetpayOperator, // 🔥 OBLIGATOIRE
+
     items: frozenItems.map(i => ({
       name: i.productName,
       quantity: i.quantity,
       price: i.price,
     })),
-    channels: "MOBILE_MONEY",
   };
 
   // ==============================
@@ -596,13 +615,17 @@ CinetPayService.createPayIn = async function (payload) {
     { timeout: 20000 }
   );
 
-  if (!resp.data || resp.data.code !== "201")
+  if (!resp.data || resp.data.code !== "201") {
     throw new Error(`CinetPay error: ${JSON.stringify(resp.data)}`);
+  }
 
   tx.paymentUrl = resp.data?.data?.payment_url || null;
   tx.raw_response = resp.data;
   await tx.save();
 
+  // ==============================
+  // FINAL RESPONSE
+  // ==============================
   return {
     success: true,
     orderId: order._id,
