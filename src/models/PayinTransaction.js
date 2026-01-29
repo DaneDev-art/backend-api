@@ -42,7 +42,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     provider: {
       type: String,
       enum: ["CINETPAY", "QOSPAY"],
-      required: false,
+      required: true,
       index: true,
     },
 
