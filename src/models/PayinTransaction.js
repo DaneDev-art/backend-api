@@ -37,6 +37,7 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     /* ======================================================
        🏦 FOURNISSEUR DE PAIEMENT
+       👉 Toujours défini côté backend
     ====================================================== */
     provider: {
       type: String,
@@ -47,8 +48,8 @@ const PayinTransactionSchema = new mongoose.Schema(
 
     /* ======================================================
        📱 OPÉRATEUR / CANAL
-       - QOSPAY : connu avant paiement
-       - CINETPAY : choisi après redirection
+       - QOSPAY : connu AVANT paiement
+       - CINETPAY : connu APRÈS redirect (verify/webhook)
     ====================================================== */
     operator: {
       type: String,
@@ -63,12 +64,10 @@ const PayinTransactionSchema = new mongoose.Schema(
         "MOOV",
         "ORANGE",
         "WAVE",
-
-        // 🔧 TECHNIQUE (CINETPAY REDIRECT)
-        "CINETPAY_REDIRECT",
       ],
-      required: true,
+      required: false, // ✅ CRITIQUE : PAS REQUIS À LA CRÉATION
       index: true,
+      default: null,
     },
 
     /* ======================================================
@@ -114,7 +113,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     provider_transaction_id: {
-      type: String, // ID QOSPAY / CINETPAY
+      type: String, // ID CINETPAY / QOSPAY
       default: null,
       index: true,
     },
@@ -125,7 +124,7 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     payment_method: {
-      type: String,
+      type: String, // MTN / MOOV / CARD / etc
       default: null,
     },
 
