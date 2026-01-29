@@ -5,7 +5,7 @@
 
 const mongoose = require("mongoose");
 const CinetPayService = require("../services/CinetPayService");
-
+const PayinTransaction = require("../models/PayinTransaction");
 const Seller = require("../models/Seller");
 const User = require("../models/user.model");
 const Product = require("../models/Product");
@@ -156,57 +156,66 @@ module.exports = {
      🔥 FINALISE ORDER + COMMISSION
   ====================================================== */
   verifyPayIn: async (req, res) => {
-    try {
-      const transactionId =
-        req.body?.transaction_id ||
-        req.body?.cpm_trans_id ||
-        req.query?.transaction_id;
+  try {
+    const transactionId =
+      req.body?.transaction_id ||
+      req.body?.cpm_trans_id ||
+      req.query?.transaction_id;
 
-      if (!transactionId) {
-        return res.status(400).json({ error: "transaction_id requis" });
-      }
-
-      const result = await CinetPayService.verifyPayIn(transactionId);
-
-      /* ======================================================
-         ✅ PAIEMENT ACCEPTÉ → FINALISATION COMMANDE
-      ====================================================== */
-      if (result?.status === "ACCEPTED") {
-        const order = await Order.findOne({
-          cinetpayTransactionId: transactionId,
-        });
-
-        if (!order) {
-          console.error(
-            "❌ Order introuvable pour transaction:",
-            transactionId
-          );
-        } else {
-          // 🔥 FINALISATION UNIQUE & IDÉMPOTENTE
-          await finalizeOrder(order._id, "CINETPAY");
-        }
-      }
-
-      /* ======================================================
-         🔁 REDIRECT FRONTEND (GET)
-      ====================================================== */
-      if (req.method === "GET") {
-        const status = result?.status || "PENDING";
-
-        const redirectUrl =
-          `${process.env.FRONTEND_URL}/payin/result` +
-          `?transaction_id=${transactionId}` +
-          `&status=${status}`;
-
-        return res.redirect(302, redirectUrl);
-      }
-
-      return res.status(200).json(result);
-    } catch (err) {
-      console.error("❌ verifyPayIn:", err.message);
-      return res.status(500).json({ error: err.message });
+    if (!transactionId) {
+      return res.status(400).json({ error: "transaction_id requis" });
     }
-  },
+
+    const result = await CinetPayService.verifyPayIn(transactionId);
+
+    /* ======================================================
+       🔎 PAYIN TRANSACTION (SOURCE DE VÉRITÉ)
+    ====================================================== */
+    const payin = await PayinTransaction.findOne({
+      transaction_id: transactionId,
+    });
+
+    if (!payin) {
+      console.error("❌ PayinTransaction introuvable:", transactionId);
+    }
+
+    /* ======================================================
+       ✅ PAIEMENT RÉELLEMENT CONFIRMÉ
+    ====================================================== */
+    const isPaymentConfirmed =
+      result?.status === "ACCEPTED" &&
+      ["SUCCESS", "SUCCEEDED", "COMPLETED"].includes(
+        result?.payment_status || result?.cpm_result
+      );
+
+    if (isPaymentConfirmed && payin && payin.status !== "SUCCESS") {
+      // 🔐 Lock transaction
+      payin.status = "SUCCESS";
+      payin.verifiedAt = new Date();
+      await payin.save();
+
+      // 🔥 FINALISATION MÉTIER (IDÉMPOTENTE)
+      await finalizeOrder(payin.order, "CINETPAY");
+    }
+
+    /* ======================================================
+       🔁 REDIRECT FRONTEND
+    ====================================================== */
+    if (req.method === "GET") {
+      const redirectUrl =
+        `${process.env.FRONTEND_URL}/payin/result` +
+        `?transaction_id=${transactionId}` +
+        `&status=${payin?.status || "PENDING"}`;
+
+      return res.redirect(302, redirectUrl);
+    }
+
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error("❌ verifyPayIn:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   /* ======================================================
      🔵 CREATE PAYOUT
@@ -317,5 +326,5 @@ module.exports = {
       console.error("❌ Webhook error:", err.message);
       return res.status(500).json({ error: err.message });
     }
-  },
+  }
 };

@@ -1,6 +1,7 @@
 // =============================================
 // models/PayinTransaction.js
-// ESCROW • MULTI-PROVIDER • PRODUCTION READY (FIXED)
+// ESCROW • MULTI-PROVIDER • PRODUCTION READY
+// CINETPAY + QOSPAY (REDIRECT SAFE)
 // =============================================
 
 const mongoose = require("mongoose");
@@ -45,8 +46,9 @@ const PayinTransactionSchema = new mongoose.Schema(
     },
 
     /* ======================================================
-       📱 OPÉRATEUR MOBILE / CANAL
-       ✅ COMPATIBLE QOSPAY + CINETPAY
+       📱 OPÉRATEUR / CANAL
+       - QOSPAY : connu avant paiement
+       - CINETPAY : choisi après redirection
     ====================================================== */
     operator: {
       type: String,
@@ -56,11 +58,14 @@ const PayinTransactionSchema = new mongoose.Schema(
         "TG",
         "CARD",
 
-        // CINETPAY (legacy / futur)
+        // CINETPAY (réel)
         "MTN",
         "MOOV",
         "ORANGE",
         "WAVE",
+
+        // 🔧 TECHNIQUE (CINETPAY REDIRECT)
+        "CINETPAY_REDIRECT",
       ],
       required: true,
       index: true,
