@@ -63,8 +63,8 @@ const CINETPAY_PAYIN_URL =
 // =================== FRAIS ===================
 const FEES = {
   payinCinetPay: 0.03,           // 3% sur le prix du produit
-  payoutCinetPay: 0.015,          // 1% sur le prix du produit
-  appFlutter: 0.05,               // 5% sur le prix du produit
+  payoutCinetPay: 0.01,          // 1% sur le prix du produit
+  appFlutter: 0.045,               // 4,5% sur le prix du produit
   commissionsParrainage: 0.015,   // 1,5% sur le prix du produit
 };
 
