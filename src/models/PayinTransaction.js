@@ -42,9 +42,12 @@ const PayinTransactionSchema = new mongoose.Schema(
     provider: {
       type: String,
       enum: ["CINETPAY", "QOSPAY"],
-      required: true,
       index: true,
+      required: function() {
+    // QOSPAY a besoin de provider, CINETPAY peut être null à la création
+    return this.operator === "TM" || this.operator === "TG" || this.operator === "CARD";
     },
+  },
 
     /* ======================================================
        📱 OPÉRATEUR / CANAL
