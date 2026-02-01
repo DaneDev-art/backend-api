@@ -1,21 +1,19 @@
 const express = require("express");
-const mongoose = require("mongoose");
 const router = express.Router();
 
 const { verifyToken } = require("../middleware/auth.middleware");
 
 const Order = require("../models/order.model");
 const Seller = require("../models/Seller");
-const PayinTransaction = require("../models/PayinTransaction");
 
-// 🔥 LOGIQUE MÉTIER UNIQUE (la même que le script test)
+// 🔥 LOGIQUE MÉTIER UNIQUE
 const confirmOrderByClient = require("../controllers/confirmOrderByClient");
 
 const BASE_URL =
   process.env.BASE_URL || "https://backend-api-m0tf.onrender.com";
 
 /* ======================================================
-   🔹 Fonction utilitaire pour URLs images absolues
+   🔹 UTIL — IMAGE PRODUIT ABSOLUE
 ====================================================== */
 function getProductImageUrl(item) {
   let img = item.productImage || null;
@@ -34,7 +32,7 @@ function getProductImageUrl(item) {
 }
 
 /* ======================================================
-   1️⃣ Commandes du client connecté
+   1️⃣ COMMANDES DU CLIENT
    GET /api/orders/me
 ====================================================== */
 router.get("/me", verifyToken, async (req, res) => {
@@ -56,9 +54,10 @@ router.get("/me", verifyToken, async (req, res) => {
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-      status: o.status,
+      status: o.status, // 🔥 SOURCE UNIQUE
       isConfirmedByClient: o.isConfirmedByClient || false,
-      payinTransactionId: o.qospayTransactionId || o.payinTransaction || null,
+      payinTransactionId:
+        o.qospayTransactionId || o.payinTransaction || null,
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -72,13 +71,13 @@ router.get("/me", verifyToken, async (req, res) => {
       createdAt: o.createdAt,
     }));
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       orders: ordersForFrontend,
     });
   } catch (err) {
     console.error("❌ GET /orders/me:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Erreur récupération commandes client",
     });
@@ -86,7 +85,7 @@ router.get("/me", verifyToken, async (req, res) => {
 });
 
 /* ======================================================
-   2️⃣ Commandes du vendeur connecté
+   2️⃣ COMMANDES DU VENDEUR
    GET /api/orders/seller
 ====================================================== */
 router.get("/seller", verifyToken, async (req, res) => {
@@ -101,6 +100,7 @@ router.get("/seller", verifyToken, async (req, res) => {
     }
 
     const orders = await Order.find({ seller: seller._id })
+      .populate("client", "fullName name email")
       .populate({
         path: "items.product",
         select: "name images price",
@@ -112,13 +112,19 @@ router.get("/seller", verifyToken, async (req, res) => {
     const ordersForFrontend = orders.map((o) => ({
       _id: o._id,
       sellerName: seller.name,
+      clientName:
+        o.client?.fullName ||
+        o.client?.name ||
+        o.client?.email ||
+        "Client inconnu",
       totalAmount: o.totalAmount || 0,
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-      status: o.status,
+      status: o.status, // ✅ PAS DE FAUX "PAYEE"
       isConfirmedByClient: o.isConfirmedByClient || false,
-      payinTransactionId: o.qospayTransactionId || o.payinTransaction || null,
+      payinTransactionId:
+        o.qospayTransactionId || o.payinTransaction || null,
       items: o.items.map((i) => ({
         product: {
           _id: i.product?._id || i.productId,
@@ -132,13 +138,13 @@ router.get("/seller", verifyToken, async (req, res) => {
       createdAt: o.createdAt,
     }));
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       orders: ordersForFrontend,
     });
   } catch (err) {
     console.error("❌ GET /orders/seller:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Erreur récupération commandes vendeur",
     });
@@ -146,13 +152,14 @@ router.get("/seller", verifyToken, async (req, res) => {
 });
 
 /* ======================================================
-   3️⃣ Détail commande (client OU vendeur)
+   3️⃣ DÉTAIL COMMANDE (CLIENT OU VENDEUR)
    GET /api/orders/:orderId
 ====================================================== */
 router.get("/:orderId", verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
       .populate("seller", "name")
+      .populate("client", "fullName name email")
       .populate({
         path: "items.product",
         select: "name images price",
@@ -165,10 +172,10 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    const isClient = order.client.toString() === req.user._id.toString();
+    const isClient = order.client._id.toString() === req.user._id.toString();
     const seller = await Seller.findOne({ user: req.user._id });
     const isSeller =
-      seller && order.seller.toString() === seller._id.toString();
+      seller && order.seller._id.toString() === seller._id.toString();
 
     if (!isClient && !isSeller) {
       return res.status(403).json({
@@ -177,18 +184,24 @@ router.get("/:orderId", verifyToken, async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       order: {
         _id: order._id,
         sellerName: order.seller?.name || "Vendeur inconnu",
+        clientName:
+          order.client?.fullName ||
+          order.client?.name ||
+          order.client?.email ||
+          "Client inconnu",
         totalAmount: order.totalAmount || 0,
         netAmount: order.netAmount || 0,
         shippingFee: order.shippingFee || 0,
         deliveryAddress: order.deliveryAddress || "Adresse inconnue",
         status: order.status,
         isConfirmedByClient: order.isConfirmedByClient || false,
-        payinTransactionId: order.qospayTransactionId || order.payinTransaction || null,
+        payinTransactionId:
+          order.qospayTransactionId || order.payinTransaction || null,
         items: order.items.map((i) => ({
           product: {
             _id: i.product?._id || i.productId,
@@ -204,7 +217,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error("❌ GET /orders/:orderId:", err);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Erreur récupération commande",
     });
@@ -212,9 +225,8 @@ router.get("/:orderId", verifyToken, async (req, res) => {
 });
 
 /* ======================================================
-   4️⃣ CONFIRMATION CLIENT — LOGIQUE UNIQUE
+   4️⃣ CONFIRMATION CLIENT
    POST /api/orders/:orderId/confirm
-   ✅ IDENTIQUE AU SCRIPT DE TEST
 ====================================================== */
 router.post("/:orderId/confirm", verifyToken, async (req, res) => {
   try {
@@ -222,16 +234,14 @@ router.post("/:orderId/confirm", verifyToken, async (req, res) => {
     const clientId = req.user._id;
 
     console.log(
-      `🔔 [ROUTE] Confirmation commande | orderId=${orderId} | clientId=${clientId}`
+      `🔔 Confirmation commande | orderId=${orderId} | clientId=${clientId}`
     );
 
-    // 🔥 APPEL DIRECT À LA LOGIQUE MÉTIER TESTÉE
     const result = await confirmOrderByClient(orderId, clientId);
 
-    // 🔹 AJOUT NETAMOUNT POUR FLUTTER
     return res.status(200).json({
       ...result,
-      netAmount: result.releasedAmount || 0, // ← clé supplémentaire pour Flutter
+      netAmount: result.releasedAmount || 0,
     });
   } catch (error) {
     console.error("❌ POST /orders/:orderId/confirm:", error);
