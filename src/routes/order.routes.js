@@ -54,7 +54,7 @@ router.get("/me", verifyToken, async (req, res) => {
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-      status: o.status, // 🔥 SOURCE UNIQUE
+      status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
       payinTransactionId:
         o.qospayTransactionId || o.payinTransaction || null,
@@ -100,7 +100,7 @@ router.get("/seller", verifyToken, async (req, res) => {
     }
 
     const orders = await Order.find({ seller: seller._id })
-      .populate("client", "fullName name email")
+      .populate("client", "fullName name email phone")
       .populate({
         path: "items.product",
         select: "name images price",
@@ -117,11 +117,12 @@ router.get("/seller", verifyToken, async (req, res) => {
         o.client?.name ||
         o.client?.email ||
         "Client inconnu",
+      clientPhone: o.client?.phone || null,
       totalAmount: o.totalAmount || 0,
       netAmount: o.netAmount || 0,
       shippingFee: o.shippingFee || 0,
       deliveryAddress: o.deliveryAddress || "Adresse inconnue",
-      status: o.status, // ✅ PAS DE FAUX "PAYEE"
+      status: o.status,
       isConfirmedByClient: o.isConfirmedByClient || false,
       payinTransactionId:
         o.qospayTransactionId || o.payinTransaction || null,
@@ -159,7 +160,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.orderId)
       .populate("seller", "name")
-      .populate("client", "fullName name email")
+      .populate("client", "fullName name email phone")
       .populate({
         path: "items.product",
         select: "name images price",
@@ -194,6 +195,7 @@ router.get("/:orderId", verifyToken, async (req, res) => {
           order.client?.name ||
           order.client?.email ||
           "Client inconnu",
+        clientPhone: order.client?.phone || null,
         totalAmount: order.totalAmount || 0,
         netAmount: order.netAmount || 0,
         shippingFee: order.shippingFee || 0,
