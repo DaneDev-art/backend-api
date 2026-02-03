@@ -97,6 +97,10 @@ function getAxiosConfig(op) {
   };
 }
 
+// =================== QOSPAY FAILURE CODES ===================
+// Ces codes indiquent un échec définitif côté opérateur
+const FAILURE_CODES = ["05", "51", "54", "91"];
+
 // ============================================
 // EXPORT
 // ============================================
@@ -119,7 +123,7 @@ module.exports = {
       throw new Error("sellerId invalide");
 
     const phone = normalizePhone(buyerPhone);
-    const op = resolveOperator(operator, phone); // ✅ TOUJOURS TM / TG
+    const op = resolveOperator(operator, phone);
 
     const seller = await Seller.findById(sellerId).lean();
     if (!seller) throw new Error("Vendeur introuvable");
@@ -174,7 +178,7 @@ module.exports = {
       seller: seller._id,
       client: clientId,
       provider: "QOSPAY",
-      operator: op, // ✅ FIX CRITIQUE
+      operator: op,
       amount: totalAmount,
       netAmount: Math.round(netToSeller),
       fees: totalFees,
@@ -214,180 +218,187 @@ module.exports = {
   },
 
   // ========================= VERIFY PAYIN (SMART + SAFE) =========================
-verifyPayIn: async (transactionId) => {
-  if (!transactionId) {
-    throw new Error("transaction_id requis");
-  }
+  verifyPayIn: async (transactionId) => {
+    if (!transactionId) {
+      throw new Error("transaction_id requis");
+    }
 
-  const MAX_RETRIES = 10;          // ≈ 2–3 minutes
-  const RETRY_INTERVAL_MS = 15000; // info frontend
+    const MAX_RETRIES = 10;
+    const RETRY_INTERVAL_MS = 15000;
 
-  const tx = await PayinTransaction.findOne({
-    transaction_id: transactionId,
-  });
-  if (!tx) throw new Error("Transaction introuvable");
+    const tx = await PayinTransaction.findOne({
+      transaction_id: transactionId,
+    });
+    if (!tx) throw new Error("Transaction introuvable");
 
-  // 🔥 GUARD ABSOLU
-  if (!tx.operator || !QOSPAY[tx.operator]) {
-    throw new Error(`OPERATEUR_QOSPAY_INVALIDE: ${tx.operator}`);
-  }
+    if (!tx.operator || !QOSPAY[tx.operator]) {
+      throw new Error(`OPERATEUR_QOSPAY_INVALIDE: ${tx.operator}`);
+    }
 
-  // 🔒 IDEMPOTENCE HARD
-  if (tx.status === "SUCCESS" && tx.sellerCredited) {
+    if (tx.status === "SUCCESS" && tx.sellerCredited) {
+      return {
+        success: true,
+        transaction_id: transactionId,
+        status: "SUCCESS",
+        alreadyProcessed: true,
+      };
+    }
+
+    tx.retryCount = tx.retryCount || 0;
+
+    if (tx.retryCount >= MAX_RETRIES) {
+      tx.status = "FAILED";
+      tx.failureReason = "PAYMENT_TIMEOUT";
+      tx.verifiedAt = new Date();
+      await tx.save();
+
+      return {
+        success: false,
+        transaction_id: transactionId,
+        status: "FAILED",
+        reason: "TIMEOUT",
+      };
+    }
+
+    let response;
+    try {
+      response = await axios.post(
+        QOSPAY[tx.operator].STATUS,
+        {
+          transref: transactionId,
+          clientid: QOSPAY[tx.operator].CLIENT_ID,
+        },
+        getAxiosConfig(tx.operator)
+      );
+    } catch (err) {
+      tx.retryCount += 1;
+      tx.lastCheckedAt = new Date();
+      await tx.save();
+
+      return {
+        success: false,
+        transaction_id: transactionId,
+        status: "PENDING",
+        retry: true,
+        retryIn: RETRY_INTERVAL_MS,
+        reason: "QOSPAY_UNREACHABLE",
+      };
+    }
+
+    const raw = response?.data || {};
+    const code = String(raw.responsecode || "").trim();
+    const remoteStatus = String(raw.status || "").toUpperCase();
+
+    tx.raw_response = raw;
+    tx.lastCheckedAt = new Date();
+    tx.retryCount += 1;
+
+    let status = "PENDING";
+
+    // =========================
+    // STATUS NORMALIZATION
+    // =========================
+    if (
+      code === "00" ||
+      remoteStatus === "SUCCESS" ||
+      remoteStatus === "PAID"
+    ) {
+      status = "SUCCESS";
+    } else if (FAILURE_CODES.includes(code)) {
+      status = "FAILED";
+    } else {
+      status = "PENDING";
+    }
+
+    // =========================
+    // 🔴 FAILED FINAL
+    // =========================
+    if (status === "FAILED") {
+      tx.status = "FAILED";
+      tx.failureReason = code || "PAYMENT_FAILED";
+      tx.verifiedAt = new Date();
+      await tx.save();
+
+      return {
+        success: false,
+        transaction_id: transactionId,
+        status: "FAILED",
+        reason: tx.failureReason,
+      };
+    }
+
+    // =========================
+    // 🟡 PENDING
+    // =========================
+    if (status === "PENDING") {
+      tx.status = "PENDING";
+      await tx.save();
+
+      return {
+        success: false,
+        transaction_id: transactionId,
+        status: "PENDING",
+        retry: true,
+        retryIn: RETRY_INTERVAL_MS,
+      };
+    }
+
+    // =========================
+    // ✅ SUCCESS FINAL (ESCROW SAFE)
+    // =========================
+    const order = await Order.findById(tx.order);
+    if (!order) throw new Error("Commande introuvable");
+
+    const creditResult = await PayinTransaction.findOneAndUpdate(
+      {
+        _id: tx._id,
+        sellerCredited: false,
+      },
+      {
+        $set: {
+          sellerCredited: true,
+          status: "SUCCESS",
+          verifiedAt: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    if (creditResult) {
+      await Seller.updateOne(
+        { _id: tx.seller },
+        { $inc: { balance_locked: Number(tx.netAmount || 0) } }
+      );
+
+      const exists = await PlatformRevenue.findOne({
+        payinTransactionId: tx._id,
+      });
+
+      if (!exists && Number(tx.fees || 0) > 0) {
+        await PlatformRevenue.create({
+          payinTransactionId: tx._id,
+          currency: tx.currency || "XOF",
+          amount: tx.fees,
+          breakdown: tx.fees_breakdown,
+        });
+      }
+    }
+
+    if (order.status !== "PAID") {
+      order.status = "PAID";
+      order.paidAt = new Date();
+      await order.save();
+    }
+
     return {
       success: true,
       transaction_id: transactionId,
+      orderId: order._id,
       status: "SUCCESS",
-      alreadyProcessed: true,
     };
-  }
-
-  // ⏱️ INIT RETRY
-  tx.retryCount = tx.retryCount || 0;
-
-  // ⛔ TIMEOUT FINAL (SEULE CAUSE DE FAILED AUTO)
-  if (tx.retryCount >= MAX_RETRIES) {
-    tx.status = "FAILED";
-    tx.failureReason = "PAYMENT_TIMEOUT";
-    tx.verifiedAt = new Date();
-    await tx.save();
-
-    return {
-      success: false,
-      transaction_id: transactionId,
-      status: "FAILED",
-      reason: "TIMEOUT",
-    };
-  }
-
-  // =========================
-  // CALL QOSPAY STATUS (🔥 clientid OBLIGATOIRE)
-  // =========================
-  let response;
-  try {
-    response = await axios.post(
-      QOSPAY[tx.operator].STATUS,
-      {
-        transref: transactionId,
-        clientid: QOSPAY[tx.operator].CLIENT_ID, // 🔥 FIX CRITIQUE
-      },
-      getAxiosConfig(tx.operator)
-    );
-  } catch (err) {
-    // ❗ ERREUR API = PENDING
-    tx.retryCount += 1;
-    tx.lastCheckedAt = new Date();
-    await tx.save();
-
-    return {
-      success: false,
-      transaction_id: transactionId,
-      status: "PENDING",
-      retry: true,
-      retryIn: RETRY_INTERVAL_MS,
-      reason: "QOSPAY_UNREACHABLE",
-    };
-  }
-
-  const raw = response?.data || {};
-  const code = String(raw.responsecode || "").trim();
-  const remoteStatus = String(raw.status || "").toUpperCase();
-
-  tx.raw_response = raw;
-  tx.lastCheckedAt = new Date();
-  tx.retryCount += 1;
-
-  let status = "PENDING";
-
-  // =========================
-  // STATUS NORMALIZATION
-  // =========================
-  if (
-    code === "00" ||
-    remoteStatus === "SUCCESS" ||
-    remoteStatus === "PAID"
-  ) {
-    status = "SUCCESS";
-  } else if (code === "01" || code === "-2" || !code) {
-    status = "PENDING"; // 🔥 JAMAIS FAILED
-  }
-
-  // =========================
-  // 🟡 PENDING
-  // =========================
-  if (status === "PENDING") {
-    tx.status = "PENDING";
-    await tx.save();
-
-    return {
-      success: false,
-      transaction_id: transactionId,
-      status: "PENDING",
-      retry: true,
-      retryIn: RETRY_INTERVAL_MS,
-    };
-  }
-
-  // =========================
-// ✅ SUCCESS FINAL (SAFE)
-// =========================
-if (status === "SUCCESS") {
-  const order = await Order.findById(tx.order);
-  if (!order) throw new Error("Commande introuvable");
-
-  // 🔐 CREDIT ESCROW ATOMIQUE
-  const creditResult = await PayinTransaction.findOneAndUpdate(
-    {
-      _id: tx._id,
-      sellerCredited: false,
-    },
-    {
-      $set: {
-        sellerCredited: true,
-        status: "SUCCESS",
-        verifiedAt: new Date(),
-      },
-    },
-    { new: true }
-  );
-
-  // 👉 SEUL LE PREMIER APPEL PASSE ICI
-  if (creditResult) {
-    await Seller.updateOne(
-      { _id: tx.seller },
-      { $inc: { balance_locked: Number(tx.netAmount || 0) } }
-    );
-
-    const exists = await PlatformRevenue.findOne({
-      payinTransactionId: tx._id,
-    });
-
-    if (!exists && Number(tx.fees || 0) > 0) {
-      await PlatformRevenue.create({
-        payinTransactionId: tx._id,
-        currency: tx.currency || "XOF",
-        amount: tx.fees,
-        breakdown: tx.fees_breakdown,
-      });
-    }
-  }
-
-  if (order.status !== "PAID") {
-    order.status = "PAID";
-    order.paidAt = new Date();
-    await order.save();
-  }
-
-  return {
-    success: true,
-    transaction_id: transactionId,
-    orderId: order._id,
-    status: "SUCCESS",
-    };
-   }
   },
 
-    // ========================= PAYOUT =========================
+  // ========================= PAYOUT =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
     if (!mongoose.Types.ObjectId.isValid(sellerId))
       throw new Error("sellerId invalide");
@@ -433,4 +444,3 @@ if (status === "SUCCESS") {
     };
   },
 };
-
