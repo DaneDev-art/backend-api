@@ -494,18 +494,18 @@ CinetPayService.createPayIn = async function (payload) {
 
   const netAmount = Math.round(netToSeller + shippingFeeAmount);
 
-  // ==============================
-  // IDS & URLS
-  // ==============================
-  const transaction_id = this.generateTransactionId("PAYIN");
+  // ============================== 
+ // IDS & URLS
+ // ==============================
+ const transaction_id = this.generateTransactionId("PAYIN");
 
-       // 🔗 DEEP LINK MOBILE
-  const finalReturnUrl =
+ // 🔗 DEEP LINK MOBILE — corrigé pour matcher Flutter
+ const finalReturnUrl =
   returnUrl ||
-  `emarket://payin/result?transaction_id=${transaction_id}`;
+  `emarket://payin?transaction_id=${transaction_id}`;
 
-      // 🔔 WEBHOOK (SERVER ↔ SERVER)
-  const finalNotifyUrl =
+ // 🔔 WEBHOOK (SERVER ↔ SERVER) — inchangé
+ const finalNotifyUrl =
   notifyUrl ||
   `${BASE_URL}/api/cinetpay/payin/verify`;
 
