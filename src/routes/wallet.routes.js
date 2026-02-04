@@ -4,10 +4,6 @@ const router = express.Router();
 const WalletController = require("../controllers/wallet.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// ============================
-// 💰 WALLET ROUTES
-// ============================
-
 // 🔹 Solde wallet
 router.get("/balance", verifyToken, WalletController.getBalance);
 
@@ -16,5 +12,12 @@ router.get("/transactions", verifyToken, WalletController.getTransactions);
 
 // 🔹 Payout vendeur (withdraw)
 router.post("/payout", verifyToken, WalletController.payout);
+
+// 🔹 Transfert des commissions vers le solde disponible
+router.post(
+  "/transfer-commission",
+  verifyToken,
+  WalletController.transferCommission
+);
 
 module.exports = router;

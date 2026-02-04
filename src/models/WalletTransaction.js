@@ -33,7 +33,8 @@ const walletTransactionSchema = new mongoose.Schema(
         "REFERRAL_COMMISSION", // commission parrainage
         "SALE_INCOME",         // vente du seller
         "DELIVERY_INCOME",     // revenu livreur
-        "WITHDRAWAL",           // retrait
+        "WITHDRAWAL",          // retrait
+        "COMMISSION_TRANSFER", // transfert de commission vers solde disponible
       ],
       required: true,
     },
@@ -44,7 +45,7 @@ const walletTransactionSchema = new mongoose.Schema(
 
     referenceType: {
       type: String,
-      enum: ["ORDER", "DELIVERY", "REFERRAL"],
+      enum: ["ORDER", "DELIVERY", "REFERRAL", "TRANSFER"],
     },
 
     meta: {
