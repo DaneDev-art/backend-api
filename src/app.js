@@ -112,7 +112,7 @@ const { router: messageRoutes } = require("./routes/messageRoutes");
 app.use("/api/messages", messageRoutes);
 
 // 💰 Wallet
-const walletRoutes = require("./routes/wallet.routes");
+const walletRoutes = require("./src/routes/wallet.routes");
 app.use("/api/wallet", walletRoutes);
 
 // 🔗 Referral
