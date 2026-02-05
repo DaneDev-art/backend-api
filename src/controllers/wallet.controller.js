@@ -4,9 +4,9 @@
 
 const mongoose = require("mongoose");
 
-const Seller = require("../models/Seller");
 const WalletTransaction = require("../models/WalletTransaction");
 const QosPayService = require("../services/QosPayService");
+const User = require("../models/User"); // ⚠️ modèle générique utilisateur
 
 /* ======================================================
    💰 GET BALANCE
@@ -15,18 +15,16 @@ exports.getBalance = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const seller = await Seller.findOne({ user: userId }).lean();
-    if (!seller) {
-      return res.status(404).json({
-        success: false,
-        message: "Vendeur introuvable",
-      });
-    }
+    const user = await User.findById(userId).lean();
+
+    // Assurer que chaque utilisateur a des champs balance_available et commission
+    const balance_available = Number(user?.balance_available || 0);
+    const commission = Number(user?.commission || 0);
 
     return res.json({
       success: true,
-      balance_available: Number(seller.balance_available || 0),
-      commission: Number(seller.commission || 0),
+      balance_available,
+      commission,
     });
   } catch (err) {
     console.error("❌ getBalance:", err);
@@ -63,7 +61,75 @@ exports.getTransactions = async (req, res) => {
 };
 
 /* ======================================================
-   🔵 PAYOUT SELLER (WITHDRAWAL)
+   🔁 TRANSFERT COMMISSIONS → SOLDE DISPONIBLE
+====================================================== */
+exports.transferCommission = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).session(session);
+    if (!user) throw new Error("Utilisateur introuvable");
+
+    const commission = Number(user.commission || 0);
+
+    if (commission < 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Minimum 1000 FCFA requis pour le transfert",
+      });
+    }
+
+    const balanceBefore = Number(user.balance_available || 0);
+
+    // 🔁 TRANSFERT TOTAL
+    user.commission = 0;
+    user.balance_available = balanceBefore + commission;
+    await user.save({ session });
+
+    await WalletTransaction.create(
+      [
+        {
+          user: userId,
+          amount: commission,
+          balanceBefore,
+          balanceAfter: user.balance_available,
+          type: "SALE_INCOME",
+          meta: {
+            source: "REFERRAL_COMMISSION_TRANSFER",
+          },
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      success: true,
+      message: "Commissions transférées avec succès",
+      transferred: commission,
+      balance_available: user.balance_available,
+      commission: 0,
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("❌ transferCommission:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Erreur transfert commission",
+    });
+  }
+};
+
+/* ======================================================
+   🔵 PAYOUT (RETRAIT)
 ====================================================== */
 exports.payout = async (req, res) => {
   const session = await mongoose.startSession();
@@ -77,18 +143,18 @@ exports.payout = async (req, res) => {
       throw new Error("Montant invalide");
     }
 
-    const seller = await Seller.findOne({ user: userId }).session(session);
-    if (!seller) throw new Error("Vendeur introuvable");
+    const user = await User.findById(userId).session(session);
+    if (!user) throw new Error("Utilisateur introuvable");
 
-    const available = Number(seller.balance_available || 0);
+    const available = Number(user.balance_available || 0);
     const withdrawAmount = Number(amount);
 
     if (available < withdrawAmount) {
       throw new Error("Solde insuffisant");
     }
 
-    const payout = await QosPayService.createPayOutForSeller({
-      sellerId: seller._id,
+    const payout = await QosPayService.createPayOutForUser({
+      userId: user._id,
       amount: withdrawAmount,
       operator,
     });
@@ -100,8 +166,8 @@ exports.payout = async (req, res) => {
     const balanceBefore = available;
     const balanceAfter = balanceBefore - withdrawAmount;
 
-    seller.balance_available = balanceAfter;
-    await seller.save({ session });
+    user.balance_available = balanceAfter;
+    await user.save({ session });
 
     await WalletTransaction.create(
       [
@@ -140,74 +206,6 @@ exports.payout = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: err.message || "Erreur payout",
-    });
-  }
-};
-
-/* ======================================================
-   🔁 TRANSFERT COMMISSIONS → SOLDE DISPONIBLE
-====================================================== */
-exports.transferCommission = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const userId = req.user.id;
-
-    const seller = await Seller.findOne({ user: userId }).session(session);
-    if (!seller) throw new Error("Vendeur introuvable");
-
-    const commission = Number(seller.commission || 0);
-
-    if (commission < 1000) {
-      return res.status(400).json({
-        success: false,
-        message: "Minimum 1000 FCFA requis pour le transfert",
-      });
-    }
-
-    const balanceBefore = Number(seller.balance_available || 0);
-
-    // 🔁 TRANSFERT TOTAL
-    seller.commission = 0;
-    seller.balance_available = balanceBefore + commission;
-    await seller.save({ session });
-
-    await WalletTransaction.create(
-      [
-        {
-          user: userId,
-          amount: commission,
-          balanceBefore,
-          balanceAfter: seller.balance_available,
-          type: "SALE_INCOME",
-          meta: {
-            source: "REFERRAL_COMMISSION_TRANSFER",
-          },
-        },
-      ],
-      { session }
-    );
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.json({
-      success: true,
-      message: "Commissions transférées avec succès",
-      transferred: commission,
-      balance_available: seller.balance_available,
-      commission: 0,
-    });
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("❌ transferCommission:", err);
-
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Erreur transfert commission",
     });
   }
 };
