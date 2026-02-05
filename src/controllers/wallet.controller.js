@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 
 const WalletTransaction = require("../models/WalletTransaction");
 const QosPayService = require("../services/QosPayService");
-const User = require("../models/User"); // ⚠️ modèle générique utilisateur
+const User = require("../models/user.model"); // ⚠️ modèle générique utilisateur
 
 /* ======================================================
    💰 GET BALANCE
