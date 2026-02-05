@@ -6,7 +6,8 @@ const mongoose = require("mongoose");
 
 const WalletTransaction = require("../models/WalletTransaction");
 const QosPayService = require("../services/QosPayService");
-const User = require("../models/user.model"); // ⚠️ modèle générique utilisateur
+const User = require("../models/user.model");
+const ReferralCommission = require("../models/ReferralCommission");
 
 /* ======================================================
    💰 GET BALANCE
@@ -16,10 +17,32 @@ exports.getBalance = async (req, res) => {
     const userId = req.user.id;
 
     const user = await User.findById(userId).lean();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Utilisateur introuvable",
+      });
+    }
 
-    // Assurer que chaque utilisateur a des champs balance_available et commission
-    const balance_available = Number(user?.balance_available || 0);
-    const commission = Number(user?.commission || 0);
+    const balance_available = Number(user.balance_available || 0);
+
+    // 🔥 TOTAL COMMISSIONS DISPONIBLES
+    const result = await ReferralCommission.aggregate([
+      {
+        $match: {
+          referrer: new mongoose.Types.ObjectId(userId),
+          status: "AVAILABLE",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const commission = Number(result[0]?.total || 0);
 
     return res.json({
       success: true,
@@ -61,7 +84,7 @@ exports.getTransactions = async (req, res) => {
 };
 
 /* ======================================================
-   🔁 TRANSFERT COMMISSIONS → SOLDE DISPONIBLE
+   🔁 TRANSFERT COMMISSIONS REFERRAL → SOLDE DISPONIBLE
 ====================================================== */
 exports.transferCommission = async (req, res) => {
   const session = await mongoose.startSession();
@@ -71,9 +94,30 @@ exports.transferCommission = async (req, res) => {
     const userId = req.user.id;
 
     const user = await User.findById(userId).session(session);
-    if (!user) throw new Error("Utilisateur introuvable");
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Utilisateur introuvable",
+      });
+    }
 
-    const commission = Number(user.commission || 0);
+    // 🔥 CALCUL COMMISSIONS DISPONIBLES
+    const result = await ReferralCommission.aggregate([
+      {
+        $match: {
+          referrer: new mongoose.Types.ObjectId(userId),
+          status: "AVAILABLE",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const commission = Number(result[0]?.total || 0);
 
     if (commission < 1000) {
       return res.status(400).json({
@@ -83,20 +127,33 @@ exports.transferCommission = async (req, res) => {
     }
 
     const balanceBefore = Number(user.balance_available || 0);
+    const balanceAfter = balanceBefore + commission;
 
-    // 🔁 TRANSFERT TOTAL
-    user.commission = 0;
-    user.balance_available = balanceBefore + commission;
+    // 💰 AJOUT AU SOLDE
+    user.balance_available = balanceAfter;
     await user.save({ session });
 
+    // 🔒 MARQUER COMMISSIONS COMME PAYÉES
+    await ReferralCommission.updateMany(
+      {
+        referrer: user._id,
+        status: "AVAILABLE",
+      },
+      {
+        $set: { status: "PAID" },
+      },
+      { session }
+    );
+
+    // 🧾 TRANSACTION WALLET
     await WalletTransaction.create(
       [
         {
           user: userId,
           amount: commission,
           balanceBefore,
-          balanceAfter: user.balance_available,
-          type: "SALE_INCOME",
+          balanceAfter,
+          type: "REFERRAL_COMMISSION",
           meta: {
             source: "REFERRAL_COMMISSION_TRANSFER",
           },
@@ -106,25 +163,24 @@ exports.transferCommission = async (req, res) => {
     );
 
     await session.commitTransaction();
-    session.endSession();
 
     return res.json({
       success: true,
       message: "Commissions transférées avec succès",
       transferred: commission,
-      balance_available: user.balance_available,
+      balance_available: balanceAfter,
       commission: 0,
     });
   } catch (err) {
     await session.abortTransaction();
-    session.endSession();
-
     console.error("❌ transferCommission:", err);
 
     return res.status(500).json({
       success: false,
       message: err.message || "Erreur transfert commission",
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -189,7 +245,6 @@ exports.payout = async (req, res) => {
     );
 
     await session.commitTransaction();
-    session.endSession();
 
     return res.json({
       success: true,
@@ -199,13 +254,13 @@ exports.payout = async (req, res) => {
     });
   } catch (err) {
     await session.abortTransaction();
-    session.endSession();
-
     console.error("❌ payout:", err);
 
     return res.status(400).json({
       success: false,
       message: err.message || "Erreur payout",
     });
+  } finally {
+    session.endSession();
   }
 };
