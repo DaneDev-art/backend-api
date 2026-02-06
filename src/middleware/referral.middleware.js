@@ -6,7 +6,6 @@ const User = require("../models/user.model");
  * Middleware de validation du parrainage
  * - empêche l'auto-parrainage
  * - empêche le multi-parrainage
- * - limite le parrainage dans le temps
  * - valide les rôles
  */
 const validateReferral = async (req, res, next) => {
@@ -42,19 +41,6 @@ const validateReferral = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Parrainage déjà appliqué",
-      });
-    }
-
-    // ⏱️ Délai maximum (ex: 7 jours après inscription)
-    const MAX_REFERRAL_DAYS = 7;
-    const daysSinceSignup =
-      (Date.now() - new Date(user.createdAt)) / (1000 * 60 * 60 * 24);
-
-    if (daysSinceSignup > MAX_REFERRAL_DAYS) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Le délai pour appliquer un parrainage est dépassé",
       });
     }
 
