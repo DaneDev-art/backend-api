@@ -6,7 +6,7 @@ class ReferralController {
    * Appliquer un code de parrainage
    * POST /api/referral/apply
    */
-  static async applyReferral(req, res, next) {
+  static async applyReferral(req, res) {
     try {
       const userId = req.user.id;
       const { referralCode } = req.body;
@@ -36,7 +36,11 @@ class ReferralController {
         },
       });
     } catch (error) {
-      next(error);
+      // 🔹 Capture toutes les erreurs du service et renvoie JSON clair
+      return res.status(400).json({
+        success: false,
+        message: error.message || "Erreur application parrainage",
+      });
     }
   }
 
@@ -70,9 +74,12 @@ class ReferralController {
         success: true,
         data: {
           myReferralCode: user.referralCode || "",
-          referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
+          referralLink: `${process.env.FRONTEND_URL}/register?ref=${
+            user.referralCode || ""
+          }`,
           totalReferrals: user.referralStats?.totalReferrals || 0,
-          totalCommissionEarned: user.referralStats?.totalCommissionEarned || 0,
+          totalCommissionEarned:
+            user.referralStats?.totalCommissionEarned || 0,
           referrals,
         },
       });
@@ -107,7 +114,9 @@ class ReferralController {
         success: true,
         data: {
           referralCode: user.referralCode || "",
-          referralLink: `${process.env.FRONTEND_URL}/register?ref=${user.referralCode || ""}`,
+          referralLink: `${process.env.FRONTEND_URL}/register?ref=${
+            user.referralCode || ""
+          }`,
           appliedByName, // 🔹 nouveau champ
         },
       });
