@@ -14,8 +14,12 @@ const validateReferral = async (req, res, next) => {
     const { referralCode } = req.body;
     const userId = req.user?.id;
 
+    // ❌ Code obligatoire pour cette route
     if (!referralCode) {
-      return next(); // pas de parrainage → on laisse passer
+      return res.status(400).json({
+        success: false,
+        message: "Code de parrainage requis",
+      });
     }
 
     if (!userId) {
@@ -54,25 +58,6 @@ const validateReferral = async (req, res, next) => {
       });
     }
 
-    const referrer = await User.findOne({
-      referralCode,
-    });
-
-    if (!referrer) {
-      return res.status(404).json({
-        success: false,
-        message: "Code de parrainage invalide",
-      });
-    }
-
-    // 🚫 Auto-parrainage
-    if (referrer._id.equals(user._id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Auto-parrainage interdit",
-      });
-    }
-
     // 🎯 Rôles éligibles
     const allowedRoles = ["buyer", "seller", "delivery"];
     if (!allowedRoles.includes(user.role)) {
@@ -82,9 +67,7 @@ const validateReferral = async (req, res, next) => {
       });
     }
 
-    // Injecter le parrain pour le controller
-    req.referrer = referrer;
-
+    // ✅ Validation OK → on laisse le service gérer le reste
     next();
   } catch (error) {
     next(error);
