@@ -83,7 +83,7 @@ const enrichProduct = async (product) => {
     stock: product.stock,
     images: product.images || [],
     category: product.category,
-    categoryKey, // <-- Ajouté pour Flutter
+    categoryKey,
     status: product.status,
     rating: product.rating || 0,
     numReviews: product.numReviews || 0,
@@ -105,10 +105,42 @@ exports.getAllProducts = async (_, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const enriched = await Promise.all(products.map((p) => enrichProduct(p)));
+    const enriched = await Promise.all(products.map(enrichProduct));
     res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getAllProducts:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ==========================================
+// ✅ GET — Produits PAYABLES par CATÉGORIE
+// ==========================================
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const { categoryKey } = req.params;
+
+    let query = { status: "actif" };
+
+    if (categoryKey !== "ALL") {
+      const categoryName = Object.keys(categoryMap).find(
+        (key) => categoryMap[key] === categoryKey
+      );
+
+      query.$or = [
+        { category: categoryKey },
+        ...(categoryName ? [{ category: categoryName }] : []),
+      ];
+    }
+
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const enriched = await Promise.all(products.map(enrichProduct));
+    res.status(200).json(enriched);
+  } catch (err) {
+    console.error("❌ getProductsByCategory:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -128,7 +160,7 @@ exports.getProductsBySeller = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const enriched = await Promise.all(products.map((p) => enrichProduct(p)));
+    const enriched = await Promise.all(products.map(enrichProduct));
     res.status(200).json(enriched);
   } catch (err) {
     console.error("❌ getProductsBySeller:", err);
@@ -164,7 +196,9 @@ exports.addProduct = async (req, res) => {
     });
 
     for (const img of images) {
-      const upload = await cloudinary.uploader.upload(img, { folder: "products" });
+      const upload = await cloudinary.uploader.upload(img, {
+        folder: "products",
+      });
       product.images.push(upload.secure_url);
     }
 
@@ -188,7 +222,10 @@ exports.updateProduct = async (req, res) => {
       return res.status(400).json({ message: "productId invalide" });
 
     const product = await Product.findOne({ _id: productId, seller: sellerId });
-    if (!product) return res.status(404).json({ message: "Produit introuvable ou non autorisé" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ message: "Produit introuvable ou non autorisé" });
 
     const { name, description, price, category, images } = req.body;
     if (name) product.name = name;
@@ -199,7 +236,9 @@ exports.updateProduct = async (req, res) => {
     if (Array.isArray(images)) {
       product.images = [];
       for (const img of images) {
-        const upload = await cloudinary.uploader.upload(img, { folder: "products" });
+        const upload = await cloudinary.uploader.upload(img, {
+          folder: "products",
+        });
         product.images.push(upload.secure_url);
       }
     }
@@ -223,8 +262,14 @@ exports.deleteProduct = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(productId))
       return res.status(400).json({ message: "productId invalide" });
 
-    const deleted = await Product.findOneAndDelete({ _id: productId, seller: sellerId });
-    if (!deleted) return res.status(404).json({ message: "Produit non trouvé ou non autorisé" });
+    const deleted = await Product.findOneAndDelete({
+      _id: productId,
+      seller: sellerId,
+    });
+    if (!deleted)
+      return res
+        .status(404)
+        .json({ message: "Produit non trouvé ou non autorisé" });
 
     res.status(200).json({ message: "Produit supprimé" });
   } catch (err) {
@@ -240,7 +285,8 @@ exports.validateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+    if (!product)
+      return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "actif";
     await product.save();
@@ -258,7 +304,8 @@ exports.blockProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: "Produit introuvable" });
+    if (!product)
+      return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "bloqué";
     await product.save();

@@ -24,6 +24,12 @@ router.use(
 // ✅ GET — Tous les produits (public)
 router.get("/", productController.getAllProducts);
 
+// ✅ GET — Produits par catégorie (public)
+router.get(
+  "/category/:categoryKey",
+  productController.getProductsByCategory
+);
+
 // ✅ GET — Produits d’un vendeur spécifique
 router.get("/seller/:sellerId", productController.getProductsBySeller);
 
