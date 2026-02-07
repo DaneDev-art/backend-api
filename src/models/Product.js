@@ -36,10 +36,19 @@ const ProductSchema = new mongoose.Schema(
       default: [],
     },
 
+    // Label pour affichage
     category: {
       type: String,
       trim: true,
       default: "Autre",
+      index: true,
+    },
+
+    // 🔑 Clé unique pour filtrage / mapping frontend
+    categoryKey: {
+      type: String,
+      trim: true,
+      default: "AUTRE",
       index: true,
     },
 
@@ -93,5 +102,6 @@ const ProductSchema = new mongoose.Schema(
 // 🔍 Index optimisés panier / paiement
 ProductSchema.index({ seller: 1, status: 1 });
 ProductSchema.index({ name: "text", category: 1 });
+ProductSchema.index({ categoryKey: 1 }); // Nouveau : index sur categoryKey
 
 module.exports = mongoose.model("Product", ProductSchema);
