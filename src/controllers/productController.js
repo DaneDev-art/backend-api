@@ -15,6 +15,39 @@ cloudinary.config({
 });
 
 // ==========================================
+// 🔹 Mapping catégorie → clé pour Flutter
+// ==========================================
+const categoryMap = {
+  "Toutes": "ALL",
+  "Electroménagers": "ELECTROMENAGER",
+  "Electroniques": "ELECTRONIQUE",
+  "Smartphones & Accessoires": "SMARTPHONES",
+  "Tablettes & ordinateurs": "TABLETTES_PC",
+  "Téléviseurs & Home Cinéma": "TV_HOME",
+  "Casques & Ecouteurs": "CASQUES",
+  "Montres Connectées": "MONTRES",
+  "Accessoirs informatiques": "ACCESSOIRS_PC",
+  "Vêtements": "VETEMENTS",
+  "Chaussures": "CHAUSSURES",
+  "Sacs & Portefeuilles": "SACS",
+  "Bijoux & Montres": "BIJOUX",
+  "Lunettes & Chapeaux": "LUNETTES",
+  "Meubles": "MEUBLES",
+  "Décoration intérieure": "DECORATION",
+  "Produits cosmétiques": "COSMETIQUES",
+  "Soins capillaires": "SOINS_CAPILLAIRES",
+  "Produits pour la peau": "PEAU",
+  "Parfums": "PARFUMS",
+  "Vêtements Bébé/Enfants": "VETEMENTS_BEBE",
+  "Jeux & Jouets": "JEUX",
+  "Instruments de Musique": "MUSIQUE",
+  "Epicerie": "EPICERIE",
+  "Produits frais": "PRODUITS_FRAIS",
+  "Boissons": "BOISSONS",
+  "Articles de Puériculture": "PUERICULTURE",
+};
+
+// ==========================================
 // 🔹 Enrichissement PRODUIT (JSON STABLE)
 // ==========================================
 const enrichProduct = async (product) => {
@@ -40,6 +73,8 @@ const enrichProduct = async (product) => {
     }
   }
 
+  const categoryKey = categoryMap[product.category] || product.category || "ALL";
+
   return {
     _id: product._id.toString(),
     name: product.name,
@@ -48,6 +83,7 @@ const enrichProduct = async (product) => {
     stock: product.stock,
     images: product.images || [],
     category: product.category,
+    categoryKey, // <-- Ajouté pour Flutter
     status: product.status,
     rating: product.rating || 0,
     numReviews: product.numReviews || 0,
