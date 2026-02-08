@@ -73,7 +73,8 @@ const enrichProduct = async (product) => {
     }
   }
 
-  const categoryKey = categoryMap[product.category] || product.category || "ALL";
+  const categoryKey =
+    categoryMap[product.category] || product.category || "ALL";
 
   return {
     _id: product._id.toString(),
@@ -119,7 +120,6 @@ exports.getAllProducts = async (_, res) => {
 exports.getProductsByCategory = async (req, res) => {
   try {
     const { categoryKey } = req.params;
-
     let query = { status: "actif" };
 
     if (categoryKey !== "ALL") {
@@ -156,7 +156,10 @@ exports.getProductsBySeller = async (req, res) => {
       return res.status(400).json({ message: "sellerId invalide" });
     }
 
-    const products = await Product.find({ seller: sellerId, status: "actif" })
+    const products = await Product.find({
+      seller: sellerId,
+      status: "actif",
+    })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -169,16 +172,33 @@ exports.getProductsBySeller = async (req, res) => {
 };
 
 // ==========================================
-// ✅ POST — Ajouter un produit
+// ✅ POST — Ajouter un produit (STOCK FIXÉ)
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
-    const { name, description, price, category, images = [] } = req.body;
+    const {
+      name,
+      description,
+      price,
+      category,
+      stock,
+      images = [],
+    } = req.body;
+
     const sellerId = req.user?._id;
 
-    if (!sellerId) return res.status(401).json({ message: "Non authentifié" });
+    if (!sellerId)
+      return res.status(401).json({ message: "Non authentifié" });
+
     if (!name || !Number(price) || price <= 0)
-      return res.status(400).json({ message: "Nom et prix valide obligatoires" });
+      return res
+        .status(400)
+        .json({ message: "Nom et prix valide obligatoires" });
+
+    const parsedStock =
+      stock !== undefined && stock !== null && stock !== ""
+        ? Number(stock)
+        : 0;
 
     const User = require("../models/user.model");
     const seller = await User.findById(sellerId).lean();
@@ -187,6 +207,7 @@ exports.addProduct = async (req, res) => {
       name,
       description,
       price,
+      stock: parsedStock,
       category,
       seller: sellerId,
       images: [],
@@ -211,7 +232,7 @@ exports.addProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✏️ PUT — Modifier un produit
+// ✏️ PUT — Modifier un produit (STOCK SAFE)
 // ==========================================
 exports.updateProduct = async (req, res) => {
   try {
@@ -221,17 +242,26 @@ exports.updateProduct = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(productId))
       return res.status(400).json({ message: "productId invalide" });
 
-    const product = await Product.findOne({ _id: productId, seller: sellerId });
+    const product = await Product.findOne({
+      _id: productId,
+      seller: sellerId,
+    });
+
     if (!product)
       return res
         .status(404)
         .json({ message: "Produit introuvable ou non autorisé" });
 
-    const { name, description, price, category, images } = req.body;
+    const { name, description, price, category, stock, images } = req.body;
+
     if (name) product.name = name;
     if (description) product.description = description;
     if (price && price > 0) product.price = price;
     if (category) product.category = category;
+
+    if (stock !== undefined && stock !== null && stock !== "") {
+      product.stock = Number(stock);
+    }
 
     if (Array.isArray(images)) {
       product.images = [];
@@ -266,6 +296,7 @@ exports.deleteProduct = async (req, res) => {
       _id: productId,
       seller: sellerId,
     });
+
     if (!deleted)
       return res
         .status(404)
@@ -285,11 +316,13 @@ exports.validateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const product = await Product.findById(productId);
+
     if (!product)
       return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "actif";
     await product.save();
+
     res.status(200).json({ message: "Produit validé", product });
   } catch (err) {
     console.error("❌ validateProduct:", err);
@@ -304,11 +337,13 @@ exports.blockProduct = async (req, res) => {
   try {
     const { productId } = req.params;
     const product = await Product.findById(productId);
+
     if (!product)
       return res.status(404).json({ message: "Produit introuvable" });
 
     product.status = "bloqué";
     await product.save();
+
     res.status(200).json({ message: "Produit bloqué", product });
   } catch (err) {
     console.error("❌ blockProduct:", err);
