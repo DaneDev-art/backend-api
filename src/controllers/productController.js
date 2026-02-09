@@ -16,6 +16,39 @@ cloudinary.config({
 });
 
 // ==========================================
+// 🔹 Mapping catégorie → clé pour Flutter
+// ==========================================
+const categoryMap = {
+  "Toutes": "ALL",
+  "Electroménagers": "ELECTROMENAGER",
+  "Electroniques": "ELECTRONIQUE",
+  "Smartphones & Accessoires": "SMARTPHONES",
+  "Tablettes & ordinateurs": "TABLETTES_PC",
+  "Téléviseurs & Home Cinéma": "TV_HOME",
+  "Casques & Ecouteurs": "CASQUES",
+  "Montres Connectées": "MONTRES",
+  "Accessoirs informatiques": "ACCESSOIRS_PC",
+  "Vêtements": "VETEMENTS",
+  "Chaussures": "CHAUSSURES",
+  "Sacs & Portefeuilles": "SACS",
+  "Bijoux & Montres": "BIJOUX",
+  "Lunettes & Chapeaux": "LUNETTES",
+  "Meubles": "MEUBLES",
+  "Décoration intérieure": "DECORATION",
+  "Produits cosmétiques": "COSMETIQUES",
+  "Soins capillaires": "SOINS_CAPILLAIRES",
+  "Produits pour la peau": "PEAU",
+  "Parfums": "PARFUMS",
+  "Vêtements Bébé/Enfants": "VETEMENTS_BEBE",
+  "Jeux & Jouets": "JEUX",
+  "Instruments de Musique": "MUSIQUE",
+  "Epicerie": "EPICERIE",
+  "Produits frais": "PRODUITS_FRAIS",
+  "Boissons": "BOISSONS",
+  "Articles de Puériculture": "PUERICULTURE",
+};
+
+// ==========================================
 // 🔢 Calcul quantité vendue (COMPLETED)
 // ==========================================
 const getSoldCountForProduct = async (productId) => {
@@ -39,42 +72,57 @@ const getSoldCountForProduct = async (productId) => {
 };
 
 // ==========================================
-// 🔹 Enrichissement PRODUIT (POPULATE SAFE)
+// 🔹 Enrichissement PRODUIT (JSON STABLE)
 // ==========================================
 const enrichProduct = async (product) => {
+  const sellerId =
+    typeof product.seller === "string"
+      ? product.seller
+      : product.seller?._id?.toString() || "";
+
+  let shopName = product.shopName || "";
+  let country = product.country || "";
+  let sellerAddress = "";
+
+  let seller = null;
+  if (sellerId) {
+    try {
+      const User = require("../models/user.model");
+      seller = await User.findById(sellerId).lean();
+      if (seller) {
+        shopName ||= seller.shopName || "Boutique inconnue";
+        country ||= seller.country || "Pays inconnu";
+        sellerAddress = seller.address || "";
+      }
+    } catch (_) {
+      shopName ||= "Boutique inconnue";
+      country ||= "Pays inconnu";
+    }
+  }
+
   const soldCount = await getSoldCountForProduct(product._id);
 
-  const seller = product.seller || {};
-
   const categoryKey =
-    categoryMap?.[product.category] || product.category || "ALL";
+    categoryMap[product.category] || product.category || "ALL";
 
   return {
     _id: product._id.toString(),
     name: product.name,
     description: product.description,
     price: product.price,
-
-    // 🔹 Quantités
     stock: product.stock,
-    availableQuantity: product.stock,
     soldCount,
-
-    // 🔹 Vendeur (via populate)
-    seller: seller._id?.toString() || "",
-    sellerId: seller._id?.toString() || "",
-    sellerAddress: seller.address || "",
-    shopName: seller.shopName || "Boutique inconnue",
-    country: seller.country || "Pays inconnu",
-
-    // 🔹 Visuel & meta
+    sellerAddress,
     images: product.images || [],
     category: product.category,
     categoryKey,
     status: product.status,
     rating: product.rating || 0,
     numReviews: product.numReviews || 0,
-
+    seller: sellerId,
+    sellerId,
+    shopName,
+    country,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
@@ -86,7 +134,6 @@ const enrichProduct = async (product) => {
 exports.getAllProducts = async (_, res) => {
   try {
     const products = await Product.find({ status: "actif" })
-      .populate("seller", "address shopName country")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -107,7 +154,7 @@ exports.getProductsByCategory = async (req, res) => {
     let query = { status: "actif" };
 
     if (categoryKey !== "ALL") {
-      const categoryName = Object.keys(categoryMap || {}).find(
+      const categoryName = Object.keys(categoryMap).find(
         (key) => categoryMap[key] === categoryKey
       );
 
@@ -118,7 +165,6 @@ exports.getProductsByCategory = async (req, res) => {
     }
 
     const products = await Product.find(query)
-      .populate("seller", "address shopName country")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -145,7 +191,6 @@ exports.getProductsBySeller = async (req, res) => {
       seller: sellerId,
       status: "actif",
     })
-      .populate("seller", "address shopName country")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -162,7 +207,15 @@ exports.getProductsBySeller = async (req, res) => {
 // ==========================================
 exports.addProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock, images = [] } = req.body;
+    const {
+      name,
+      description,
+      price,
+      category,
+      stock,
+      images = [],
+    } = req.body;
+
     const sellerId = req.user?._id;
 
     if (!sellerId)
@@ -173,14 +226,24 @@ exports.addProduct = async (req, res) => {
         .status(400)
         .json({ message: "Nom et prix valide obligatoires" });
 
+    const parsedStock =
+      stock !== undefined && stock !== null && stock !== ""
+        ? Number(stock)
+        : 0;
+
+    const User = require("../models/user.model");
+    const seller = await User.findById(sellerId).lean();
+
     const product = new Product({
       name,
       description,
       price,
-      stock: Number(stock) || 0,
+      stock: parsedStock,
       category,
       seller: sellerId,
       images: [],
+      shopName: seller?.shopName || "",
+      country: seller?.country || "",
       status: "actif",
     });
 
@@ -192,12 +255,7 @@ exports.addProduct = async (req, res) => {
     }
 
     await product.save();
-
-    const populated = await Product.findById(product._id)
-      .populate("seller", "address shopName country")
-      .lean();
-
-    res.status(201).json(await enrichProduct(populated));
+    res.status(201).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ addProduct:", err);
     res.status(500).json({ error: err.message });
@@ -231,7 +289,10 @@ exports.updateProduct = async (req, res) => {
     if (description) product.description = description;
     if (price && price > 0) product.price = price;
     if (category) product.category = category;
-    if (stock !== undefined && stock !== "") product.stock = Number(stock);
+
+    if (stock !== undefined && stock !== null && stock !== "") {
+      product.stock = Number(stock);
+    }
 
     if (Array.isArray(images)) {
       product.images = [];
@@ -244,12 +305,7 @@ exports.updateProduct = async (req, res) => {
     }
 
     await product.save();
-
-    const populated = await Product.findById(product._id)
-      .populate("seller", "address shopName country")
-      .lean();
-
-    res.status(200).json(await enrichProduct(populated));
+    res.status(200).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ updateProduct:", err);
     res.status(500).json({ error: err.message });
