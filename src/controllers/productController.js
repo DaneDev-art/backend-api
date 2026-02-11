@@ -277,10 +277,8 @@ exports.updateProduct = async (req, res) => {
       return res.status(401).json({ message: "Non authentifié" });
     }
 
-    // ✅ CAST EXPLICITE
     const sellerId = new mongoose.Types.ObjectId(req.user._id);
 
-    // ✅ Recherche sécurisée
     const product = await Product.findOne({
       _id: productId,
       seller: sellerId,
@@ -296,12 +294,18 @@ exports.updateProduct = async (req, res) => {
 
     // 🔹 Champs simples
     if (typeof name === "string") product.name = name.trim();
-    if (typeof description === "string") product.description = description.trim();
-    if (price !== undefined && !isNaN(price) && Number(price) > 0) {
+    if (typeof description === "string")
+      product.description = description.trim();
+
+    // ✅ FIX PRICE
+    if (price !== undefined && !isNaN(price)) {
       product.price = Number(price);
     }
+
     if (typeof category === "string") product.category = category;
-    if (stock !== undefined && stock !== null && stock !== "") {
+
+    // ✅ FIX STOCK
+    if (stock !== undefined && !isNaN(stock)) {
       product.stock = Number(stock);
     }
 
@@ -323,7 +327,6 @@ exports.updateProduct = async (req, res) => {
       product.images = finalImages;
     }
 
-    // ✅ SAVE (updatedAt sera bien modifié)
     await product.save();
 
     return res.status(200).json(await enrichProduct(product));
