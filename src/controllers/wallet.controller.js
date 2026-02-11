@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const WalletTransaction = require("../models/WalletTransaction");
 const QosPayService = require("../services/QosPayService");
 const User = require("../models/user.model");
+const Seller = require("../models/Seller");
 const ReferralCommission = require("../models/ReferralCommission");
 
 /* ======================================================
