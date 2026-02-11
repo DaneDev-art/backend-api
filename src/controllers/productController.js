@@ -263,48 +263,56 @@ exports.addProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✏️ PUT — Modifier un produit (corrigé)
+// ✏️ PUT — Modifier un produit (FIX FINAL)
 // ==========================================
 exports.updateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    const sellerId = req.user?._id;
 
-    if (!mongoose.Types.ObjectId.isValid(productId))
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
       return res.status(400).json({ message: "productId invalide" });
+    }
 
-    // On récupère le produit uniquement s'il appartient au vendeur
+    if (!req.user?._id) {
+      return res.status(401).json({ message: "Non authentifié" });
+    }
+
+    // ✅ CAST EXPLICITE
+    const sellerId = new mongoose.Types.ObjectId(req.user._id);
+
+    // ✅ Recherche sécurisée
     const product = await Product.findOne({
       _id: productId,
       seller: sellerId,
     });
 
-    if (!product)
+    if (!product) {
       return res
-        .status(404)
+        .status(403)
         .json({ message: "Produit introuvable ou non autorisé" });
+    }
 
     const { name, description, price, category, stock, images } = req.body;
 
-    // 🔹 Mise à jour des champs classiques
-    if (name) product.name = name;
-    if (description) product.description = description;
-    if (price !== undefined && price !== null && !isNaN(price) && price > 0)
+    // 🔹 Champs simples
+    if (typeof name === "string") product.name = name.trim();
+    if (typeof description === "string") product.description = description.trim();
+    if (price !== undefined && !isNaN(price) && Number(price) > 0) {
       product.price = Number(price);
-    if (category) product.category = category;
-    if (stock !== undefined && stock !== null && stock !== "")
+    }
+    if (typeof category === "string") product.category = category;
+    if (stock !== undefined && stock !== null && stock !== "") {
       product.stock = Number(stock);
+    }
 
-    // 🔹 Gestion images
+    // 🔹 Images
     if (Array.isArray(images)) {
       const finalImages = [];
 
       for (const img of images) {
         if (typeof img === "string" && img.startsWith("http")) {
-          // URL existante → on conserve
           finalImages.push(img);
         } else if (typeof img === "string") {
-          // Nouvelle image base64 → on upload
           const upload = await cloudinary.uploader.upload(img, {
             folder: "products",
           });
@@ -315,16 +323,16 @@ exports.updateProduct = async (req, res) => {
       product.images = finalImages;
     }
 
-    // 🔹 Sauvegarde
+    // ✅ SAVE (updatedAt sera bien modifié)
     await product.save();
 
-    // 🔹 Retour JSON enrichi
-    res.status(200).json(await enrichProduct(product));
+    return res.status(200).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ updateProduct:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
+
 
 // ==========================================
 // ❌ DELETE — Supprimer un produit
