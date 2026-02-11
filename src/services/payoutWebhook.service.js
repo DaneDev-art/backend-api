@@ -1,7 +1,7 @@
 // services/payoutWebhook.service.js
 const mongoose = require("mongoose");
 const PayoutTransaction = require("../models/PayoutTransaction");
-const Wallet = require("../models/Wallet");
+const Wallet = require("../models/WalletTransaction");
 const chalk = require("chalk");
 
 class PayoutWebhookService {
