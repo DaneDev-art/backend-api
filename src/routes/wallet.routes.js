@@ -1,23 +1,51 @@
 // src/routes/wallet.routes.js
 const express = require("express");
 const router = express.Router();
+
 const WalletController = require("../controllers/wallet.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// 🔹 Solde wallet
-router.get("/balance", verifyToken, WalletController.getBalance);
+/* ======================================================
+   👤 WALLET USER (CLIENT / AFFILIÉ)
+====================================================== */
 
-// 🔹 Historique transactions
-router.get("/transactions", verifyToken, WalletController.getTransactions);
+// 🔹 Solde wallet user
+router.get(
+  "/balance",
+  verifyToken,
+  WalletController.getBalance
+);
 
-// 🔹 Payout vendeur (withdraw)
-router.post("/payout", verifyToken, WalletController.payout);
+// 🔹 Historique transactions wallet user
+router.get(
+  "/transactions",
+  verifyToken,
+  WalletController.getTransactions
+);
 
-// 🔹 Transfert des commissions vers le solde disponible
+// 🔹 Transfert commissions → solde disponible
 router.post(
   "/transfer-commission",
   verifyToken,
   WalletController.transferCommission
+);
+
+// 🔹 Retrait USER (commissions, optionnel)
+router.post(
+  "/payout/user",
+  verifyToken,
+  WalletController.payout
+);
+
+/* ======================================================
+   🏪 WALLET VENDEUR (MARKETPLACE)
+====================================================== */
+
+// 🔹 Retrait vendeur (fonds issus des ventes)
+router.post(
+  "/payout/seller",
+  verifyToken, // ⚠️ idéalement verifySellerToken plus tard
+  WalletController.payoutSeller
 );
 
 module.exports = router;

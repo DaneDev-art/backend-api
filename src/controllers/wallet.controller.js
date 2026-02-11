@@ -185,6 +185,91 @@ exports.transferCommission = async (req, res) => {
 };
 
 /* ======================================================
+   🔵 PAYOUT VENDEUR (VENTES MARKETPLACE)
+====================================================== */
+exports.payoutSeller = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const sellerId = req.user.id; // JWT vendeur
+    const { amount, operator, phone, provider = "QOSPAY" } = req.body;
+
+    if (!amount || Number(amount) <= 0) {
+      throw new Error("Montant invalide");
+    }
+
+    const seller = await Seller.findById(sellerId).session(session);
+    if (!seller) throw new Error("Vendeur introuvable");
+
+    const available = Number(seller.balance_available || 0);
+    const withdrawAmount = Number(amount);
+
+    if (available < withdrawAmount) {
+      throw new Error(
+        `Solde insuffisant (disponible: ${available}, demandé: ${withdrawAmount})`
+      );
+    }
+
+    // 🔥 Appel provider (QOSPAY / CinetPay)
+    const payout = await QosPayService.createPayOutForSeller({
+      sellerId: seller._id,
+      amount: withdrawAmount,
+      operator,
+    });
+
+    if (!payout.success) {
+      throw new Error("Échec du payout fournisseur");
+    }
+
+    // 💰 Débit vendeur
+    const balanceBefore = available;
+    const balanceAfter = balanceBefore - withdrawAmount;
+
+    seller.balance_available = balanceAfter;
+    await seller.save({ session });
+
+    // 🧾 Trace payout
+    await PayoutTransaction.create(
+      [
+        {
+          seller: seller._id,
+          provider,
+          amount: withdrawAmount,
+          currency: "XOF",
+          transaction_id: payout.transactionId,
+          operator,
+          prefix: "+228",
+          phone,
+          status: payout.status || "PENDING",
+          raw_response: payout.raw || null,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    return res.json({
+      success: true,
+      message: "Retrait vendeur en cours de traitement",
+      amount: withdrawAmount,
+      balanceAfter,
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    console.error("❌ payoutSeller:", err);
+
+    return res.status(400).json({
+      success: false,
+      message: err.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+/* ======================================================
    🔵 PAYOUT (RETRAIT)
 ====================================================== */
 exports.payout = async (req, res) => {

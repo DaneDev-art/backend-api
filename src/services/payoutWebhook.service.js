@@ -1,89 +1,99 @@
 // services/payoutWebhook.service.js
 const mongoose = require("mongoose");
-const Seller = require("../models/Seller");
 const PayoutTransaction = require("../models/PayoutTransaction");
+const Wallet = require("../models/Wallet");
 const chalk = require("chalk");
 
 class PayoutWebhookService {
 
-  // 🔹 Gestion paiement réussi
+  // ✅ SUCCESS = confirmation uniquement
   static async handleSuccess({ payoutId, providerTxId }) {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
-      // Recherche par transaction_id (string) et non _id
-      const payout = await PayoutTransaction.findOne({ transaction_id: payoutId }).session(session);
+      const payout = await PayoutTransaction.findOne({
+        client_transaction_id: payoutId,
+      }).session(session);
+
       if (!payout) {
-        console.warn(chalk.yellow(`⚠️ Transaction non trouvée: ${payoutId}`));
+        console.warn(chalk.yellow(`⚠️ Payout introuvable: ${payoutId}`));
         await session.abortTransaction();
         return;
       }
 
-      // 🔁 Idempotence
-      if (payout.status === "SUCCESS" && payout.webhook_received) {
-        console.log(chalk.blue(`ℹ️ Transaction déjà traitée: ${payoutId}`));
+      // 🔒 Idempotence
+      if (payout.status === "SUCCESS") {
+        console.log(chalk.blue(`ℹ️ Payout déjà confirmé: ${payoutId}`));
         await session.commitTransaction();
         return;
       }
 
-      const seller = await Seller.findById(payout.seller).session(session);
-      if (!seller) throw new Error("SELLER_NOT_FOUND");
-
-      // ⚡ Débiter le balance disponible
-      seller.balance_available -= payout.amount;
-      await seller.save({ session });
-
-      // 🔹 Mettre à jour la transaction
       payout.status = "SUCCESS";
-      payout.provider_transaction_id = providerTxId;
-      payout.webhook_received = true;
-      payout.webhook_received_at = new Date();
-      payout.sent_amount = payout.amount;
+      payout.cinetpay_transaction_id =
+        providerTxId || payout.cinetpay_transaction_id;
       payout.message = "PAYOUT_CONFIRMED_BY_WEBHOOK";
 
       await payout.save({ session });
 
       await session.commitTransaction();
-      console.log(chalk.green(`✅ Transaction ${payoutId} marquée SUCCESS`));
-
+      console.log(chalk.green(`✅ PAYOUT SUCCESS confirmé: ${payoutId}`));
     } catch (err) {
       await session.abortTransaction();
-      console.error(chalk.red(`❌ Erreur handleSuccess pour ${payoutId}:`), err);
+      console.error(chalk.red("❌ handleSuccess error:"), err);
       throw err;
     } finally {
       session.endSession();
     }
   }
 
-  // 🔹 Gestion paiement échoué
+  // ❌ FAILED = remboursement vendeur
   static async handleFailure({ payoutId, providerTxId, reason }) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-      const payout = await PayoutTransaction.findOne({ transaction_id: payoutId });
+      const payout = await PayoutTransaction.findOne({
+        client_transaction_id: payoutId,
+      }).session(session);
 
       if (!payout) {
-        console.warn(chalk.yellow(`⚠️ Transaction non trouvée: ${payoutId}`));
+        console.warn(chalk.yellow(`⚠️ Payout introuvable: ${payoutId}`));
+        await session.abortTransaction();
         return;
       }
 
-      // 🔁 Idempotence
-      if (payout.status === "FAILED" && payout.webhook_received) {
-        console.log(chalk.blue(`ℹ️ Transaction déjà traitée (FAILED): ${payoutId}`));
+      // 🔒 Idempotence
+      if (["FAILED", "CANCELED"].includes(payout.status)) {
+        await session.commitTransaction();
         return;
       }
 
       payout.status = "FAILED";
-      payout.provider_transaction_id = providerTxId;
-      payout.webhook_received = true;
-      payout.webhook_received_at = new Date();
+      payout.cinetpay_transaction_id =
+        providerTxId || payout.cinetpay_transaction_id;
       payout.message = reason || "PAYOUT_FAILED_PROVIDER";
 
-      await payout.save();
-      console.log(chalk.red(`❌ Transaction ${payoutId} marquée FAILED`));
+      await payout.save({ session });
 
+      // 🔁 Remboursement wallet vendeur
+      const wallet = await Wallet.findOne({
+        seller: payout.seller,
+      }).session(session);
+
+      if (!wallet) throw new Error("WALLET_NOT_FOUND");
+
+      wallet.balance += payout.amount;
+      await wallet.save({ session });
+
+      await session.commitTransaction();
+      console.log(chalk.red(`❌ PAYOUT FAILED + REMBOURSÉ: ${payoutId}`));
     } catch (err) {
-      console.error(chalk.red(`❌ Erreur handleFailure pour ${payoutId}:`), err);
+      await session.abortTransaction();
+      console.error(chalk.red("❌ handleFailure error:"), err);
       throw err;
+    } finally {
+      session.endSession();
     }
   }
 }

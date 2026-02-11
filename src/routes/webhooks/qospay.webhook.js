@@ -1,36 +1,36 @@
 // =============================================
 // routes/webhooks/qospay.webhook.js
-// QOSPAY PAYOUT WEBHOOK — PROD SAFE
+// QOSPAY PAYOUT WEBHOOK — PROD SAFE (FIXED)
 // =============================================
 
 const express = require("express");
 const router = express.Router();
+
 const PayoutWebhookService = require("../../services/payoutWebhook.service");
 const PayoutTransaction = require("../../models/PayoutTransaction");
-
-// Middleware JSON déjà global dans app.js
 
 router.post("/payout", async (req, res) => {
   console.log("📥 QOSPay webhook reçu :", req.body);
 
-  const rawStatus = req.body?.status;
-  const status = String(rawStatus || "").toUpperCase();
+  const status = String(req.body?.status || "").toUpperCase();
 
+  // 🔑 TON ID interne
   const payoutRef =
-    req.body?.client_transaction_id ||
     req.body?.transref ||
-    req.body?.transaction_id;
+    req.body?.client_transaction_id ||
+    null;
 
+  // 🔑 ID provider QOSPAY
   const providerTxId = req.body?.transaction_id || null;
 
   if (!payoutRef || !status) {
     console.warn("⚠️ Webhook QOSPay incomplet", req.body);
-    return res.status(200).json({ ok: false, message: "Payload incomplet" });
+    return res.status(200).json({ ok: false });
   }
 
   try {
     const payout = await PayoutTransaction.findOne({
-      client_transaction_id: payoutRef,
+      transaction_id: payoutRef,
       provider: "QOSPAY",
     });
 
@@ -47,15 +47,17 @@ router.post("/payout", async (req, res) => {
 
     if (status === "SUCCESS") {
       await PayoutWebhookService.handleSuccess({
-        payoutId: payoutRef,
+        payout,
         providerTxId,
+        raw: req.body,
       });
       console.log(`✅ QOSPay PAYOUT SUCCESS : ${payoutRef}`);
     } else {
       await PayoutWebhookService.handleFailure({
-        payoutId: payoutRef,
+        payout,
         providerTxId,
         reason: status,
+        raw: req.body,
       });
       console.log(`❌ QOSPay PAYOUT FAILED : ${payoutRef} (${status})`);
     }
@@ -63,10 +65,7 @@ router.post("/payout", async (req, res) => {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("❌ Erreur webhook QOSPay :", err);
-    return res.status(200).json({
-      ok: false,
-      message: "Erreur interne",
-    });
+    return res.status(200).json({ ok: false });
   }
 });
 
