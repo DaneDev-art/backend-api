@@ -263,7 +263,7 @@ exports.addProduct = async (req, res) => {
 };
 
 // ==========================================
-// ✏️ PUT — Modifier un produit
+// ✏️ PUT — Modifier un produit (corrigé)
 // ==========================================
 exports.updateProduct = async (req, res) => {
   try {
@@ -273,6 +273,7 @@ exports.updateProduct = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(productId))
       return res.status(400).json({ message: "productId invalide" });
 
+    // On récupère le produit uniquement s'il appartient au vendeur
     const product = await Product.findOne({
       _id: productId,
       seller: sellerId,
@@ -285,26 +286,39 @@ exports.updateProduct = async (req, res) => {
 
     const { name, description, price, category, stock, images } = req.body;
 
+    // 🔹 Mise à jour des champs classiques
     if (name) product.name = name;
     if (description) product.description = description;
-    if (price && price > 0) product.price = price;
+    if (price !== undefined && price !== null && !isNaN(price) && price > 0)
+      product.price = Number(price);
     if (category) product.category = category;
-
-    if (stock !== undefined && stock !== null && stock !== "") {
+    if (stock !== undefined && stock !== null && stock !== "")
       product.stock = Number(stock);
-    }
 
+    // 🔹 Gestion images
     if (Array.isArray(images)) {
-      product.images = [];
+      const finalImages = [];
+
       for (const img of images) {
-        const upload = await cloudinary.uploader.upload(img, {
-          folder: "products",
-        });
-        product.images.push(upload.secure_url);
+        if (typeof img === "string" && img.startsWith("http")) {
+          // URL existante → on conserve
+          finalImages.push(img);
+        } else if (typeof img === "string") {
+          // Nouvelle image base64 → on upload
+          const upload = await cloudinary.uploader.upload(img, {
+            folder: "products",
+          });
+          finalImages.push(upload.secure_url);
+        }
       }
+
+      product.images = finalImages;
     }
 
+    // 🔹 Sauvegarde
     await product.save();
+
+    // 🔹 Retour JSON enrichi
     res.status(200).json(await enrichProduct(product));
   } catch (err) {
     console.error("❌ updateProduct:", err);
