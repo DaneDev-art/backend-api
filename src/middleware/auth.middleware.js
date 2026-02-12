@@ -2,6 +2,7 @@
 // src/middleware/auth.middleware.js
 // ==========================================
 const jwt = require("jsonwebtoken");
+const Seller = require("../models/Seller"); // 🔥 AJOUT
 
 // ==========================================
 // 🔐 Vérifier authentification utilisateur
@@ -37,16 +38,12 @@ const verifyToken = (req, res, next) => {
       });
     }
 
-    // ======================================================
-    // ✅ Injection utilisateur NORMALISÉE
-    // ======================================================
     req.user = {
       _id: payload.id || payload._id,
       id: payload.id || payload._id,
       role: payload.role?.toLowerCase() || null,
       email: payload.email || null,
 
-      // 🔥 IMPORTANT POUR QOSPAY
       phone:
         payload.phone ||
         payload.fullNumber ||
@@ -108,10 +105,68 @@ const verifyRole = (roles = []) => {
 };
 
 // ==========================================
+// 🔐 Vérifier abonnement vendeur
+// ==========================================
+const checkSellerSubscription = async (req, res, next) => {
+  try {
+    // Ne s'applique qu'aux vendeurs
+    if (req.role !== "seller") {
+      return next();
+    }
+
+    const seller = await Seller.findOne({ user: req.user._id });
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        error: "Vendeur introuvable",
+      });
+    }
+
+    const now = new Date();
+
+    // Si pas encore de première vente → autorisé
+    if (!seller.subscription?.firstSaleAt) {
+      return next();
+    }
+
+    // Si abonnement actif → autorisé
+    if (seller.subscription.status === "ACTIVE") {
+      return next();
+    }
+
+    // Si période gratuite encore valide → autorisé
+    if (
+      seller.subscription.endAt &&
+      now <= seller.subscription.endAt
+    ) {
+      return next();
+    }
+
+    // Sinon → expiré
+    seller.subscription.status = "EXPIRED";
+    await seller.save();
+
+    return res.status(403).json({
+      success: false,
+      error: "Abonnement annuel expiré. Veuillez renouveler.",
+      code: "SUBSCRIPTION_EXPIRED",
+    });
+  } catch (error) {
+    console.error("❌ Subscription middleware error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Erreur vérification abonnement",
+    });
+  }
+};
+
+// ==========================================
 // ✅ Export
 // ==========================================
 module.exports = {
   verifyToken,
   verifyAdmin,
   verifyRole,
+  checkSellerSubscription, // 🔥 AJOUT EXPORT
 };

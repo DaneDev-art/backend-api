@@ -400,47 +400,54 @@ module.exports = {
 
   // ========================= PAYOUT =========================
   createPayOutForSeller: async ({ sellerId, amount, operator }) => {
-    if (!mongoose.Types.ObjectId.isValid(sellerId))
-      throw new Error("sellerId invalide");
+  if (!mongoose.Types.ObjectId.isValid(sellerId))
+    throw new Error("sellerId invalide");
 
-    const seller = await Seller.findById(sellerId).lean();
-    if (!seller?.phone) throw new Error("Téléphone vendeur requis");
+  if (amount <= 0) throw new Error("Montant invalide");
 
-    const phone = normalizePhone(seller.phone);
-    const op = resolveOperator(operator, phone);
+  const seller = await Seller.findById(sellerId);
+  if (!seller?.phone) throw new Error("Téléphone vendeur requis");
 
-    const transref = generateTransactionRef("WD");
+  if (seller.balance_available < amount) {
+    throw new Error("Solde insuffisant");
+  }
 
-    const response = await axios.post(
-      QOSPAY[op].DEPOSIT,
-      {
-        msisdn: phone,
-        amount: String(amount),
-        transref,
-        clientid: QOSPAY[op].CLIENT_ID,
-      },
-      getAxiosConfig(op)
-    );
+  const phone = normalizePhone(seller.phone);
+  const op = resolveOperator(operator, phone);
+  const transref = generateTransactionRef("WD");
 
-    const code = response?.data?.responsecode;
-    const status = code === "00" ? "SUCCESS" : "PENDING";
+  const payload = {
+    msisdn: phone,
+    amount: String(amount),
+    transref,
+    clientid: QOSPAY[op].CLIENT_ID,
+    operator: op,
+    currency: "XOF",
+    callbackurl: `${process.env.BACKEND_URL}/api/webhooks/qospay/payout`,
+  };
 
-    await PayoutTransaction.create({
-      seller: seller._id,
-      provider: "QOSPAY",
-      operator: op,
-      amount,
-      currency: "XOF",
-      transaction_id: transref,
-      phone,
-      status,
-      raw_response: response.data,
-    });
+  const response = await axios.post(
+    QOSPAY[op].DEPOSIT,
+    payload,
+    getAxiosConfig(op)
+  );
 
-    return {
-      success: status === "SUCCESS",
-      transaction_id: transref,
-      status,
-    };
-  },
-};
+  await PayoutTransaction.create({
+    seller: seller._id,
+    provider: "QOSPAY",
+    operator: op,
+    amount,
+    currency: "XOF",
+    transaction_id: transref,
+    phone,
+    status: "PENDING", // 🔥 TOUJOURS PENDING
+    raw_response: response.data,
+  });
+
+  return {
+    success: true,
+    transaction_id: transref,
+    status: "PENDING",
+  };
+}
+

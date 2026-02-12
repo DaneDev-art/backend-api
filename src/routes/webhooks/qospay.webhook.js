@@ -1,6 +1,6 @@
 // =============================================
 // routes/webhooks/qospay.webhook.js
-// QOSPAY PAYOUT WEBHOOK — PROD SAFE (FIXED)
+// QOSPAY PAYOUT WEBHOOK — PROD SAFE
 // =============================================
 
 const express = require("express");
@@ -12,16 +12,21 @@ const PayoutTransaction = require("../../models/PayoutTransaction");
 router.post("/payout", async (req, res) => {
   console.log("📥 QOSPay webhook reçu :", req.body);
 
-  const status = String(req.body?.status || "").toUpperCase();
+  // 🔑 Normalisation status
+  let rawStatus = req.body?.status || req.body?.responsecode;
+  const status = String(rawStatus || "").toUpperCase();
 
-  // 🔑 TON ID interne
+  // 🔑 TON ID interne (transref que TU génères)
   const payoutRef =
     req.body?.transref ||
     req.body?.client_transaction_id ||
     null;
 
   // 🔑 ID provider QOSPAY
-  const providerTxId = req.body?.transaction_id || null;
+  const providerTxId =
+    req.body?.transaction_id ||
+    req.body?.qos_transaction_id ||
+    null;
 
   if (!payoutRef || !status) {
     console.warn("⚠️ Webhook QOSPay incomplet", req.body);
@@ -39,13 +44,18 @@ router.post("/payout", async (req, res) => {
       return res.status(200).json({ ok: true });
     }
 
-    // 🔒 Idempotence
+    // 🔒 Idempotence absolue
     if (["SUCCESS", "FAILED"].includes(payout.status)) {
       console.log(`ℹ️ Webhook déjà traité : ${payoutRef}`);
       return res.status(200).json({ ok: true });
     }
 
-    if (status === "SUCCESS") {
+    // 🧠 Mapping statut QOSPAY
+    const isSuccess =
+      status === "SUCCESS" ||
+      status === "00";
+
+    if (isSuccess) {
       await PayoutWebhookService.handleSuccess({
         payout,
         providerTxId,

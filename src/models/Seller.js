@@ -24,6 +24,27 @@ const SellerSchema = new mongoose.Schema(
     balance_available: { type: Number, default: 0 },
 
     role: { type: String, default: "seller" },
+
+    // ==========================================
+    // 🔐 ABONNEMENT ANNUEL VENDEUR (AJOUT)
+    // ==========================================
+    subscription: {
+      status: {
+        type: String,
+        enum: ["FREE", "ACTIVE", "EXPIRED"],
+        default: "FREE",
+      },
+
+      // Date de la première vente réussie
+      firstSaleAt: { type: Date },
+
+      // Période de référence (12 mois)
+      startAt: { type: Date },
+      endAt: { type: Date },
+
+      // Dernier paiement abonnement
+      lastPaymentAt: { type: Date },
+    },
   },
   { timestamps: true }
 );

@@ -152,5 +152,33 @@ exports.lockEscrowAfterPayIn = async ({ orderId, payinResult }) => {
   };
 
   await order.save();
+
+  /* ======================================================
+     🔐 ABONNEMENT VENDEUR – PREMIÈRE VENTE
+  ===================================================== */
+  const seller = await Seller.findById(order.seller);
+
+  if (seller && !seller.subscription?.firstSaleAt) {
+    const now = new Date();
+
+    const addOneYear = (date) => {
+      const d = new Date(date);
+      d.setFullYear(d.getFullYear() + 1);
+      return d;
+    };
+
+    seller.subscription.firstSaleAt = now;
+    seller.subscription.startAt = now;
+    seller.subscription.endAt = addOneYear(now);
+    seller.subscription.status = "FREE";
+
+    await seller.save();
+
+    console.log(
+      `📅 Abonnement gratuit démarré pour le vendeur ${seller._id}`
+    );
+  }
+
   return order;
 };
+
