@@ -20,7 +20,7 @@ const verifyToken = (req, res, next) => {
   const token = authHeader.split(" ")[1];
 
   if (!process.env.JWT_SECRET) {
-    console.error("❌ JWT_SECRET manquant dans l'environnement");
+    console.error("❌ JWT_SECRET manquant");
     return res.status(500).json({
       success: false,
       error: "Erreur serveur",
@@ -30,19 +30,16 @@ const verifyToken = (req, res, next) => {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (!payload?.id && !payload?._id) {
-      return res.status(401).json({
-        success: false,
-        error: "Token invalide",
-      });
-    }
-
     req.user = {
       _id: payload.id || payload._id,
       id: payload.id || payload._id,
       role: payload.role?.toLowerCase() || null,
       email: payload.email || null,
-      phone: payload.phone || payload.fullNumber || payload.phoneNumber || null,
+      phone:
+        payload.phone ||
+        payload.fullNumber ||
+        payload.phoneNumber ||
+        null,
       prefix: payload.prefix || null,
     };
 
@@ -81,7 +78,6 @@ const verifyAdmin = (req, res, next) => {
 
 // ==========================================
 // 🔐 Vérifier rôle spécifique
-// Usage : verifyRole(["buyer", "seller"])
 // ==========================================
 const verifyRole = (roles = []) => {
   const allowed = new Set(roles.map((r) => r.toLowerCase()));
@@ -115,10 +111,9 @@ const checkSellerSubscription = async (req, res, next) => {
     const now = new Date();
 
     if (!seller.subscription?.firstSaleAt) return next();
-
     if (seller.subscription.status === "ACTIVE") return next();
-
-    if (seller.subscription.endAt && now <= seller.subscription.endAt) return next();
+    if (seller.subscription.endAt && now <= seller.subscription.endAt)
+      return next();
 
     seller.subscription.status = "EXPIRED";
     await seller.save();
@@ -140,12 +135,10 @@ const checkSellerSubscription = async (req, res, next) => {
 // ==========================================
 // 🔐 Vérifier rôle vendeur
 // ==========================================
-const { verifyToken } = require("./auth.middleware");
-
 const verifySellerToken = [
-  verifyToken, // 🔥 décode le JWT et remplit req.user
+  verifyToken,
   (req, res, next) => {
-    if (req.user.role !== "seller") {
+    if (req.role !== "seller") {
       return res.status(403).json({
         success: false,
         error: "Accès vendeur requis",
@@ -163,5 +156,5 @@ module.exports = {
   verifyAdmin,
   verifyRole,
   checkSellerSubscription,
-  verifySellerToken, // 🔥 AJOUTÉ
+  verifySellerToken,
 };
