@@ -3,7 +3,6 @@
 // ==========================================
 
 const mongoose = require("mongoose");
-
 const WalletTransaction = require("../models/WalletTransaction");
 const QosPayService = require("../services/QosPayService");
 const User = require("../models/user.model");
@@ -11,10 +10,10 @@ const Seller = require("../models/Seller");
 const ReferralCommission = require("../models/ReferralCommission");
 const PayoutTransaction = require("../models/PayoutTransaction");
 
-/* ======================================================
-   🔵 PAYOUT VENDEUR (VENTES MARKETPLACE)
-   ⚠️ NE DÉBITE PAS ICI — Débit fait par webhook
-====================================================== */
+// ======================================================
+// 🔵 PAYOUT VENDEUR (VENTES MARKETPLACE)
+// ⚠️ NE DÉBITE PAS ICI — Débit fait par webhook
+// ======================================================
 exports.payoutSeller = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -52,9 +51,6 @@ exports.payoutSeller = async (req, res) => {
       throw new Error("Échec du payout fournisseur");
     }
 
-    // ✅ ON NE DÉBITE PAS ICI
-    // Le débit sera fait dans le webhook SUCCESS
-
     await PayoutTransaction.create(
       [
         {
@@ -62,7 +58,7 @@ exports.payoutSeller = async (req, res) => {
           provider,
           amount: withdrawAmount,
           currency: "XOF",
-          transaction_id: payout.transactionId,
+          transaction_id: payout.transaction_id,
           operator,
           prefix: "+228",
           phone,
@@ -79,7 +75,7 @@ exports.payoutSeller = async (req, res) => {
       success: true,
       message: "Retrait vendeur en cours de traitement",
       amount: withdrawAmount,
-      balance_available: available, // inchangé
+      balance_available: available,
       status: "PENDING",
     });
   } catch (err) {
@@ -95,10 +91,10 @@ exports.payoutSeller = async (req, res) => {
   }
 };
 
-/* ======================================================
-   🔵 PAYOUT USER (RETRAIT REFERRAL)
-   ⚠️ NE DÉBITE PAS ICI — webhook fera le débit
-====================================================== */
+// ======================================================
+// 🔵 PAYOUT USER (RETRAIT REFERRAL)
+// ⚠️ NE DÉBITE PAS ICI — webhook fera le débit
+// ======================================================
 exports.payout = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -132,20 +128,18 @@ exports.payout = async (req, res) => {
       throw new Error("Échec du payout QOSPAY");
     }
 
-    // ✅ PAS DE DÉBIT ICI
-
     await WalletTransaction.create(
       [
         {
           user: userId,
           amount: withdrawAmount,
           balanceBefore: available,
-          balanceAfter: available, // inchangé
+          balanceAfter: available,
           type: "WITHDRAWAL_REQUEST",
           meta: {
             provider: "QOSPAY",
             operator,
-            transaction_id: payout.transactionId,
+            transaction_id: payout.transaction_id,
             status: "PENDING",
           },
         },
@@ -172,5 +166,77 @@ exports.payout = async (req, res) => {
     });
   } finally {
     session.endSession();
+  }
+};
+
+// ======================================================
+// 🔵 GET BALANCE WALLET USER
+// ======================================================
+exports.getBalance = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const wallet = await WalletTransaction.aggregate([
+      { $match: { user: mongoose.Types.ObjectId(userId) } },
+      { $group: { _id: null, balance: { $sum: "$amount" } } },
+    ]);
+
+    const balance = wallet?.[0]?.balance || 0;
+
+    res.json({ success: true, balance });
+  } catch (err) {
+    console.error("❌ getBalance:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ======================================================
+// 🔵 GET WALLET TRANSACTIONS
+// ======================================================
+exports.getTransactions = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const transactions = await WalletTransaction.find({ user: userId }).sort({
+      createdAt: -1,
+    });
+
+    res.json({ success: true, transactions });
+  } catch (err) {
+    console.error("❌ getTransactions:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ======================================================
+// 🔵 TRANSFER COMMISSION → AVAILABLE BALANCE
+// ======================================================
+exports.transferCommission = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const commissions = await ReferralCommission.find({
+      user: userId,
+      status: "PENDING",
+    });
+
+    if (!commissions.length) throw new Error("Aucune commission disponible");
+
+    let totalTransferred = 0;
+    for (const c of commissions) {
+      totalTransferred += c.amount;
+      c.status = "TRANSFERRED";
+      await c.save();
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      $inc: { balance_available: totalTransferred },
+    });
+
+    res.json({
+      success: true,
+      message: "Commissions transférées vers le solde disponible",
+      totalTransferred,
+    });
+  } catch (err) {
+    console.error("❌ transferCommission:", err);
+    res.status(400).json({ success: false, message: err.message });
   }
 };

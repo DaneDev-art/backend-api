@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 const WalletController = require("../controllers/wallet.controller");
-const { verifyToken } = require("../middleware/auth.middleware");
+const { verifyToken, verifySellerToken } = require("../middleware/auth.middleware");
 
 /* ======================================================
    👤 WALLET USER (CLIENT / AFFILIÉ)
@@ -12,7 +12,7 @@ const { verifyToken } = require("../middleware/auth.middleware");
 // 🔹 Solde wallet user
 router.get(
   "/balance",
-  verifyToken,
+  verifyToken, // ✅ uniquement client/auth
   WalletController.getBalance
 );
 
@@ -44,7 +44,7 @@ router.post(
 // 🔹 Retrait vendeur (fonds issus des ventes)
 router.post(
   "/payout/seller",
-  verifyToken, // ⚠️ idéalement verifySellerToken plus tard
+  verifySellerToken, // ✅ middleware spécifique vendeur
   WalletController.payoutSeller
 );
 
