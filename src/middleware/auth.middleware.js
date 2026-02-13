@@ -140,23 +140,20 @@ const checkSellerSubscription = async (req, res, next) => {
 // ==========================================
 // 🔐 Vérifier rôle vendeur
 // ==========================================
-const verifySellerToken = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({
-      success: false,
-      error: "Non authentifié",
-    });
-  }
+const { verifyToken } = require("./auth.middleware");
 
-  if (req.user.role !== "seller") {
-    return res.status(403).json({
-      success: false,
-      error: "Accès vendeur requis",
-    });
-  }
-
-  next();
-};
+const verifySellerToken = [
+  verifyToken, // 🔥 décode le JWT et remplit req.user
+  (req, res, next) => {
+    if (req.user.role !== "seller") {
+      return res.status(403).json({
+        success: false,
+        error: "Accès vendeur requis",
+      });
+    }
+    next();
+  },
+];
 
 // ==========================================
 // ✅ Export
