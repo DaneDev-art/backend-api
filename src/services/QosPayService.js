@@ -449,5 +449,6 @@ module.exports = {
     transaction_id: transref,
     status: "PENDING",
   };
-}
+ }
+};
 
