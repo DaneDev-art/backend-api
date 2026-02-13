@@ -141,12 +141,20 @@ const checkSellerSubscription = async (req, res, next) => {
 // 🔐 Vérifier rôle vendeur
 // ==========================================
 const verifySellerToken = (req, res, next) => {
-  if (!req.user || req.user.role !== "seller") {
-    return res.status(403).json({
+  if (!req.user) {
+    return res.status(401).json({
       success: false,
-      error: "Accès vendeur refusé",
+      error: "Non authentifié",
     });
   }
+
+  if (req.user.role !== "seller") {
+    return res.status(403).json({
+      success: false,
+      error: "Accès vendeur requis",
+    });
+  }
+
   next();
 };
 
