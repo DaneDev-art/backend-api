@@ -2,14 +2,13 @@
 // src/middleware/auth.middleware.js
 // ==========================================
 const jwt = require("jsonwebtoken");
-const Seller = require("../models/Seller"); // 🔥 AJOUT
+const Seller = require("../models/Seller");
 
 // ==========================================
 // 🔐 Vérifier authentification utilisateur
 // ==========================================
 const verifyToken = (req, res, next) => {
-  const authHeader =
-    req.headers.authorization || req.headers.Authorization;
+  const authHeader = req.headers.authorization || req.headers.Authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({
@@ -43,13 +42,7 @@ const verifyToken = (req, res, next) => {
       id: payload.id || payload._id,
       role: payload.role?.toLowerCase() || null,
       email: payload.email || null,
-
-      phone:
-        payload.phone ||
-        payload.fullNumber ||
-        payload.phoneNumber ||
-        null,
-
+      phone: payload.phone || payload.fullNumber || payload.phoneNumber || null,
       prefix: payload.prefix || null,
     };
 
@@ -109,13 +102,9 @@ const verifyRole = (roles = []) => {
 // ==========================================
 const checkSellerSubscription = async (req, res, next) => {
   try {
-    // Ne s'applique qu'aux vendeurs
-    if (req.role !== "seller") {
-      return next();
-    }
+    if (req.role !== "seller") return next();
 
     const seller = await Seller.findOne({ user: req.user._id });
-
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -125,25 +114,12 @@ const checkSellerSubscription = async (req, res, next) => {
 
     const now = new Date();
 
-    // Si pas encore de première vente → autorisé
-    if (!seller.subscription?.firstSaleAt) {
-      return next();
-    }
+    if (!seller.subscription?.firstSaleAt) return next();
 
-    // Si abonnement actif → autorisé
-    if (seller.subscription.status === "ACTIVE") {
-      return next();
-    }
+    if (seller.subscription.status === "ACTIVE") return next();
 
-    // Si période gratuite encore valide → autorisé
-    if (
-      seller.subscription.endAt &&
-      now <= seller.subscription.endAt
-    ) {
-      return next();
-    }
+    if (seller.subscription.endAt && now <= seller.subscription.endAt) return next();
 
-    // Sinon → expiré
     seller.subscription.status = "EXPIRED";
     await seller.save();
 
@@ -162,11 +138,25 @@ const checkSellerSubscription = async (req, res, next) => {
 };
 
 // ==========================================
+// 🔐 Vérifier rôle vendeur
+// ==========================================
+const verifySellerToken = (req, res, next) => {
+  if (!req.user || req.user.role !== "seller") {
+    return res.status(403).json({
+      success: false,
+      error: "Accès vendeur refusé",
+    });
+  }
+  next();
+};
+
+// ==========================================
 // ✅ Export
 // ==========================================
 module.exports = {
   verifyToken,
   verifyAdmin,
   verifyRole,
-  checkSellerSubscription, // 🔥 AJOUT EXPORT
+  checkSellerSubscription,
+  verifySellerToken, // 🔥 AJOUTÉ
 };
