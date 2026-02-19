@@ -18,36 +18,45 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
+
             echo "🔹 Début du déploiement..."
             cd ~/backend-api || exit 1
 
-            echo "🔹 Sauvegarde temporaire du serveur..."
-            tar czf backup_$(date +%Y%m%d_%H%M%S).tar.gz . || echo "Échec de la sauvegarde, on continue"
+            echo "🔹 Sauvegarde temporaire..."
+            tar czf backup_$(date +%Y%m%d_%H%M%S).tar.gz . || echo "⚠️ Sauvegarde échouée, on continue"
 
-            echo "🔹 Récupération des dernières modifications..."
+            echo "🔹 Récupération du code depuis GitHub..."
             git fetch origin main
             git reset --hard origin/main
 
             echo "🔹 Installation des dépendances..."
             npm install --omit=dev
 
-            echo "🔹 Démarrage temporaire sur un port secondaire..."
+            echo "🔹 Démarrage serveur temporaire..."
             TEMP_PORT=5001
-            pm2 start server.js --name backend-temp -- --port $TEMP_PORT
+            PORT=$TEMP_PORT pm2 start server.js --name backend-temp --update-env
 
-            echo "🔹 Vérification que le serveur temporaire écoute..."
-            for i in {1..10}; do
-              nc -z localhost $TEMP_PORT && echo "✅ Serveur temporaire actif sur $TEMP_PORT" && break
-              echo "⏳ En attente du serveur temporaire..."
-              sleep 3
-            done
+            echo "🔹 Attente du démarrage..."
+            sleep 5
 
-            nc -z localhost $TEMP_PORT || (echo "❌ Le serveur temporaire ne répond pas" && pm2 delete backend-temp && exit 1)
+            echo "🔹 Vérification du serveur temporaire..."
+            if nc -z localhost $TEMP_PORT; then
+              echo "✅ Serveur temporaire actif sur port $TEMP_PORT"
 
-            echo "🔹 Remplacement du serveur en production..."
-            pm2 delete backend-api || echo "Pas de serveur existant"
-            pm2 start server.js --name backend-api --update-env
-            pm2 delete backend-temp
-            pm2 save
+              echo "🔹 Remplacement du serveur production..."
+              pm2 delete backend-api || echo "⚠️ Aucun serveur backend-api existant"
 
-            echo "✅ Déploiement terminé avec succès et zéro downtime."
+              PORT=5000 pm2 start server.js --name backend-api --update-env
+
+              echo "🔹 Suppression du serveur temporaire..."
+              pm2 delete backend-temp
+
+              echo "🔹 Sauvegarde PM2..."
+              pm2 save
+
+              echo "✅ Déploiement terminé avec succès (Zero Downtime)"
+            else
+              echo "❌ Le serveur temporaire ne répond pas"
+              pm2 delete backend-temp || true
+              exit 1
+            fi
