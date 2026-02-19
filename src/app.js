@@ -138,7 +138,7 @@ app.use(
 // =======================
 app.get("/", (req, res) => {
   res.json({
-    message: "🚀 Bienvenue sur l’API Marketplace",
+    message: "🚀 API Marketplace — VERSION AUTO DEPLOY",
     environment: process.env.NODE_ENV || "development",
     docs: "/api",
   });
