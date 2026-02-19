@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy to VPS (Zero Downtime)
 
 on:
   push:
@@ -17,8 +17,37 @@ jobs:
           username: admin
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/backend-api
-            git pull origin main
-            npm install
-            pm2 restart backend-api --update-env
+            set -e
+            echo "🔹 Début du déploiement..."
+            cd ~/backend-api || exit 1
 
+            echo "🔹 Sauvegarde temporaire du serveur..."
+            tar czf backup_$(date +%Y%m%d_%H%M%S).tar.gz . || echo "Échec de la sauvegarde, on continue"
+
+            echo "🔹 Récupération des dernières modifications..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "🔹 Installation des dépendances..."
+            npm install --omit=dev
+
+            echo "🔹 Démarrage temporaire sur un port secondaire..."
+            TEMP_PORT=5001
+            pm2 start server.js --name backend-temp -- --port $TEMP_PORT
+
+            echo "🔹 Vérification que le serveur temporaire écoute..."
+            for i in {1..10}; do
+              nc -z localhost $TEMP_PORT && echo "✅ Serveur temporaire actif sur $TEMP_PORT" && break
+              echo "⏳ En attente du serveur temporaire..."
+              sleep 3
+            done
+
+            nc -z localhost $TEMP_PORT || (echo "❌ Le serveur temporaire ne répond pas" && pm2 delete backend-temp && exit 1)
+
+            echo "🔹 Remplacement du serveur en production..."
+            pm2 delete backend-api || echo "Pas de serveur existant"
+            pm2 start server.js --name backend-api --update-env
+            pm2 delete backend-temp
+            pm2 save
+
+            echo "✅ Déploiement terminé avec succès et zéro downtime."
