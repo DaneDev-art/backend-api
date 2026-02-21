@@ -1,6 +1,6 @@
 // ===============================
 // routes/messageRoutes.js
-// Version PRO compatible User & Seller avec Cloudinary
+// Version PRO compatible User & Seller avec Cloudinary + customOrder
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -12,6 +12,7 @@ const Message = require("../models/Message");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
+const CustomOrder = require("../models/CustomOrder"); // 🔹 ajouté
 const cloudinary = require("cloudinary").v2;
 
 // ============================================
@@ -52,7 +53,7 @@ const upload = multer({ storage });
 // ============================================
 router.post("/", async (req, res) => {
   try {
-    const { senderId, receiverId, message, productId } = req.body;
+    const { senderId, receiverId, message, productId, customOrderId } = req.body;
     if (!senderId || !receiverId || !message?.trim())
       return res.status(400).json({ error: "Champs manquants ou invalides" });
 
@@ -62,6 +63,7 @@ router.post("/", async (req, res) => {
       content: message,
       type: "text",
       productId: productId ? productId.toString() : null,
+      customOrderId: customOrderId ? customOrderId.toString() : null, // 🔹 support customOrder
       unread: [receiverId.toString()],
     });
 
@@ -82,7 +84,7 @@ router.post("/", async (req, res) => {
 // ============================================
 router.post("/media", upload.single("file"), async (req, res) => {
   try {
-    const { senderId, receiverId, productId, type } = req.body;
+    const { senderId, receiverId, productId, type, customOrderId } = req.body;
 
     if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
       return res.status(400).json({ error: "Champs manquants ou type invalide" });
@@ -91,7 +93,6 @@ router.post("/media", upload.single("file"), async (req, res) => {
       return res.status(500).json({ error: "Configuration Cloudinary manquante" });
     }
 
-    // 🔹 Déterminer resource_type
     const resourceType = type === "audio" ? "raw" : "image";
 
     const cloudResult = await cloudinary.uploader.upload(req.file.path, {
@@ -99,7 +100,6 @@ router.post("/media", upload.single("file"), async (req, res) => {
       resource_type: resourceType,
     });
 
-    // 🔹 Supprimer fichier local après upload
     fs.unlinkSync(req.file.path);
 
     const newMessage = await Message.create({
@@ -108,6 +108,7 @@ router.post("/media", upload.single("file"), async (req, res) => {
       content: cloudResult.secure_url,
       type,
       productId: productId ? productId.toString() : null,
+      customOrderId: customOrderId ? customOrderId.toString() : null, // 🔹 support customOrder
       unread: [receiverId.toString()],
     });
 
@@ -195,20 +196,20 @@ router.get("/conversations/:userId", async (req, res) => {
     if (!messages || messages.length === 0) return res.json([]);
 
     const convMap = new Map();
-
     for (const msg of messages) {
       const fromId = msg.from?.toString();
       const toId = msg.to?.toString();
       if (!fromId || !toId) continue;
 
       const otherUserId = fromId === userId.toString() ? toId : fromId;
-      const productKey = msg.productId ? msg.productId.toString() : "no_product";
+      const productKey = msg.productId ? msg.productId.toString() : msg.customOrderId ? msg.customOrderId.toString() : "no_product";
       const key = `${otherUserId}_${productKey}`;
 
       if (!convMap.has(key)) {
         convMap.set(key, {
           otherUserId,
           productId: msg.productId ? msg.productId.toString() : null,
+          customOrderId: msg.customOrderId ? msg.customOrderId.toString() : null, // 🔹 ajouté
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
           unread: msg.unread?.includes(userId.toString()) ? 1 : 0,
@@ -238,9 +239,18 @@ router.get("/conversations/:userId", async (req, res) => {
     }
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
+    const customOrderIds = conversations.map(c => c.customOrderId).filter(id => id);
+    let customOrders = [];
+    if (customOrderIds.length > 0) {
+      customOrders = await CustomOrder.find({ _id: { $in: customOrderIds } })
+        .select("items totalAmount shippingFee currency status"); // 🔹 sélectionner infos utiles
+    }
+    const customOrderMap = Object.fromEntries(customOrders.map(co => [co._id.toString(), co]));
+
     const enrichedConversations = conversations.map(c => {
       const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
       const product = c.productId ? productMap[c.productId] : null;
+      const customOrder = c.customOrderId ? customOrderMap[c.customOrderId] : null;
 
       const otherUserData = user
         ? {
@@ -256,6 +266,7 @@ router.get("/conversations/:userId", async (req, res) => {
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
+        customOrder, // 🔹 inclut info commande pour affichage paiement
       };
     });
 
@@ -278,7 +289,9 @@ router.get("/:user1/:user2", async (req, res) => {
         { from: user1.toString(), to: user2.toString() },
         { from: user2.toString(), to: user1.toString() },
       ],
-    }).sort({ createdAt: 1 });
+    })
+      .populate("customOrderId") // 🔹 inclut détails customOrder si existant
+      .sort({ createdAt: 1 });
 
     res.json(messages);
   } catch (err) {
@@ -292,15 +305,20 @@ router.get("/:user1/:user2", async (req, res) => {
 // ============================================
 router.put("/markAsRead", async (req, res) => {
   try {
-    const { userId, otherUserId, productId } = req.body;
+    const { userId, otherUserId, productId, customOrderId } = req.body;
 
-    const result = await Message.updateMany(
-      { from: otherUserId.toString(), to: userId.toString(), productId: productId || null, unread: userId.toString() },
-      { $pull: { unread: userId.toString() } }
-    );
+    const filter = {
+      from: otherUserId.toString(),
+      to: userId.toString(),
+      unread: userId.toString(),
+    };
+    if (productId) filter.productId = productId;
+    if (customOrderId) filter.customOrderId = customOrderId;
+
+    const result = await Message.updateMany(filter, { $pull: { unread: userId.toString() } });
 
     if (io) {
-      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId });
+      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId, customOrderId });
     }
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
