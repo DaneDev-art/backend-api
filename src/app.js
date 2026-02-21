@@ -9,6 +9,7 @@ const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const emailRoutes = require("./routes/emailRoutes");
 const deployAuth = require("./middleware/deployAuth");
+const customOrderRoutes = require("./routes/customOrder.routes");
 
 // 🔹 CORS middleware centralisé (frontend)
 const corsOptions = require("./middleware/cors.middleware");
@@ -86,6 +87,9 @@ app.use("/api/sellers", require("./routes/seller.routes"));
 
 // 🛒 Orders
 app.use("/api/orders", require("./routes/order.routes"));
+
+//CustomOrder
+app.use("/api/custom-orders", customOrderRoutes);
 
 // 📧 Email
 app.use("/api/email", emailRoutes);

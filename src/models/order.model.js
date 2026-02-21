@@ -21,8 +21,23 @@ const OrderSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+/* ======================================================
+   🧾 SOURCE DE LA COMMANDE
+====================================================== */
+source: {
+  type: String,
+  enum: ["MARKETPLACE", "CUSTOM"],
+  default: "MARKETPLACE",
+  index: true,
+},
 
-    /* ======================================================
+customOrder: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "CustomOrder",
+  index: true,
+},
+
+  /* ======================================================
        📦 PRODUITS — SNAPSHOT IMMUTABLE
     ====================================================== */
     items: [
