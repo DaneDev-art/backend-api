@@ -1,6 +1,6 @@
 // ===============================
 // routes/messageRoutes.js
-// Version PRO compatible User & Seller avec Cloudinary + customOrder
+// Version PRO compatible User & Seller avec Cloudinary + support CustomOrder
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -8,11 +8,13 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const mongoose = require("mongoose");
+
 const Message = require("../models/Message");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
-const CustomOrder = require("../models/CustomOrder"); // 🔹 ajouté
+const CustomOrder = require("../models/CustomOrder"); // <-- ajout
+
 const cloudinary = require("cloudinary").v2;
 
 // ============================================
@@ -49,21 +51,28 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ============================================
-// 🔹 Envoyer un message texte
+// 🔹 Envoyer un message texte ou customOrder
 // ============================================
 router.post("/", async (req, res) => {
   try {
     const { senderId, receiverId, message, productId, customOrderId } = req.body;
-    if (!senderId || !receiverId || !message?.trim())
+    if (!senderId || !receiverId || (!message?.trim() && !customOrderId))
       return res.status(400).json({ error: "Champs manquants ou invalides" });
+
+    let customOrder = null;
+    if (customOrderId) {
+      customOrder = await CustomOrder.findById(customOrderId);
+      if (!customOrder)
+        return res.status(404).json({ error: "CustomOrder non trouvée" });
+    }
 
     const newMessage = await Message.create({
       from: senderId.toString(),
       to: receiverId.toString(),
-      content: message,
-      type: "text",
+      content: message || (customOrder ? "[CustomOrder]" : ""),
+      type: customOrder ? "CUSTOM_ORDER" : "text",
       productId: productId ? productId.toString() : null,
-      customOrderId: customOrderId ? customOrderId.toString() : null, // 🔹 support customOrder
+      customOrderId: customOrder ? customOrder._id : null,
       unread: [receiverId.toString()],
     });
 
@@ -80,35 +89,41 @@ router.post("/", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Envoyer un message media (image/audio) sur Cloudinary
+// 🔹 Envoyer un message media (image/audio) ou customOrder
 // ============================================
 router.post("/media", upload.single("file"), async (req, res) => {
   try {
     const { senderId, receiverId, productId, type, customOrderId } = req.body;
-
-    if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
+    if (!senderId || !receiverId || (!req.file && !customOrderId))
       return res.status(400).json({ error: "Champs manquants ou type invalide" });
 
-    if (!cloudinary.config().api_key) {
-      return res.status(500).json({ error: "Configuration Cloudinary manquante" });
+    let customOrder = null;
+    if (customOrderId) {
+      customOrder = await CustomOrder.findById(customOrderId);
+      if (!customOrder)
+        return res.status(404).json({ error: "CustomOrder non trouvée" });
     }
 
-    const resourceType = type === "audio" ? "raw" : "image";
-
-    const cloudResult = await cloudinary.uploader.upload(req.file.path, {
-      folder: `messages/${senderId}_${receiverId}`,
-      resource_type: resourceType,
-    });
-
-    fs.unlinkSync(req.file.path);
+    let content = "";
+    if (req.file) {
+      const resourceType = type === "audio" ? "raw" : "image";
+      const cloudResult = await cloudinary.uploader.upload(req.file.path, {
+        folder: `messages/${senderId}_${receiverId}`,
+        resource_type: resourceType,
+      });
+      fs.unlinkSync(req.file.path);
+      content = cloudResult.secure_url;
+    } else if (customOrder) {
+      content = "[CustomOrder]";
+    }
 
     const newMessage = await Message.create({
       from: senderId.toString(),
       to: receiverId.toString(),
-      content: cloudResult.secure_url,
-      type,
+      content,
+      type: customOrder ? "CUSTOM_ORDER" : type,
       productId: productId ? productId.toString() : null,
-      customOrderId: customOrderId ? customOrderId.toString() : null, // 🔹 support customOrder
+      customOrderId: customOrder ? customOrder._id : null,
       unread: [receiverId.toString()],
     });
 
@@ -136,7 +151,8 @@ router.put("/update/:messageId", async (req, res) => {
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString()) return res.status(403).json({ error: "Permission refusée" });
+    if (msg.from.toString() !== senderId.toString())
+      return res.status(403).json({ error: "Permission refusée" });
 
     msg.content = newContent;
     await msg.save();
@@ -164,7 +180,8 @@ router.delete("/delete/:messageId", async (req, res) => {
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString()) return res.status(403).json({ error: "Permission refusée" });
+    if (msg.from.toString() !== senderId.toString())
+      return res.status(403).json({ error: "Permission refusée" });
 
     msg.content = "[message supprimé]";
     await msg.save();
@@ -202,17 +219,17 @@ router.get("/conversations/:userId", async (req, res) => {
       if (!fromId || !toId) continue;
 
       const otherUserId = fromId === userId.toString() ? toId : fromId;
-      const productKey = msg.productId ? msg.productId.toString() : msg.customOrderId ? msg.customOrderId.toString() : "no_product";
+      const productKey = msg.productId ? msg.productId.toString() : "no_product";
       const key = `${otherUserId}_${productKey}`;
 
       if (!convMap.has(key)) {
         convMap.set(key, {
           otherUserId,
           productId: msg.productId ? msg.productId.toString() : null,
-          customOrderId: msg.customOrderId ? msg.customOrderId.toString() : null, // 🔹 ajouté
           lastMessage: msg.content || "",
           lastDate: msg.createdAt,
           unread: msg.unread?.includes(userId.toString()) ? 1 : 0,
+          customOrderId: msg.customOrderId || null, // <-- support customOrder
         });
       } else {
         const existing = convMap.get(key);
@@ -239,18 +256,9 @@ router.get("/conversations/:userId", async (req, res) => {
     }
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
 
-    const customOrderIds = conversations.map(c => c.customOrderId).filter(id => id);
-    let customOrders = [];
-    if (customOrderIds.length > 0) {
-      customOrders = await CustomOrder.find({ _id: { $in: customOrderIds } })
-        .select("items totalAmount shippingFee currency status"); // 🔹 sélectionner infos utiles
-    }
-    const customOrderMap = Object.fromEntries(customOrders.map(co => [co._id.toString(), co]));
-
     const enrichedConversations = conversations.map(c => {
       const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
       const product = c.productId ? productMap[c.productId] : null;
-      const customOrder = c.customOrderId ? customOrderMap[c.customOrderId] : null;
 
       const otherUserData = user
         ? {
@@ -266,7 +274,6 @@ router.get("/conversations/:userId", async (req, res) => {
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
-        customOrder, // 🔹 inclut info commande pour affichage paiement
       };
     });
 
@@ -279,6 +286,7 @@ router.get("/conversations/:userId", async (req, res) => {
 
 // ============================================
 // 🔹 Récupérer tous les messages entre 2 utilisateurs
+//    avec population de la customOrder
 // ============================================
 router.get("/:user1/:user2", async (req, res) => {
   try {
@@ -290,7 +298,7 @@ router.get("/:user1/:user2", async (req, res) => {
         { from: user2.toString(), to: user1.toString() },
       ],
     })
-      .populate("customOrderId") // 🔹 inclut détails customOrder si existant
+      .populate("customOrderId")
       .sort({ createdAt: 1 });
 
     res.json(messages);
@@ -305,20 +313,15 @@ router.get("/:user1/:user2", async (req, res) => {
 // ============================================
 router.put("/markAsRead", async (req, res) => {
   try {
-    const { userId, otherUserId, productId, customOrderId } = req.body;
+    const { userId, otherUserId, productId } = req.body;
 
-    const filter = {
-      from: otherUserId.toString(),
-      to: userId.toString(),
-      unread: userId.toString(),
-    };
-    if (productId) filter.productId = productId;
-    if (customOrderId) filter.customOrderId = customOrderId;
-
-    const result = await Message.updateMany(filter, { $pull: { unread: userId.toString() } });
+    const result = await Message.updateMany(
+      { from: otherUserId.toString(), to: userId.toString(), productId: productId || null, unread: userId.toString() },
+      { $pull: { unread: userId.toString() } }
+    );
 
     if (io) {
-      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId, customOrderId });
+      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId });
     }
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
