@@ -1,6 +1,6 @@
 // ===============================
 // routes/messageRoutes.js
-// Version PRO corrigée : Conversation + Cloudinary + Compatibilité ancien front
+// Version finale PRO : Conversation + Cloudinary + compatibilité front ancien et moderne
 // ===============================
 
 const express = require("express");
@@ -14,7 +14,6 @@ const Conversation = require("../models/Conversation");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
-
 const cloudinary = require("cloudinary").v2;
 
 // ============================================
@@ -51,7 +50,40 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ============================================
-// POST / - Envoyer un message texte
+// Helper: trouver ou créer conversation
+// ============================================
+async function getOrCreateConversation(senderId, receiverId, productId, initialMessage) {
+  // Chercher conversation existante pour ces deux utilisateurs + produit
+  let conversation = await Conversation.findOne({
+    participants: { $all: [senderId, receiverId], $size: 2 },
+    "product.productId": productId ? productId : { $exists: false },
+  });
+
+  if (!conversation) {
+    // Déterminer seller et client
+    const senderIsSeller = await Seller.exists({ _id: senderId });
+    const sellerId = senderIsSeller ? senderId : receiverId;
+    const clientId = senderIsSeller ? receiverId : senderId;
+
+    conversation = await Conversation.create({
+      participants: [senderId, receiverId],
+      seller: sellerId,
+      client: clientId,
+      product: productId ? { productId } : {},
+      lastMessage: initialMessage || "",
+      lastDate: new Date(),
+      unreadCounts: {
+        [receiverId]: 1,
+        [senderId]: 0,
+      },
+    });
+  }
+
+  return conversation;
+}
+
+// ============================================
+// POST / - Envoyer message texte
 // ============================================
 router.post("/", async (req, res) => {
   try {
@@ -59,36 +91,23 @@ router.post("/", async (req, res) => {
     if (!senderId || !receiverId || !message?.trim())
       return res.status(400).json({ error: "Champs manquants ou invalides" });
 
-    // -- Trouver ou créer conversation
-    let conversation = null;
+    let conversation;
     if (conversationId) {
       conversation = await Conversation.findById(conversationId);
+      if (!conversation) return res.status(404).json({ error: "Conversation non trouvée" });
     } else {
-      conversation = await Conversation.findOne({
-        participants: { $all: [senderId, receiverId], $size: 2 },
-        "product.productId": productId ? productId : { $exists: true },
-      });
-
-      if (!conversation) {
-        conversation = await Conversation.create({
-          participants: [senderId, receiverId],
-          product: productId ? { productId } : {},
-        });
-      }
+      conversation = await getOrCreateConversation(senderId, receiverId, productId, message);
     }
 
-    // -- Créer message
     const newMessage = await Message.create({
       conversation: conversation._id,
       sender: senderId,
-      receiver: receiverId,
       text: message,
       type: "TEXT",
-      productId: productId || null,
       readBy: [senderId],
     });
 
-    // -- Mettre à jour conversation
+    // Mettre à jour conversation
     const otherUser = conversation.participants.find((id) => id.toString() !== senderId);
     await Conversation.findByIdAndUpdate(conversation._id, {
       lastMessage: message,
@@ -96,12 +115,8 @@ router.post("/", async (req, res) => {
       $inc: { [`unreadCounts.${otherUser}`]: 1 },
     });
 
-    // -- Socket
-    if (io) {
-      io.to(conversation._id.toString()).emit("message:new", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-    }
+    // Socket.IO
+    if (io) io.to(conversation._id.toString()).emit("message:new", newMessage);
 
     res.status(201).json(newMessage);
   } catch (err) {
@@ -111,16 +126,28 @@ router.post("/", async (req, res) => {
 });
 
 // ============================================
-// POST /media - Envoyer un média
+// POST /media - Envoyer image/audio
 // ============================================
 router.post("/media", upload.single("file"), async (req, res) => {
   try {
     const { conversationId, senderId, receiverId, type, productId } = req.body;
-    if (!req.file || !senderId || !receiverId)
-      return res.status(400).json({ error: "Champs manquants ou fichier manquant" });
+    if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
+      return res.status(400).json({ error: "Champs manquants ou type invalide" });
+
+    let conversation;
+    if (conversationId) {
+      conversation = await Conversation.findById(conversationId);
+      if (!conversation) return res.status(404).json({ error: "Conversation non trouvée" });
+    } else {
+      conversation = await getOrCreateConversation(
+        senderId,
+        receiverId,
+        productId,
+        type === "audio" ? "[Audio]" : "[Image]"
+      );
+    }
 
     const resourceType = type === "audio" ? "raw" : "image";
-
     const uploadResult = await cloudinary.uploader.upload(req.file.path, {
       folder: `messages/${senderId}_${receiverId}`,
       resource_type: resourceType,
@@ -128,21 +155,21 @@ router.post("/media", upload.single("file"), async (req, res) => {
     fs.unlinkSync(req.file.path);
 
     const newMessage = await Message.create({
-      conversation: conversationId,
+      conversation: conversation._id,
       sender: senderId,
-      receiver: receiverId,
       type: type === "audio" ? "AUDIO" : "IMAGE",
       mediaUrl: uploadResult.secure_url,
-      productId: productId || null,
       readBy: [senderId],
     });
 
-    // -- Socket
-    if (io) {
-      io.to(conversationId).emit("message:new", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-    }
+    const otherUser = conversation.participants.find((id) => id.toString() !== senderId);
+    await Conversation.findByIdAndUpdate(conversation._id, {
+      lastMessage: type === "audio" ? "[Audio]" : "[Image]",
+      lastDate: new Date(),
+      $inc: { [`unreadCounts.${otherUser}`]: 1 },
+    });
+
+    if (io) io.to(conversation._id.toString()).emit("message:new", newMessage);
 
     res.status(201).json(newMessage);
   } catch (err) {
@@ -152,7 +179,7 @@ router.post("/media", upload.single("file"), async (req, res) => {
 });
 
 // ============================================
-// PUT /update/:messageId - Modifier un message
+// PUT /update/:messageId - Modifier message
 // ============================================
 router.put("/update/:messageId", async (req, res) => {
   try {
@@ -168,10 +195,12 @@ router.put("/update/:messageId", async (req, res) => {
     msg.text = newContent;
     await msg.save();
 
+    const conversation = await Conversation.findById(msg.conversation);
+    const otherUser = conversation.participants.find((id) => id.toString() !== senderId);
+
     if (io) {
-      io.to(msg.conversation.toString()).emit("message:updated", msg);
-      io.to(msg.sender.toString()).emit("message:updated", msg);
-      io.to(msg.receiver.toString()).emit("message:updated", msg);
+      io.to(conversation._id.toString()).emit("message:updated", msg);
+      io.to(otherUser.toString()).emit("message:updated", msg);
     }
 
     res.json(msg);
@@ -182,7 +211,7 @@ router.put("/update/:messageId", async (req, res) => {
 });
 
 // ============================================
-// DELETE /delete/:messageId - Supprimer un message
+// DELETE /delete/:messageId - Supprimer message
 // ============================================
 router.delete("/delete/:messageId", async (req, res) => {
   try {
@@ -193,10 +222,12 @@ router.delete("/delete/:messageId", async (req, res) => {
     msg.text = "[message supprimé]";
     await msg.save();
 
+    const conversation = await Conversation.findById(msg.conversation);
+    const otherUser = conversation.participants.find((id) => id.toString() !== msg.sender.toString());
+
     if (io) {
-      io.to(msg.conversation.toString()).emit("message:deleted", msg);
-      io.to(msg.sender.toString()).emit("message:deleted", msg);
-      io.to(msg.receiver.toString()).emit("message:deleted", msg);
+      io.to(conversation._id.toString()).emit("message:deleted", msg);
+      io.to(otherUser.toString()).emit("message:deleted", msg);
     }
 
     res.json({ success: true });
@@ -207,19 +238,16 @@ router.delete("/delete/:messageId", async (req, res) => {
 });
 
 // ============================================
-// GET /conversations/:userId - Lister conversations
+// GET /conversations/:userId - Lister conversations (ancien front)
 // ============================================
 router.get("/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    const messages = await Message.find({ $or: [{ sender: userId }, { receiver: userId }] })
+      .sort({ createdAt: -1 })
+      .lean();
+    if (!messages.length) return res.json([]);
 
-    const messages = await Message.find({
-      $or: [{ sender: userId }, { receiver: userId }],
-    }).sort({ createdAt: -1 }).lean();
-
-    if (!messages || messages.length === 0) return res.json([]);
-
-    // -- Grouper messages par conversation (ancien front)
     const convMap = new Map();
     for (const msg of messages) {
       const otherUserId = msg.sender.toString() === userId ? msg.receiver.toString() : msg.sender.toString();
@@ -242,28 +270,29 @@ router.get("/conversations/:userId", async (req, res) => {
 
     const conversations = Array.from(convMap.values());
 
-    // -- Récupérer info utilisateurs et produits
-    const userIds = conversations.map(c => c.otherUserId);
+    const userIds = conversations.map((c) => c.otherUserId);
     const users = await User.find({ _id: { $in: userIds } }).select("name fullName username avatar isOnline");
     const sellers = await Seller.find({ _id: { $in: userIds } }).select("shopName name avatar isOnline");
-    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
-    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), s]));
 
-    const productIds = conversations.map(c => c.productId).filter(Boolean);
+    const userMap = Object.fromEntries(users.map((u) => [u._id.toString(), u]));
+    const sellerMap = Object.fromEntries(sellers.map((s) => [s._id.toString(), s]));
+
+    const productIds = conversations.map((c) => c.productId).filter(Boolean);
     const products = productIds.length > 0 ? await Product.find({ _id: { $in: productIds } }).select("name title price images") : [];
-    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
+    const productMap = Object.fromEntries(products.map((p) => [p._id.toString(), p]));
 
-    const enrichedConversations = conversations.map(c => {
+    const enrichedConversations = conversations.map((c) => {
       const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
       const product = c.productId ? productMap[c.productId] : null;
-
       return {
         ...c,
-        otherUser: user ? {
-          name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
-          avatar: user.avatar || "",
-          isOnline: user.isOnline || false,
-        } : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
+        otherUser: user
+          ? {
+              name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
+              avatar: user.avatar || "",
+              isOnline: user.isOnline || false,
+            }
+          : { name: "Utilisateur inconnu", avatar: "", isOnline: false },
         productName: product?.name || product?.title || null,
         productPrice: product?.price || null,
         productImage: product?.images?.[0] || null,
@@ -284,7 +313,6 @@ router.get("/conversation/:conversationId", async (req, res) => {
   try {
     const messages = await Message.find({ conversation: req.params.conversationId })
       .populate("sender")
-      .populate("receiver")
       .sort({ createdAt: 1 });
     res.json(messages);
   } catch (err) {
@@ -294,7 +322,7 @@ router.get("/conversation/:conversationId", async (req, res) => {
 });
 
 // ============================================
-// PUT /markAsRead - Marquer messages lus
+// PUT /markAsRead - Marquer messages comme lus
 // ============================================
 router.put("/markAsRead", async (req, res) => {
   try {
@@ -305,9 +333,7 @@ router.put("/markAsRead", async (req, res) => {
       { $addToSet: { readBy: userId } }
     );
 
-    if (io) {
-      io.to(otherUserId.toString()).emit("message:read", { readerId: userId, otherUserId, productId });
-    }
+    if (io) io.to(otherUserId.toString()).emit("message:read", { readerId: userId, otherUserId, productId });
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
   } catch (err) {
