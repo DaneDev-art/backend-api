@@ -1,6 +1,7 @@
 const CustomOrder = require("../models/CustomOrder");
 const Order = require("../models/order.model");
 const Conversation = require("../models/Conversation");
+const Message = require("../models/Message");
 
 /* ======================================================
    VENDEUR crée une commande personnalisée
@@ -23,8 +24,9 @@ exports.createCustomOrder = async (req, res) => {
       });
     }
 
-    // Vérifie la conversation pour récupérer client et seller
+    // récupérer conversation
     const conversation = await Conversation.findById(conversationId);
+
     if (!conversation) {
       return res.status(404).json({
         success: false,
@@ -32,6 +34,7 @@ exports.createCustomOrder = async (req, res) => {
       });
     }
 
+    // créer custom order
     const customOrder = await CustomOrder.create({
       client: conversation.client,
       seller: conversation.seller,
@@ -41,7 +44,16 @@ exports.createCustomOrder = async (req, res) => {
       totalAmount,
       currency: currency || "XOF",
       status: "SUBMITTED",
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // expire dans 24h
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    });
+
+    // 🔥 CRITIQUE : envoyer message dans la conversation
+    await Message.create({
+      conversation: conversationId,
+      sender: conversation.seller,
+      type: "CUSTOM_ORDER",
+      customOrder: customOrder._id,
+      text: "Commande personnalisée"
     });
 
     return res.status(201).json({
@@ -51,6 +63,7 @@ exports.createCustomOrder = async (req, res) => {
 
   } catch (error) {
     console.error("createCustomOrder error:", error);
+
     return res.status(500).json({
       success: false,
       message: "Server error"
