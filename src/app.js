@@ -112,8 +112,8 @@ app.use(
 );
 
 // 💬 Messages
-const { router: messageRoutes } = require("./routes/messageRoutes");
-app.use("/api/messages", messageRoutes);
+const messageRoutes = require("./routes/messageRoutes");
+app.use("/api/messages", messageRoutes.router);
 
 // 💰 Wallet
 const walletRoutes = require("./routes/wallet.routes");

@@ -48,16 +48,25 @@ exports.createCustomOrder = async (req, res) => {
     });
 
     // 🔥 CRITIQUE : envoyer message dans la conversation
-    await Message.create({
-      conversation: conversationId,
-      sender: conversation.seller,
-      type: "CUSTOM_ORDER",
-      customOrder: customOrder._id,
-      text: "Commande personnalisée",
-      readBy: [conversation.seller]
-    });
+    const message = await Message.create({
+  conversation: conversationId,
+  sender: conversation.seller,
+  type: "CUSTOM_ORDER",
+  customOrder: customOrder._id,
+  text: "Commande personnalisée",
+  readBy: [conversation.seller]
+});
 
-    return res.status(201).json({
+// 🔥 mettre à jour la conversation
+await Conversation.findByIdAndUpdate(conversationId, {
+  lastMessage: "Commande personnalisée",
+  lastDate: new Date(),
+  $inc: {
+    [`unreadCounts.${conversation.client}`]: 1
+  }
+});
+
+   return res.status(201).json({
       success: true,
       customOrder
     });

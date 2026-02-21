@@ -1,316 +1,585 @@
 // ===============================
 // routes/messageRoutes.js
 // Version PRO compatible User & Seller avec Cloudinary
+// CORRIGÉ pour supporter Conversation + CustomOrder
 // ===============================
+
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const mongoose = require("mongoose");
+
 const Message = require("../models/Message");
+const Conversation = require("../models/Conversation");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
+
 const cloudinary = require("cloudinary").v2;
 
+
 // ============================================
-// ⚙️ Configuration Cloudinary
+// Cloudinary config
 // ============================================
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+
 // ============================================
-// ⚙️ Configuration Socket.IO (injection depuis server.js)
+// SOCKET IO
 // ============================================
+
 let io;
+
 function initSocket(socketInstance) {
   io = socketInstance;
 }
 
+
 // ============================================
-// 🔹 Configuration Multer pour upload fichiers
+// MULTER
 // ============================================
+
 const storage = multer.diskStorage({
+
   destination: function (req, file, cb) {
+
     const dir = "./uploads/messages";
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    if (!fs.existsSync(dir))
+      fs.mkdirSync(dir, { recursive: true });
+
     cb(null, dir);
+
   },
+
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "_" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
+
+    const unique =
+      Date.now() + "_" +
+      Math.round(Math.random() * 1e9);
+
+    cb(null, unique + path.extname(file.originalname));
+
+  }
+
 });
+
 const upload = multer({ storage });
 
+
 // ============================================
-// 🔹 Envoyer un message texte
+// ENVOYER MESSAGE TEXTE
 // ============================================
+
 router.post("/", async (req, res) => {
+
   try {
-    const { senderId, receiverId, message, productId } = req.body;
-    if (!senderId || !receiverId || !message?.trim())
-      return res.status(400).json({ error: "Champs manquants ou invalides" });
 
-    const newMessage = await Message.create({
-      from: senderId.toString(),
-      to: receiverId.toString(),
-      content: message,
-      type: "text",
-      productId: productId ? productId.toString() : null,
-      unread: [receiverId.toString()],
-    });
+    const {
+      conversationId,
+      senderId,
+      receiverId,
+      message,
+      productId
+    } = req.body;
 
-    if (io) {
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
-    }
 
-    res.status(201).json(newMessage);
-  } catch (err) {
-    console.error("Erreur POST /messages :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    // Trouver ou créer conversation si non fournie
+    let conversation;
 
-// ============================================
-// 🔹 Envoyer un message media (image/audio) sur Cloudinary
-// ============================================
-router.post("/media", upload.single("file"), async (req, res) => {
-  try {
-    const { senderId, receiverId, productId, type } = req.body;
+    if (conversationId) {
 
-    if (!senderId || !receiverId || !req.file || !["image", "audio"].includes(type))
-      return res.status(400).json({ error: "Champs manquants ou type invalide" });
+      conversation =
+        await Conversation.findById(conversationId);
 
-    if (!cloudinary.config().api_key) {
-      return res.status(500).json({ error: "Configuration Cloudinary manquante" });
-    }
+    } else {
 
-    // 🔹 Déterminer resource_type
-    const resourceType = type === "audio" ? "raw" : "image";
-
-    const cloudResult = await cloudinary.uploader.upload(req.file.path, {
-      folder: `messages/${senderId}_${receiverId}`,
-      resource_type: resourceType,
-    });
-
-    // 🔹 Supprimer fichier local après upload
-    fs.unlinkSync(req.file.path);
-
-    const newMessage = await Message.create({
-      from: senderId.toString(),
-      to: receiverId.toString(),
-      content: cloudResult.secure_url,
-      type,
-      productId: productId ? productId.toString() : null,
-      unread: [receiverId.toString()],
-    });
-
-    if (io) {
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
-    }
-
-    res.status(201).json(newMessage);
-  } catch (err) {
-    console.error("Erreur POST /messages/media :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================
-// 🔹 Modifier un message
-// ============================================
-router.put("/update/:messageId", async (req, res) => {
-  try {
-    const { messageId } = req.params;
-    const { senderId, newContent } = req.body;
-    if (!senderId || !newContent?.trim())
-      return res.status(400).json({ error: "Champs manquants ou invalides" });
-
-    const msg = await Message.findById(messageId);
-    if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString()) return res.status(403).json({ error: "Permission refusée" });
-
-    msg.content = newContent;
-    await msg.save();
-
-    if (io) {
-      io.to(msg.to.toString()).emit("message:updated", msg);
-      io.to(msg.from.toString()).emit("message:updated", msg);
-    }
-
-    res.json(msg);
-  } catch (err) {
-    console.error("Erreur PUT /update/:messageId :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================
-// 🔹 Supprimer un message
-// ============================================
-router.delete("/delete/:messageId", async (req, res) => {
-  try {
-    const { messageId } = req.params;
-    const { senderId } = req.body;
-    if (!senderId) return res.status(400).json({ error: "Champs manquants" });
-
-    const msg = await Message.findById(messageId);
-    if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString()) return res.status(403).json({ error: "Permission refusée" });
-
-    msg.content = "[message supprimé]";
-    await msg.save();
-
-    if (io) {
-      io.to(msg.to.toString()).emit("message:deleted", msg);
-      io.to(msg.from.toString()).emit("message:deleted", msg);
-    }
-
-    res.json({ success: true, message: msg });
-  } catch (err) {
-    console.error("Erreur DELETE /delete/:messageId :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ============================================
-// 🔹 Récupérer toutes les conversations d’un user
-// ============================================
-router.get("/conversations/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-    if (!userId) return res.status(400).json({ error: "userId requis" });
-
-    const messages = await Message.find({
-      $or: [{ from: userId.toString() }, { to: userId.toString() }],
-    }).sort({ createdAt: -1 }).lean();
-
-    if (!messages || messages.length === 0) return res.json([]);
-
-    const convMap = new Map();
-
-    for (const msg of messages) {
-      const fromId = msg.from?.toString();
-      const toId = msg.to?.toString();
-      if (!fromId || !toId) continue;
-
-      const otherUserId = fromId === userId.toString() ? toId : fromId;
-      const productKey = msg.productId ? msg.productId.toString() : "no_product";
-      const key = `${otherUserId}_${productKey}`;
-
-      if (!convMap.has(key)) {
-        convMap.set(key, {
-          otherUserId,
-          productId: msg.productId ? msg.productId.toString() : null,
-          lastMessage: msg.content || "",
-          lastDate: msg.createdAt,
-          unread: msg.unread?.includes(userId.toString()) ? 1 : 0,
-        });
-      } else {
-        const existing = convMap.get(key);
-        if (msg.unread?.includes(userId.toString())) existing.unread += 1;
-      }
-    }
-
-    const conversations = Array.from(convMap.values());
-    const userIds = conversations.map(c => c.otherUserId);
-
-    const users = await User.find({ _id: { $in: userIds } })
-      .select("name username fullName shopName avatar isOnline");
-    const sellers = await Seller.find({ _id: { $in: userIds } })
-      .select("name shopName avatar isOnline");
-
-    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
-    const sellerMap = Object.fromEntries(sellers.map(s => [s._id.toString(), s]));
-
-    const productIds = conversations.map(c => c.productId).filter(id => id);
-    let products = [];
-    if (productIds.length > 0) {
-      products = await Product.find({ _id: { $in: productIds } })
-        .select("name title price images");
-    }
-    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
-
-    const enrichedConversations = conversations.map(c => {
-      const user = userMap[c.otherUserId] || sellerMap[c.otherUserId];
-      const product = c.productId ? productMap[c.productId] : null;
-
-      const otherUserData = user
-        ? {
-            name: user.name || user.fullName || user.username || user.shopName || "Utilisateur",
-            avatar: user.avatar || "",
-            isOnline: user.isOnline || false,
+      conversation =
+        await Conversation.findOne({
+          participants: {
+            $all: [senderId, receiverId],
+            $size: 2
           }
-        : { name: "Utilisateur inconnu", avatar: "", isOnline: false };
+        });
 
-      return {
-        ...c,
-        otherUser: otherUserData,
-        productName: product?.name || product?.title || null,
-        productPrice: product?.price || null,
-        productImage: product?.images?.[0] || null,
-      };
-    });
+      if (!conversation) {
 
-    res.json(enrichedConversations);
-  } catch (err) {
-    console.error("Erreur GET /conversations/:userId :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+        conversation =
+          await Conversation.create({
 
-// ============================================
-// 🔹 Récupérer tous les messages entre 2 utilisateurs
-// ============================================
-router.get("/:user1/:user2", async (req, res) => {
-  try {
-    const { user1, user2 } = req.params;
+            participants: [senderId, receiverId],
 
-    const messages = await Message.find({
-      $or: [
-        { from: user1.toString(), to: user2.toString() },
-        { from: user2.toString(), to: user1.toString() },
-      ],
-    }).sort({ createdAt: 1 });
+            product: productId
+              ? { productId }
+              : {}
 
-    res.json(messages);
-  } catch (err) {
-    console.error("Erreur GET /messages :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+          });
 
-// ============================================
-// 🔹 Marquer messages comme lus
-// ============================================
-router.put("/markAsRead", async (req, res) => {
-  try {
-    const { userId, otherUserId, productId } = req.body;
+      }
 
-    const result = await Message.updateMany(
-      { from: otherUserId.toString(), to: userId.toString(), productId: productId || null, unread: userId.toString() },
-      { $pull: { unread: userId.toString() } }
+    }
+
+
+    const newMessage =
+      await Message.create({
+
+        conversation: conversation._id,
+
+        sender: senderId,
+
+        text: message || "",
+
+        type: "TEXT",
+
+        readBy: [senderId]
+
+      });
+
+
+    // update conversation
+
+    const otherUser =
+      conversation.participants.find(
+        id => id.toString() !== senderId
+      );
+
+    await Conversation.findByIdAndUpdate(
+      conversation._id,
+      {
+        lastMessage: message,
+        lastDate: new Date(),
+        $inc: {
+          [`unreadCounts.${otherUser}`]: 1
+        }
+      }
     );
 
+
+    // socket
+
     if (io) {
-      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId });
+
+      io.to(conversation._id.toString())
+        .emit("message:new", newMessage);
+
     }
 
-    res.json({ success: true, modifiedCount: result.modifiedCount });
-  } catch (err) {
-    console.error("Erreur PUT /markAsRead :", err);
-    res.status(500).json({ error: err.message });
+
+    res.status(201).json(newMessage);
+
   }
+
+  catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+
 });
 
+
 // ============================================
-// ✅ Export du router et initSocket
+// ENVOYER MEDIA
 // ============================================
-module.exports = { router, initSocket };
+
+router.post(
+  "/media",
+  upload.single("file"),
+  async (req, res) => {
+
+    try {
+
+      const {
+        conversationId,
+        senderId,
+        receiverId,
+        type
+      } = req.body;
+
+
+      if (!req.file)
+        return res.status(400).json({
+          error: "File manquante"
+        });
+
+
+      const resourceType =
+        type === "audio"
+          ? "raw"
+          : "image";
+
+
+      const uploadResult =
+        await cloudinary.uploader.upload(
+          req.file.path,
+          {
+            folder:
+              `messages/${senderId}`,
+            resource_type:
+              resourceType
+          }
+        );
+
+
+      fs.unlinkSync(req.file.path);
+
+
+      const message =
+        await Message.create({
+
+          conversation: conversationId,
+
+          sender: senderId,
+
+          type:
+            type === "audio"
+              ? "AUDIO"
+              : "IMAGE",
+
+          mediaUrl:
+            uploadResult.secure_url,
+
+          readBy: [senderId]
+
+        });
+
+
+      if (io) {
+
+        io.to(conversationId)
+          .emit("message:new", message);
+
+      }
+
+
+      res.status(201).json(message);
+
+    }
+
+    catch (err) {
+
+      console.error(err);
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// UPDATE MESSAGE
+// ============================================
+
+router.put(
+  "/update/:messageId",
+  async (req, res) => {
+
+    try {
+
+      const {
+        messageId
+      } = req.params;
+
+      const {
+        senderId,
+        newContent
+      } = req.body;
+
+
+      const msg =
+        await Message.findById(messageId);
+
+      if (!msg)
+        return res.status(404).json({
+          error: "Message non trouvé"
+        });
+
+
+      if (
+        msg.sender.toString()
+        !== senderId
+      )
+        return res.status(403).json({
+          error: "Non autorisé"
+        });
+
+
+      msg.text = newContent;
+
+      await msg.save();
+
+
+      res.json(msg);
+
+    }
+
+    catch (err) {
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// DELETE MESSAGE
+// ============================================
+
+router.delete(
+  "/delete/:messageId",
+  async (req, res) => {
+
+    try {
+
+      const msg =
+        await Message.findById(
+          req.params.messageId
+        );
+
+      if (!msg)
+        return res.status(404).json({
+          error: "Not found"
+        });
+
+
+      msg.text =
+        "[message supprimé]";
+
+      await msg.save();
+
+
+      res.json({
+        success: true
+      });
+
+    }
+
+    catch (err) {
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// GET CONVERSATIONS USER
+// ============================================
+
+router.get(
+  "/conversations/:userId",
+  async (req, res) => {
+
+    try {
+
+      const conversations =
+        await Conversation.find({
+
+          participants:
+            req.params.userId
+
+        })
+        .sort({
+          lastDate: -1
+        })
+        .lean();
+
+
+      const result =
+        await Promise.all(
+
+          conversations.map(
+            async conv => {
+
+              const otherId =
+                conv.participants
+                  .find(
+                    id =>
+                      id.toString()
+                      !== req.params.userId
+                  );
+
+
+              const user =
+                await User.findById(otherId)
+                ||
+                await Seller.findById(otherId);
+
+
+              return {
+
+                ...conv,
+
+                unread:
+                  conv.unreadCounts?.[
+                    req.params.userId
+                  ] || 0,
+
+                otherUser: {
+
+                  _id:
+                    user?._id,
+
+                  name:
+                    user?.name ||
+                    user?.fullName ||
+                    user?.shopName,
+
+                  avatar:
+                    user?.avatar || ""
+
+                }
+
+              };
+
+            }
+
+          )
+
+        );
+
+
+      res.json(result);
+
+    }
+
+    catch (err) {
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// GET MESSAGES CONVERSATION
+// ============================================
+
+router.get(
+  "/conversation/:conversationId",
+  async (req, res) => {
+
+    try {
+
+      const messages =
+        await Message.find({
+
+          conversation:
+            req.params.conversationId
+
+        })
+        .populate("sender")
+        .populate("customOrder")
+        .sort({
+          createdAt: 1
+        });
+
+
+      res.json(messages);
+
+    }
+
+    catch (err) {
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// MARK AS READ
+// ============================================
+
+router.put(
+  "/markAsRead",
+  async (req, res) => {
+
+    try {
+
+      const {
+        conversationId,
+        userId
+      } = req.body;
+
+
+      await Message.updateMany(
+        {
+          conversation:
+            conversationId,
+          readBy:
+            { $ne: userId }
+        },
+        {
+          $addToSet: {
+            readBy: userId
+          }
+        }
+      );
+
+
+      await Conversation.findByIdAndUpdate(
+        conversationId,
+        {
+          [`unreadCounts.${userId}`]:
+            0
+        }
+      );
+
+
+      res.json({
+        success: true
+      });
+
+    }
+
+    catch (err) {
+
+      res.status(500).json({
+        error: err.message
+      });
+
+    }
+
+  }
+);
+
+
+// ============================================
+// EXPORT
+// ============================================
+
+module.exports = {
+  router,
+  initSocket
+};
