@@ -54,6 +54,7 @@ exports.createCustomOrder = async (req, res) => {
       type: "CUSTOM_ORDER",
       customOrder: customOrder._id,
       text: "Commande personnalisée"
+      readBy: [conversation.seller]
     });
 
     return res.status(201).json({

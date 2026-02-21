@@ -5,6 +5,7 @@ const Schema = mongoose.Schema;
 
 const conversationSchema = new Schema(
   {
+    // participants (compatibilité chat)
     participants: [
       {
         type: Schema.Types.ObjectId,
@@ -12,32 +13,41 @@ const conversationSchema = new Schema(
         required: true,
       },
     ],
+
+    // IMPORTANT pour CustomOrder
+    client: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    seller: {
+      type: Schema.Types.ObjectId,
+      ref: "Seller",
+      required: true,
+    },
+
     lastMessage: {
       type: String,
       default: "",
     },
+
     lastDate: {
       type: Date,
       default: Date.now,
     },
+
     unreadCounts: {
-      type: Map, // clé = userId, valeur = nombre de messages non lus
+      type: Map,
       of: Number,
       default: {},
     },
+
     product: {
-      productId: {
-        type: String,
-      },
-      productName: {
-        type: String,
-      },
-      productImage: {
-        type: String,
-      },
-      productPrice: {
-        type: Number,
-      },
+      productId: String,
+      productName: String,
+      productImage: String,
+      productPrice: Number,
     },
   },
   { timestamps: true }
