@@ -53,7 +53,7 @@ exports.createCustomOrder = async (req, res) => {
       sender: conversation.seller,
       type: "CUSTOM_ORDER",
       customOrder: customOrder._id,
-      text: "Commande personnalisée"
+      text: "Commande personnalisée",
       readBy: [conversation.seller]
     });
 
