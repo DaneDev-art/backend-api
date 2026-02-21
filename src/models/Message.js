@@ -13,6 +13,14 @@ const messageSchema = new mongoose.Schema(
       index: true,
     },
 
+    // utilisateur destinataire (optionnel si conversation multi-utilisateurs)
+    receiver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
     // conversation liée
     conversation: {
       type: mongoose.Schema.Types.ObjectId,
@@ -40,6 +48,15 @@ const messageSchema = new mongoose.Schema(
     customOrder: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "CustomOrder",
+      default: null,
+      index: true,
+    },
+
+    // lien vers un produit (facultatif)
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+      default: null,
       index: true,
     },
 
@@ -70,5 +87,6 @@ const messageSchema = new mongoose.Schema(
 
 // index critique pour chargement rapide du chat
 messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Message", messageSchema);

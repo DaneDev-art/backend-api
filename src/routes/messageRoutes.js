@@ -1,6 +1,6 @@
 // ===============================
 // routes/messageRoutes.js
-// Version PRO compatible User & Seller avec Cloudinary + support CustomOrder
+// Version PRO complète corrigée pour User, Seller, Cloudinary + CustomOrder
 // ===============================
 const express = require("express");
 const router = express.Router();
@@ -13,7 +13,7 @@ const Message = require("../models/Message");
 const User = require("../models/user.model");
 const Seller = require("../models/Seller");
 const Product = require("../models/Product");
-const CustomOrder = require("../models/CustomOrder"); // <-- ajout
+const CustomOrder = require("../models/CustomOrder");
 
 const cloudinary = require("cloudinary").v2;
 
@@ -38,12 +38,12 @@ function initSocket(socketInstance) {
 // 🔹 Configuration Multer pour upload fichiers
 // ============================================
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: (req, file, cb) => {
     const dir = "./uploads/messages";
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
-  filename: function (req, file, cb) {
+  filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "_" + Math.round(Math.random() * 1e9);
     cb(null, uniqueSuffix + path.extname(file.originalname));
   },
@@ -67,18 +67,19 @@ router.post("/", async (req, res) => {
     }
 
     const newMessage = await Message.create({
-      from: senderId.toString(),
-      to: receiverId.toString(),
-      content: message || (customOrder ? "[CustomOrder]" : ""),
-      type: customOrder ? "CUSTOM_ORDER" : "text",
-      productId: productId ? productId.toString() : null,
-      customOrderId: customOrder ? customOrder._id : null,
-      unread: [receiverId.toString()],
+      sender: mongoose.Types.ObjectId(senderId),
+      receiver: mongoose.Types.ObjectId(receiverId),
+      conversation: mongoose.Types.ObjectId(senderId), // à adapter si conversation existante
+      text: message || (customOrder ? "[CustomOrder]" : ""),
+      type: customOrder ? "CUSTOM_ORDER" : "TEXT",
+      productId: productId ? mongoose.Types.ObjectId(productId) : null,
+      customOrder: customOrder ? customOrder._id : null,
+      readBy: [],
     });
 
     if (io) {
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
+      io.to(receiverId).emit("message:received", newMessage);
+      io.to(senderId).emit("message:sent", newMessage);
     }
 
     res.status(201).json(newMessage);
@@ -104,32 +105,32 @@ router.post("/media", upload.single("file"), async (req, res) => {
         return res.status(404).json({ error: "CustomOrder non trouvée" });
     }
 
-    let content = "";
+    let mediaUrl = null;
     if (req.file) {
-      const resourceType = type === "audio" ? "raw" : "image";
+      const resourceType = type === "AUDIO" ? "raw" : "image";
       const cloudResult = await cloudinary.uploader.upload(req.file.path, {
         folder: `messages/${senderId}_${receiverId}`,
         resource_type: resourceType,
       });
       fs.unlinkSync(req.file.path);
-      content = cloudResult.secure_url;
-    } else if (customOrder) {
-      content = "[CustomOrder]";
+      mediaUrl = cloudResult.secure_url;
     }
 
     const newMessage = await Message.create({
-      from: senderId.toString(),
-      to: receiverId.toString(),
-      content,
-      type: customOrder ? "CUSTOM_ORDER" : type,
-      productId: productId ? productId.toString() : null,
-      customOrderId: customOrder ? customOrder._id : null,
-      unread: [receiverId.toString()],
+      sender: mongoose.Types.ObjectId(senderId),
+      receiver: mongoose.Types.ObjectId(receiverId),
+      conversation: mongoose.Types.ObjectId(senderId), // à adapter si conversation existante
+      text: customOrder ? "[CustomOrder]" : "",
+      type: customOrder ? "CUSTOM_ORDER" : type.toUpperCase(),
+      productId: productId ? mongoose.Types.ObjectId(productId) : null,
+      customOrder: customOrder ? customOrder._id : null,
+      mediaUrl,
+      readBy: [],
     });
 
     if (io) {
-      io.to(receiverId.toString()).emit("message:received", newMessage);
-      io.to(senderId.toString()).emit("message:sent", newMessage);
+      io.to(receiverId).emit("message:received", newMessage);
+      io.to(senderId).emit("message:sent", newMessage);
     }
 
     res.status(201).json(newMessage);
@@ -151,15 +152,15 @@ router.put("/update/:messageId", async (req, res) => {
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString())
+    if (msg.sender.toString() !== senderId.toString())
       return res.status(403).json({ error: "Permission refusée" });
 
-    msg.content = newContent;
+    msg.text = newContent;
     await msg.save();
 
     if (io) {
-      io.to(msg.to.toString()).emit("message:updated", msg);
-      io.to(msg.from.toString()).emit("message:updated", msg);
+      io.to(msg.receiver.toString()).emit("message:updated", msg);
+      io.to(msg.sender.toString()).emit("message:updated", msg);
     }
 
     res.json(msg);
@@ -170,7 +171,7 @@ router.put("/update/:messageId", async (req, res) => {
 });
 
 // ============================================
-// 🔹 Supprimer un message
+// 🔹 Supprimer un message (soft delete)
 // ============================================
 router.delete("/delete/:messageId", async (req, res) => {
   try {
@@ -180,15 +181,16 @@ router.delete("/delete/:messageId", async (req, res) => {
 
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ error: "Message non trouvé" });
-    if (msg.from.toString() !== senderId.toString())
+    if (msg.sender.toString() !== senderId.toString())
       return res.status(403).json({ error: "Permission refusée" });
 
-    msg.content = "[message supprimé]";
+    msg.text = "[message supprimé]";
+    msg.deleted = true;
     await msg.save();
 
     if (io) {
-      io.to(msg.to.toString()).emit("message:deleted", msg);
-      io.to(msg.from.toString()).emit("message:deleted", msg);
+      io.to(msg.receiver.toString()).emit("message:deleted", msg);
+      io.to(msg.sender.toString()).emit("message:deleted", msg);
     }
 
     res.json({ success: true, message: msg });
@@ -207,15 +209,20 @@ router.get("/conversations/:userId", async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId requis" });
 
     const messages = await Message.find({
-      $or: [{ from: userId.toString() }, { to: userId.toString() }],
-    }).sort({ createdAt: -1 }).lean();
+      $or: [
+        { sender: mongoose.Types.ObjectId(userId) },
+        { receiver: mongoose.Types.ObjectId(userId) },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
     if (!messages || messages.length === 0) return res.json([]);
 
     const convMap = new Map();
     for (const msg of messages) {
-      const fromId = msg.from?.toString();
-      const toId = msg.to?.toString();
+      const fromId = msg.sender?.toString();
+      const toId = msg.receiver?.toString();
       if (!fromId || !toId) continue;
 
       const otherUserId = fromId === userId.toString() ? toId : fromId;
@@ -226,14 +233,14 @@ router.get("/conversations/:userId", async (req, res) => {
         convMap.set(key, {
           otherUserId,
           productId: msg.productId ? msg.productId.toString() : null,
-          lastMessage: msg.content || "",
+          lastMessage: msg.text || "",
           lastDate: msg.createdAt,
-          unread: msg.unread?.includes(userId.toString()) ? 1 : 0,
-          customOrderId: msg.customOrderId || null, // <-- support customOrder
+          unread: msg.readBy?.includes(userId.toString()) ? 0 : 1,
+          customOrder: msg.customOrder || null,
         });
       } else {
         const existing = convMap.get(key);
-        if (msg.unread?.includes(userId.toString())) existing.unread += 1;
+        if (!msg.readBy?.includes(userId.toString())) existing.unread += 1;
       }
     }
 
@@ -294,11 +301,11 @@ router.get("/:user1/:user2", async (req, res) => {
 
     const messages = await Message.find({
       $or: [
-        { from: user1.toString(), to: user2.toString() },
-        { from: user2.toString(), to: user1.toString() },
+        { sender: user1, receiver: user2 },
+        { sender: user2, receiver: user1 },
       ],
     })
-      .populate("customOrderId")
+      .populate("customOrder")
       .sort({ createdAt: 1 });
 
     res.json(messages);
@@ -316,12 +323,21 @@ router.put("/markAsRead", async (req, res) => {
     const { userId, otherUserId, productId } = req.body;
 
     const result = await Message.updateMany(
-      { from: otherUserId.toString(), to: userId.toString(), productId: productId || null, unread: userId.toString() },
-      { $pull: { unread: userId.toString() } }
+      {
+        sender: mongoose.Types.ObjectId(otherUserId),
+        receiver: mongoose.Types.ObjectId(userId),
+        productId: productId ? mongoose.Types.ObjectId(productId) : null,
+        readBy: { $ne: mongoose.Types.ObjectId(userId) },
+      },
+      { $push: { readBy: mongoose.Types.ObjectId(userId) } }
     );
 
     if (io) {
-      io.to(otherUserId.toString()).emit("message:read", { readerId: userId.toString(), otherUserId: otherUserId.toString(), productId });
+      io.to(otherUserId.toString()).emit("message:read", {
+        readerId: userId.toString(),
+        otherUserId: otherUserId.toString(),
+        productId,
+      });
     }
 
     res.json({ success: true, modifiedCount: result.modifiedCount });
